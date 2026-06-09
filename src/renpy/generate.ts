@@ -177,8 +177,8 @@ screen say(who, what):
         vbox:
             spacing 6
             if who is not None:
-                text who color "#ffd479" size 28 bold True
-            text what color "#ffffff" size 26
+                text who id "who" color "#ffd479" size 28 bold True
+            text what id "what" color "#ffffff" size 26
 
 # 선택지 화면 — 화면 중앙 버튼 목록
 screen choice(items):
