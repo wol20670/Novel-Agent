@@ -149,7 +149,7 @@ export default function LeftPanel() {
           </button>
         </div>
         <div
-          className={`text-[11px] flex items-center gap-1.5 ${apiKey ? 'text-emerald-400' : 'text-gray-500'}`}
+          className={`text-[11px] flex items-center gap-1.5 ${apiKey ? 'text-emerald-600' : 'text-gray-500'}`}
         >
           <span className={`w-1.5 h-1.5 rounded-full ${apiKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
           {apiKey ? '키 저장됨 · OpenAI 모드' : '키 없음 · 오프라인(Canvas) 모드'}

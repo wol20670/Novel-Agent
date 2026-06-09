@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -14,8 +14,8 @@ body,
 }
 
 body {
-  background: radial-gradient(1200px 600px at 80% -10%, #211d3a 0%, #141220 55%);
-  color: #e8e5f2;
+  background: radial-gradient(1200px 620px at 82% -12%, #fdf8ec 0%, #f4efe2 58%);
+  color: #2c3243;
   font-family: 'Pretendard', 'Malgun Gothic', system-ui, -apple-system, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -27,21 +27,22 @@ body {
       disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100;
   }
   .btn-primary {
-    @apply btn text-white shadow-sm;
-    background: linear-gradient(135deg, #7c5cff 0%, #9d7bff 100%);
+    @apply btn text-white;
+    background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+    box-shadow: 0 1px 2px rgba(79, 70, 229, 0.2);
   }
   .btn-primary:hover:not(:disabled) {
-    background: linear-gradient(135deg, #8a6cff 0%, #ab8dff 100%);
-    box-shadow: 0 4px 14px -2px rgba(124, 92, 255, 0.5);
+    background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+    box-shadow: 0 4px 14px -2px rgba(99, 102, 241, 0.4);
   }
   .btn-ghost {
-    @apply btn bg-panel2/80 text-gray-200 border border-edge hover:bg-edge hover:border-accent/40;
+    @apply btn bg-white text-gray-200 border border-edge hover:bg-panel2 hover:border-accent/40 shadow-sm;
   }
   .btn-soft {
-    @apply btn bg-accent2/15 text-accent border border-accent/30 hover:bg-accent2/25;
+    @apply btn bg-accent2/10 text-accent border border-accent/30 hover:bg-accent2/20;
   }
   .field {
-    @apply w-full bg-ink/80 border border-edge rounded-lg px-2.5 py-1.5 text-sm text-gray-100
+    @apply w-full bg-white border border-edge rounded-lg px-2.5 py-1.5 text-sm text-gray-100
       outline-none transition-colors placeholder:text-gray-600
       focus:border-accent focus:ring-2 focus:ring-accent/20;
   }
@@ -52,20 +53,21 @@ body {
     @apply text-[11px] px-2 py-0.5 rounded-full border transition-colors;
   }
   .card {
-    @apply rounded-xl border bg-panel/90 backdrop-blur-sm transition-all duration-150;
+    @apply rounded-xl border border-edge bg-white shadow-sm transition-all duration-150;
   }
   .section-title {
-    @apply flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-accent/90;
+    @apply flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-accent;
   }
 }
 
-/* 스피너 */
+/* 스피너 — currentColor 사용으로 밝은 버튼(흰 글자)·옅은 버튼(어두운 글자) 모두에서 보인다 */
 .spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: #fff;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
   border-radius: 50%;
+  opacity: 0.65;
   animation: spin 0.6s linear infinite;
 }
 @keyframes spin {
@@ -95,13 +97,13 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #3a3450;
+  background: #d9d2c2;
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4a4366;
+  background: #c7bfac;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-track {
@@ -110,7 +112,7 @@ body {
 
 /* range 슬라이더 */
 input[type='range'] {
-  accent-color: #a78bfa;
+  accent-color: #6366f1;
 }
 input[type='color'] {
   cursor: pointer;

@@ -4,9 +4,9 @@ import { useAssetUrl } from './useAssetUrl';
 import Spinner from './Spinner';
 
 const STATUS_BTN: Record<SceneStatus, { on: string; dot: string }> = {
-  review: { on: 'bg-gray-500/20 text-gray-200 border-gray-400', dot: 'bg-gray-400' },
-  approved: { on: 'bg-emerald-500/20 text-emerald-300 border-emerald-500', dot: 'bg-emerald-400' },
-  needs_fix: { on: 'bg-amber-500/20 text-amber-300 border-amber-500', dot: 'bg-amber-400' },
+  review: { on: 'bg-gray-500/15 text-gray-300 border-gray-400', dot: 'bg-gray-400' },
+  approved: { on: 'bg-emerald-500/15 text-emerald-700 border-emerald-500', dot: 'bg-emerald-500' },
+  needs_fix: { on: 'bg-amber-500/15 text-amber-700 border-amber-500', dot: 'bg-amber-500' },
 };
 const STATUSES = Object.keys(SCENE_STATUS_LABEL) as SceneStatus[];
 
@@ -129,21 +129,21 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
           ),
         )}
         {scene.cg.map((c, i) => (
-          <p key={`cg${i}`} className="text-pink-300 text-xs">
+          <p key={`cg${i}`} className="text-pink-600 text-xs">
             🎴 CG: {c}
           </p>
         ))}
         {scene.choices.length > 0 && (
           <div className="mt-2 border-t border-edge pt-2 space-y-0.5">
             {scene.choices.map((c, i) => (
-              <p key={i} className="text-amber-300 text-xs">
+              <p key={i} className="text-amber-700 text-xs">
                 ▷ {c.text}
                 {c.target && <span className="text-gray-500"> → {c.target}</span>}
               </p>
             ))}
           </div>
         )}
-        {scene.jumpTo && <p className="text-cyan-300 text-xs mt-1">⤳ 점프: {scene.jumpTo}</p>}
+        {scene.jumpTo && <p className="text-cyan-600 text-xs mt-1">⤳ 점프: {scene.jumpTo}</p>}
       </div>
 
       {/* 액션 */}

@@ -43,7 +43,7 @@ export default function RenpyTab() {
       <div className="card border-edge p-4 mb-4 flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-[200px]">
           <p className="text-sm text-gray-300">
-            승인 장면 <b className="text-emerald-400">{approvedCount}</b> / 전체 {project.scenes.length}개가 ZIP에 포함됩니다.
+            승인 장면 <b className="text-emerald-600">{approvedCount}</b> / 전체 {project.scenes.length}개가 ZIP에 포함됩니다.
           </p>
           <p className="text-[11px] text-gray-500 mt-0.5">
             생성되지 않은 배경·BGM은 임시 에셋으로 자동 채워져 바로 실행 가능한 프로젝트가 됩니다.

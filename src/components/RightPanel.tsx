@@ -80,7 +80,7 @@ export default function RightPanel() {
               <span>대사 {scene.lines.length}</span>
               <span>선택지 {scene.choices.length}</span>
               {scene.cg.length > 0 && <span>CG {scene.cg.length}</span>}
-              {scene.jumpTo && <span className="text-cyan-400">점프</span>}
+              {scene.jumpTo && <span className="text-cyan-600">점프</span>}
             </div>
           </div>
         </>
