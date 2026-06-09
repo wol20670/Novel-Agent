@@ -134,11 +134,11 @@ function optionsRpy(project: Project): string {
   return [
     '# 자동 생성: 기본 옵션',
     `define config.name = _("${esc(project.title)}")`,
-    `define gui.show_name = True`,
     `define config.version = "1.0"`,
     `define config.has_sound = True`,
     `define config.has_music = True`,
     `define config.window_title = "${esc(project.title)}"`,
+    `define build.name = "${esc(project.title)}"`,
     '',
     `## 저자: ${esc(project.author)}`,
     `init python:`,
@@ -148,32 +148,86 @@ function optionsRpy(project: Project): string {
   ].join('\n');
 }
 
-const GUI_COMPAT = `# 자동 생성: GUI 호환 보조
-# 기본 GUI 가 없는 환경에서도 텍스트가 보이도록 최소 스타일을 보강한다.
-init offset = -1
+// 버전에 거의 안 타는 최소 자립형 화면 정의.
+// - 메인메뉴를 건너뛰고 바로 start (label main_menu: return 트릭)
+// - 게임메뉴(Esc/우클릭) 비활성화 → 누락 화면 오류 방지
+// - say/choice 만 직접 정의(화면 언어 핵심 — 7.x~8.x 안정).
+// 정식 출시 시에는 Ren'Py 런처의 풀 GUI 프로젝트로 교체할 것.
+const SCREENS_RPY = `# 자동 생성: 최소 자립형 화면 (테스트용)
+# 정식 출시 전에는 Ren'Py 런처가 만든 풀 GUI(screens.rpy/gui.rpy)로 교체하세요.
+
+# 메인 메뉴를 건너뛰고 곧바로 start 로 진입
+label main_menu:
+    return
+
 init python:
-    gui.init(config.screen_width, config.screen_height)
+    # 최소 구성에서 누락된 화면으로 인한 오류를 막기 위해 게임 메뉴를 비활성화
+    config.keymap['game_menu'] = []
+    config.keymap['hide_windows'] = []
+
+# 대사 화면 — 하단 반투명 박스 + 흰 글씨
+screen say(who, what):
+    window:
+        style "empty"
+        background "#000000cc"
+        xfill True
+        yalign 1.0
+        xpadding 50
+        ypadding 28
+        vbox:
+            spacing 6
+            if who is not None:
+                text who color "#ffd479" size 28 bold True
+            text what color "#ffffff" size 26
+
+# 선택지 화면 — 화면 중앙 버튼 목록
+screen choice(items):
+    vbox:
+        xalign 0.5
+        yalign 0.5
+        spacing 14
+        for i in items:
+            textbutton i.caption:
+                action i.action
+                xpadding 36
+                ypadding 12
+                background "#00000099"
+                hover_background "#6366f1cc"
+                text_color "#ffffff"
+                text_size 26
+                text_xalign 0.5
 `;
 
 const README = `# Ren'Py 프로젝트 (Novel-Agent 자동 생성)
 
-이 ZIP 을 Ren'Py SDK 의 프로젝트 폴더로 풀어 실행하세요.
+## 실행 방법 (간편 — 최소 자립형)
+1. Ren'Py SDK (https://www.renpy.org/) 설치 후 런처 실행
+2. 이 폴더를 런처의 projects 디렉터리에 두거나, 런처에서 프로젝트로 추가
+3. 프로젝트 선택 → Launch Project
+   → 메인 메뉴 없이 곧바로 첫 장면이 재생됩니다.
 
-1. Ren'Py SDK (https://www.renpy.org/) 설치
-2. 이 폴더를 SDK 의 projects 디렉터리에 복사
-3. Ren'Py Launcher 에서 프로젝트 선택 → Launch Project
+이 프로젝트는 버전에 안정적인 최소 화면(대사/선택지)만 포함해 바로 실행되도록 만들어졌습니다.
+화면 모양은 검은 박스 + 흰 글씨의 소박한 테스트용입니다.
+
+## 폴백 (위가 안 될 때 — 항상 작동)
+1. 런처에서 "새 프로젝트 만들기"로 빈 프로젝트 생성(해상도 동일하게)
+2. 그 프로젝트의 game/ 안에 이 폴더의 다음만 복사:
+   script.rpy, characters.rpy, assets.rpy, images/, audio/
+   (options.rpy, screens.rpy 는 복사하지 말 것 — 새 프로젝트 것과 충돌)
+3. 새 프로젝트의 기본 script.rpy 는 우리 것으로 덮어쓰기 → Launch
 
 ## 포함 파일
-- game/script.rpy        : 승인된 장면의 대사·연출·분기
-- game/characters.rpy    : 캐릭터 정의
-- game/assets.rpy        : 이미지·오디오 에셋 정의
-- game/00_vn_options.rpy : 해상도·제목·저자
-- game/gui_compat.rpy    : GUI 호환 보조
-- game/images/           : 배경/CG PNG (생성된 것 또는 임시)
-- game/audio/            : BGM WAV
+- game/script.rpy     : 승인된 장면의 대사·연출·분기
+- game/characters.rpy : 캐릭터 정의
+- game/assets.rpy     : 이미지·오디오 에셋 정의
+- game/options.rpy    : 해상도·제목·저자
+- game/screens.rpy    : 최소 자립형 화면(대사/선택지) — 정식 출시 시 풀 GUI 로 교체
+- game/images/        : 배경/CG PNG (생성된 것 또는 임시)
+- game/audio/         : BGM WAV
 
 ## 상업 배포 전
 - 임시 배경/합성 BGM 은 테스트용입니다. 정식 일러스트·BGM·SFX 로 교체하세요.
+- screens.rpy 를 Ren'Py 런처의 풀 GUI(screens.rpy/gui.rpy)로 교체하세요.
 - 폰트 라이선스(OFL 등) 를 확인하세요.
 - 실제 Windows 환경에서 Ren'Py 빌드를 테스트하세요.
 `;
@@ -191,8 +245,8 @@ export function generateRenpyFiles(project: Project): {
     { path: 'game/script.rpy', content: scriptBody(refs, charSlug) },
     { path: 'game/characters.rpy', content: characterDefs(project, charSlug) },
     { path: 'game/assets.rpy', content: assetDefs(refs) },
-    { path: 'game/00_vn_options.rpy', content: optionsRpy(project) },
-    { path: 'game/gui_compat.rpy', content: GUI_COMPAT },
+    { path: 'game/options.rpy', content: optionsRpy(project) },
+    { path: 'game/screens.rpy', content: SCREENS_RPY },
     { path: 'README.md', content: README },
   ];
   return { files, refs, characters: project.characters };
