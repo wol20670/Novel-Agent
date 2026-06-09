@@ -1,0 +1,88 @@
+# Novel-Agent
+
+오프라인에서 동작하는 **Ren'Py 비주얼노벨 제작 보조 웹앱**.
+엑셀/텍스트로 스토리를 입력하면 → 장면을 자동 분석 → 배경·BGM 에셋 생성(AI 또는 폴백) →
+검수/승인 → 실행 가능한 Ren'Py 프로젝트 ZIP 을 내보낸다.
+
+## 작업 흐름
+
+```
+1. 스토리 입력   →  2. 장면 분석  →  3. 에셋 생성    →  4. 승인/수정  →  5. ZIP 출력
+   (엑셀/텍스트)     (자동 추론)     (AI 배경·BGM)      (검수)          (Ren'Py)
+```
+
+- **AI 키 없이도 완전 동작**: 배경은 Canvas 임시 이미지, BGM 은 Web Audio 합성기로 오프라인 생성.
+- **OpenAI 키 입력 시**: `gpt-image-1` 으로 실제 배경 생성. 키는 브라우저(localStorage)에만 저장.
+
+## 실행
+
+```bash
+npm install
+npm run dev      # http://localhost:5173
+npm run build    # 타입체크 + 프로덕션 빌드 (dist/)
+```
+
+## 입력 포맷
+
+### 텍스트 (왼쪽 패널 직접 입력)
+```
+장면: 맑은 아침, 운동장
+배경: 학교 운동장
+BGM: morning_breeze
+연출: 햇살이 환하게 비추는 아침
+
+주인공: 야, 오늘 날씨 진짜 좋다!
+(잠시 두 사람은 말없이 서 있었다.)
+선택지:
+> 앞자리에 앉는다.
+> 창가 자리에 앉는다. -> 다른 장면 제목
+```
+
+### 엑셀 (.xlsx)
+A열 = 화자 이름, B열 = 대사 · 지문 · 태그.
+- A열 있음 → 대사 / A열 없고 일반 문장 → 지문(나레이션)
+- A열 없고 `#`/`>` 시작 → 태그·선택지
+
+| 태그 | 의미 |
+|---|---|
+| `#S 제목` | 새 장면 시작 (배경 추론에 사용) |
+| `#배경 이름` | 배경 직접 지정 |
+| `#BGM 파일명` | BGM 지정 |
+| `#연출 내용` | 연출 노트 (AI 프롬프트 반영) |
+| `#CG 설명` | CG 컷 표시 |
+| `#점프 장면제목` | 해당 장면으로 점프 |
+| `> 텍스트 -> 대상장면` | 선택지 (대상 생략 시 다음으로 진행) |
+
+`#배경/#BGM/#연출/#CG` 는 바로 위 `#S` 장면에 적용된다.
+
+## 아키텍처
+
+| 영역 | 모듈 |
+|---|---|
+| 파싱 | `src/parser/` — 텍스트/엑셀 → 공통 `Scene[]` (`sceneBuilder` 공유) |
+| 이미지 | `src/generators/image/` — 어댑터(키 있으면 OpenAI, 없으면 Canvas) |
+| 오디오 | `src/generators/audio/` — Web Audio 무드 합성 → WAV |
+| Ren'Py | `src/renpy/` — 승인 장면 → `.rpy` 파일 집합 (label/menu/jump) |
+| ZIP | `src/zip/buildZip.ts` — JSZip, 미생성 에셋은 폴백으로 자동 채움 |
+| 저장 | `src/storage/` — 메타=localStorage, 바이너리=IndexedDB |
+| 상태 | `src/store.ts` — zustand |
+
+> AI 호출은 모두 어댑터로 추상화되어 있어, 추후 **백엔드 프록시(SaaS 과금)** 나
+> **다른 이미지/AI 음악 provider** 로 교체할 때 UI·파싱·ZIP 로직은 건드리지 않는다.
+
+## 검증 (순수 로직)
+
+```bash
+npx tsx scripts/verify.ts        # 샘플 파싱 → Ren'Py 스크립트(분기/점프) 생성 검증
+npx tsx scripts/verify-excel.ts  # 엑셀 A/B열 파싱 검증
+```
+
+## 상업 배포 전 체크
+- Canvas 임시 배경 / 합성 BGM 은 **테스트용**. 정식 일러스트·BGM·SFX 로 교체.
+- 폰트 라이선스(OFL 등) 확인.
+- 실제 Windows 환경에서 Ren'Py 빌드 테스트.
+
+## 로드맵 (v1 이후)
+- AI 음악 provider 연결 (현재 합성기만 / 어댑터 자리 확보됨)
+- 캐릭터 스프라이트 일관성: 기본표정 1장 → edit 레퍼런스로 표정 변형
+- Electron 래퍼(.exe) / 백엔드 과금(SaaS)

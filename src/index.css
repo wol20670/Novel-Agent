@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: radial-gradient(1200px 600px at 80% -10%, #211d3a 0%, #141220 55%);
+  color: #e8e5f2;
+  font-family: 'Pretendard', 'Malgun Gothic', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium
+      transition-all duration-150 active:scale-[0.97]
+      disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100;
+  }
+  .btn-primary {
+    @apply btn text-white shadow-sm;
+    background: linear-gradient(135deg, #7c5cff 0%, #9d7bff 100%);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #8a6cff 0%, #ab8dff 100%);
+    box-shadow: 0 4px 14px -2px rgba(124, 92, 255, 0.5);
+  }
+  .btn-ghost {
+    @apply btn bg-panel2/80 text-gray-200 border border-edge hover:bg-edge hover:border-accent/40;
+  }
+  .btn-soft {
+    @apply btn bg-accent2/15 text-accent border border-accent/30 hover:bg-accent2/25;
+  }
+  .field {
+    @apply w-full bg-ink/80 border border-edge rounded-lg px-2.5 py-1.5 text-sm text-gray-100
+      outline-none transition-colors placeholder:text-gray-600
+      focus:border-accent focus:ring-2 focus:ring-accent/20;
+  }
+  .label {
+    @apply text-[11px] font-medium text-gray-400 mb-1 block tracking-wide;
+  }
+  .chip {
+    @apply text-[11px] px-2 py-0.5 rounded-full border transition-colors;
+  }
+  .card {
+    @apply rounded-xl border bg-panel/90 backdrop-blur-sm transition-all duration-150;
+  }
+  .section-title {
+    @apply flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-accent/90;
+  }
+}
+
+/* 스피너 */
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 토스트 진입 */
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.toast-in {
+  animation: toastIn 0.22s ease-out;
+}
+
+/* 스크롤바 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #3a3450;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4a4366;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* range 슬라이더 */
+input[type='range'] {
+  accent-color: #a78bfa;
+}
+input[type='color'] {
+  cursor: pointer;
+  padding: 0;
+}

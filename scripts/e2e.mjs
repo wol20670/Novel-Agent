@@ -1,0 +1,113 @@
+// 실제 브라우저(헤드리스 Chromium)로 전체 파이프라인을 클릭 검증한다.
+// 샘플 → 분석 → 전체 승인 → 배경/음악 생성(폴백) → Ren'Py 확인 → ZIP 다운로드 → 내용물 검증.
+import { chromium } from 'playwright';
+import JSZip from 'jszip';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { mkdirSync, readFileSync } from 'node:fs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = join(__dirname, '..');
+const shotDir = join(root, 'e2e-shots');
+mkdirSync(shotDir, { recursive: true });
+
+const BASE = process.env.BASE_URL || 'http://localhost:4173';
+const log = (...a) => console.log(...a);
+const fails = [];
+const assert = (cond, msg) => {
+  log(cond ? '✅' : '❌', msg);
+  if (!cond) fails.push(msg);
+};
+
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ acceptDownloads: true, viewport: { width: 1440, height: 900 } });
+const page = await ctx.newPage();
+page.on('console', (m) => {
+  if (m.type() === 'error') log('  [browser console.error]', m.text());
+});
+page.on('pageerror', (e) => log('  [pageerror]', e.message));
+
+try {
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  assert(await page.getByText('Novel-Agent').first().isVisible(), '앱 로드(헤더 표시)');
+
+  // 1) 샘플 → 분석
+  await page.getByRole('button', { name: /^✨ 샘플$/ }).click();
+  await page.getByRole('button', { name: /^🔍 분석$/ }).click();
+  await page.waitForTimeout(500);
+  const cardCount = await page.locator('input.field.font-semibold').count();
+  assert(cardCount === 5, `장면 카드 5개 렌더 (실제 ${cardCount})`);
+  await page.screenshot({ path: join(shotDir, '1-scenes.png'), fullPage: true });
+
+  // 2) 전체 승인
+  await page.getByRole('button', { name: '전체 승인' }).click();
+  await page.waitForTimeout(300);
+  const approvedChips = await page.getByRole('button', { name: '✓ 전체 승인됨' }).count();
+  assert(approvedChips > 0, '전체 승인 완료 상태 표시');
+
+  // 3) 첫 장면 배경 생성 (Canvas 폴백) — SceneCard 첫 버튼
+  await page.getByRole('button', { name: /배경 생성/ }).first().click();
+  await page.waitForSelector('img[src^="blob:"]', { timeout: 15000 });
+  assert(true, '배경 이미지(blob) 생성·표시');
+
+  // 4) 첫 장면 음악 생성 (합성 WAV)
+  await page.getByRole('button', { name: /음악 생성/ }).first().click();
+  await page.waitForSelector('audio[src^="blob:"]', { timeout: 20000 });
+  assert(true, 'BGM 오디오(blob) 생성·표시');
+  await page.screenshot({ path: join(shotDir, '2-generated.png'), fullPage: true });
+
+  // 5) Ren'Py 탭 — 스크립트 내용 확인
+  await page.getByRole('button', { name: /Ren'Py/ }).click();
+  await page.waitForTimeout(300);
+  const pre = await page.locator('pre').first().innerText();
+  log('  --- script.rpy 앞부분 ---\n' + pre.split('\n').slice(0, 12).map((l) => '    ' + l).join('\n'));
+  assert(/label scene_1\b/.test(pre), "script.rpy 에 label scene_1 존재");
+  assert(/menu:/.test(pre), 'script.rpy 에 menu 블록 존재');
+  await page.screenshot({ path: join(shotDir, '3-renpy.png'), fullPage: true });
+
+  // 6) ZIP 생성 → 다운로드 → 내용물 검증
+  await page.getByRole('button', { name: /ZIP 생성/ }).click();
+  let download;
+  try {
+    download = await page.waitForEvent('download', { timeout: 90000 });
+  } catch (err) {
+    const toastTxt = await page.locator('.fixed.bottom-4').textContent().catch(() => '(toast 없음)');
+    log('  ⏱ download 미발생. 현재 toast:', toastTxt);
+    throw err;
+  }
+  const zipPath = join(shotDir, 'out.zip');
+  await download.saveAs(zipPath);
+  const zip = await JSZip.loadAsync(readFileSync(zipPath));
+  const names = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
+  log('  ZIP 내용:', names.join(', '));
+  assert(names.includes('game/script.rpy'), 'ZIP: game/script.rpy');
+  assert(names.includes('game/characters.rpy'), 'ZIP: game/characters.rpy');
+  assert(names.includes('game/assets.rpy'), 'ZIP: game/assets.rpy');
+  assert(names.includes('game/00_vn_options.rpy'), 'ZIP: game/00_vn_options.rpy');
+  assert(names.some((n) => n.startsWith('game/images/bg_') && n.endsWith('.png')), 'ZIP: 배경 PNG 포함');
+  assert(names.some((n) => n.startsWith('game/audio/bgm_') && n.endsWith('.wav')), 'ZIP: BGM WAV 포함');
+
+  // PNG/WAV 매직넘버 확인
+  const bgFile = names.find((n) => n.startsWith('game/images/bg_'));
+  const pngBuf = await zip.files[bgFile].async('uint8array');
+  assert(pngBuf[0] === 0x89 && pngBuf[1] === 0x50, `배경 PNG 시그니처 정상 (${bgFile}, ${pngBuf.length} bytes)`);
+  const wavFile = names.find((n) => n.startsWith('game/audio/bgm_'));
+  const wavBuf = await zip.files[wavFile].async('uint8array');
+  const riff = String.fromCharCode(...wavBuf.slice(0, 4));
+  assert(riff === 'RIFF', `BGM WAV 시그니처 정상 (${wavFile}, ${wavBuf.length} bytes)`);
+
+  // 7) 새로고침 후 자동복원
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(600);
+  const restored = await page.locator('input.field.font-semibold').count();
+  assert(restored === 5, `새로고침 후 자동복원 (장면 ${restored})`);
+} catch (e) {
+  log('❌ 예외:', e.message);
+  fails.push('예외: ' + e.message);
+  await page.screenshot({ path: join(shotDir, 'error.png'), fullPage: true }).catch(() => {});
+} finally {
+  await browser.close();
+}
+
+log('\n=== 결과:', fails.length === 0 ? '전체 통과 ✅' : `${fails.length}개 실패 ❌`, '===');
+if (fails.length) process.exitCode = 1;
