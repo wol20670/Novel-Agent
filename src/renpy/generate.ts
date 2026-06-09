@@ -161,9 +161,13 @@ label main_menu:
     return
 
 init python:
-    # 최소 구성에서 누락된 화면으로 인한 오류를 막기 위해 게임 메뉴를 비활성화
+    # 한글 폰트 지정 (기본 DejaVuSans 는 한글 글리프가 없어 □ 로 깨짐)
+    style.default.font = "fonts/NanumGothic.ttf"
+    # 최소 구성에서 누락된 화면으로 인한 오류를 막기 위해 게임 메뉴 비활성화
     config.keymap['game_menu'] = []
     config.keymap['hide_windows'] = []
+    # 창 닫기 시 종료 확인창(yesno) 대신 즉시 종료 (확인 화면 미포함)
+    config.quit_action = Quit(confirm=False)
 
 # 대사 화면 — 하단 반투명 박스 + 흰 글씨
 screen say(who, what):
@@ -222,6 +226,7 @@ const README = `# Ren'Py 프로젝트 (Novel-Agent 자동 생성)
 - game/assets.rpy     : 이미지·오디오 에셋 정의
 - game/options.rpy    : 해상도·제목·저자
 - game/screens.rpy    : 최소 자립형 화면(대사/선택지) — 정식 출시 시 풀 GUI 로 교체
+- game/fonts/         : 한글 폰트(나눔고딕, OFL) + 라이선스
 - game/images/        : 배경/CG PNG (생성된 것 또는 임시)
 - game/audio/         : BGM WAV
 

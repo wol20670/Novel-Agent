@@ -85,6 +85,7 @@ try {
   assert(names.includes('game/assets.rpy'), 'ZIP: game/assets.rpy');
   assert(names.includes('game/options.rpy'), 'ZIP: game/options.rpy');
   assert(names.includes('game/screens.rpy'), 'ZIP: game/screens.rpy (최소 자립형 화면)');
+  assert(names.includes('game/fonts/NanumGothic.ttf'), 'ZIP: 한글 폰트(나눔고딕) 포함');
   assert(names.some((n) => n.startsWith('game/images/bg_') && n.endsWith('.png')), 'ZIP: 배경 PNG 포함');
   assert(names.some((n) => n.startsWith('game/audio/bgm_') && n.endsWith('.wav')), 'ZIP: BGM WAV 포함');
 

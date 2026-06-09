@@ -77,9 +77,27 @@ export async function buildRenpyZip(project: Project): Promise<ZipResult> {
     }
   }
 
+  // 한글 폰트(나눔고딕, OFL) 포함 — Ren'Py 기본 폰트는 한글 글리프가 없다.
+  await addKoreanFont(zip);
+
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   const safeName = (project.title || 'visual-novel').replace(/[^\w가-힣-]+/g, '_').slice(0, 40);
   return { blob, filename: `${safeName}_renpy.zip`, placeholders };
+}
+
+/** 앱에 번들된 한글 폰트를 game/fonts/ 로 복사. 실패해도 ZIP 생성은 계속한다. */
+async function addKoreanFont(zip: JSZip): Promise<void> {
+  const base = import.meta.env.BASE_URL || '/';
+  try {
+    const [font, license] = await Promise.all([
+      fetch(`${base}fonts/NanumGothic.ttf`),
+      fetch(`${base}fonts/OFL.txt`),
+    ]);
+    if (font.ok) zip.file('game/fonts/NanumGothic.ttf', await font.blob());
+    if (license.ok) zip.file('game/fonts/OFL.txt', await license.text());
+  } catch {
+    /* 폰트 누락 시 한글이 □ 로 보일 수 있으나 ZIP 자체는 정상 */
+  }
 }
 
 /** 브라우저 다운로드 트리거. */
