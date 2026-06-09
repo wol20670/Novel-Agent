@@ -13,6 +13,8 @@ import {
   clearProject,
 } from './storage/projectStore';
 import { SAMPLE_STORY } from './sample';
+import { exportProjectFile, importProjectFile } from './project/transfer';
+import { downloadBlob } from './zip/buildZip';
 
 export type Tab = 'scenes' | 'assets' | 'renpy';
 
@@ -61,6 +63,10 @@ interface State {
   hydrate: () => void;
   resetAll: () => void;
   setToast: (msg: string | null) => void;
+
+  // 프로젝트 파일 (기기 간 이동)
+  exportProject: () => Promise<void>;
+  importProject: (file: File) => Promise<void>;
 }
 
 export const useStore = create<State>((set, get) => {
@@ -288,6 +294,39 @@ export const useStore = create<State>((set, get) => {
     setToast: (msg) => {
       if (msg === null) return set({ toast: null });
       flash(msg);
+    },
+
+    exportProject: async () => {
+      const { project, assets } = get();
+      if (project.scenes.length === 0) {
+        flash('내보낼 장면이 없습니다. 먼저 분석하세요.');
+        return;
+      }
+      try {
+        flash('프로젝트 파일을 만드는 중…');
+        const { blob, filename, assetCount } = await exportProjectFile(project, assets);
+        downloadBlob(blob, filename);
+        flash(`프로젝트를 내보냈습니다: ${filename} (에셋 ${assetCount}개 포함)`);
+      } catch (e) {
+        flash(`내보내기 실패: ${(e as Error).message}`);
+      }
+    },
+
+    importProject: async (file) => {
+      try {
+        flash('프로젝트 파일을 불러오는 중…');
+        const { project, assets, assetCount } = await importProjectFile(file);
+        set({
+          project,
+          assets,
+          selectedSceneId: project.scenes[0]?.id ?? null,
+          activeTab: 'scenes',
+        });
+        saveProject(project, assets);
+        flash(`프로젝트를 불러왔습니다: 장면 ${project.scenes.length}개 · 에셋 ${assetCount}개 복원.`);
+      } catch (e) {
+        flash(`가져오기 실패: ${(e as Error).message}`);
+      }
     },
   };
 });

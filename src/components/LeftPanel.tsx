@@ -12,8 +12,11 @@ export default function LeftPanel() {
   const resetAll = useStore((s) => s.resetAll);
   const apiKey = useStore((s) => s.apiKey);
   const setApiKey = useStore((s) => s.setApiKey);
+  const exportProject = useStore((s) => s.exportProject);
+  const importProject = useStore((s) => s.importProject);
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const projFileRef = useRef<HTMLInputElement>(null);
   const [showKey, setShowKey] = useState(false);
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -24,6 +27,13 @@ export default function LeftPanel() {
     if (fileRef.current) fileRef.current.value = '';
   };
 
+  const onProjFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await importProject(file);
+    if (projFileRef.current) projFileRef.current.value = '';
+  };
+
   const onReset = () => {
     if (confirm('모든 장면·에셋·저장 데이터를 지웁니다. 계속할까요?')) resetAll();
   };
@@ -31,16 +41,41 @@ export default function LeftPanel() {
   return (
     <div className="p-3.5 flex flex-col gap-5 text-sm">
       {/* 상단 액션 */}
-      <div className="flex gap-2">
-        <button className="btn-primary flex-1" onClick={save}>
-          💾 저장
-        </button>
-        <button className="btn-ghost flex-1" onClick={loadSample}>
-          ✨ 샘플
-        </button>
-        <button className="btn-ghost" onClick={onReset} title="모두 초기화">
-          ⟲
-        </button>
+      <div className="flex flex-col gap-2">
+        <div className="flex gap-2">
+          <button className="btn-primary flex-1" onClick={save}>
+            💾 저장
+          </button>
+          <button className="btn-ghost flex-1" onClick={loadSample}>
+            ✨ 샘플
+          </button>
+          <button className="btn-ghost" onClick={onReset} title="모두 초기화">
+            ⟲
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <button
+            className="btn-ghost flex-1"
+            onClick={exportProject}
+            title="장면·에셋을 단일 파일로 저장 (다른 기기로 이동)"
+          >
+            📤 내보내기
+          </button>
+          <button
+            className="btn-ghost flex-1"
+            onClick={() => projFileRef.current?.click()}
+            title=".npproj.zip 프로젝트 파일 불러오기"
+          >
+            📥 가져오기
+          </button>
+          <input
+            ref={projFileRef}
+            type="file"
+            accept=".zip,.npproj.zip"
+            className="hidden"
+            onChange={onProjFile}
+          />
+        </div>
       </div>
 
       {/* 1. 스토리 입력 */}

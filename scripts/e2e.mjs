@@ -101,6 +101,35 @@ try {
   await page.waitForTimeout(600);
   const restored = await page.locator('input.field.font-semibold').count();
   assert(restored === 5, `새로고침 후 자동복원 (장면 ${restored})`);
+
+  // 8) 프로젝트 내보내기 → 초기화 → 가져오기 round-trip
+  const [proj] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30000 }),
+    page.getByRole('button', { name: /내보내기/ }).click(),
+  ]);
+  const projPath = join(shotDir, 'project.npproj.zip');
+  await proj.saveAs(projPath);
+  // 내보낸 파일 자체 검증
+  const pzip = await JSZip.loadAsync(readFileSync(projPath));
+  const pnames = Object.keys(pzip.files).filter((n) => !pzip.files[n].dir);
+  assert(pnames.includes('project.json'), '프로젝트 파일: project.json 포함');
+  assert(pnames.some((n) => n.startsWith('assets/')), '프로젝트 파일: 에셋 바이너리 포함');
+
+  // 초기화(confirm 수락) → 장면 0
+  page.once('dialog', (d) => d.accept());
+  await page.getByTitle('모두 초기화').click();
+  await page.waitForTimeout(500);
+  const afterReset = await page.locator('input.field.font-semibold').count();
+  assert(afterReset === 0, `초기화 후 장면 0 (실제 ${afterReset})`);
+
+  // 가져오기: 숨김 input 에 파일 주입
+  await page.locator('input[type=file][accept*="npproj"]').setInputFiles(projPath);
+  await page.waitForTimeout(1000);
+  const afterImport = await page.locator('input.field.font-semibold').count();
+  assert(afterImport === 5, `가져오기 후 장면 5 복원 (실제 ${afterImport})`);
+  const restoredImg = await page.locator('img[src^="blob:"]').count();
+  assert(restoredImg > 0, '가져오기 후 배경 에셋(blob) 복원');
+  await page.screenshot({ path: join(shotDir, '4-imported.png'), fullPage: true });
 } catch (e) {
   log('❌ 예외:', e.message);
   fails.push('예외: ' + e.message);

@@ -22,6 +22,16 @@ npm run dev      # http://localhost:5173
 npm run build    # 타입체크 + 프로덕션 빌드 (dist/)
 ```
 
+## 기기 간 작업 이동 (내보내기 / 가져오기)
+
+작업물(장면·에셋)은 브라우저 로컬 데이터(localStorage + IndexedDB)라 기기마다 분리됩니다.
+다른 PC에서 이어 작업하려면 왼쪽 패널의 **📤 내보내기**로 단일 파일(`<제목>.npproj.zip`)을 저장하고,
+다른 기기에서 **📥 가져오기**로 불러옵니다.
+
+- `.npproj.zip` 안에 `project.json`(장면·캐릭터·설정·에셋 메타) + `assets/`(PNG·WAV 바이너리)가 모두 담깁니다.
+- 따라서 **AI로 생성한 배경/오디오까지 그대로 복원**됩니다(재생성 불필요).
+- OpenAI API 키는 보안상 파일에 포함되지 않습니다. 새 기기에서 다시 입력하세요.
+
 ## 입력 포맷
 
 ### 텍스트 (왼쪽 패널 직접 입력)
@@ -65,6 +75,7 @@ A열 = 화자 이름, B열 = 대사 · 지문 · 태그.
 | Ren'Py | `src/renpy/` — 승인 장면 → `.rpy` 파일 집합 (label/menu/jump) |
 | ZIP | `src/zip/buildZip.ts` — JSZip, 미생성 에셋은 폴백으로 자동 채움 |
 | 저장 | `src/storage/` — 메타=localStorage, 바이너리=IndexedDB |
+| 이동 | `src/project/transfer.ts` — 프로젝트 내보내기/가져오기 (`.npproj.zip`) |
 | 상태 | `src/store.ts` — zustand |
 
 > AI 호출은 모두 어댑터로 추상화되어 있어, 추후 **백엔드 프록시(SaaS 과금)** 나
