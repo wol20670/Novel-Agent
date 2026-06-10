@@ -40,6 +40,8 @@ export default function RenpyTab() {
 
   return (
     <div className="max-w-4xl mx-auto">
+      <FolderSync approvedCount={approvedCount} />
+
       <div className="card border-edge p-4 mb-4 flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-[200px]">
           <p className="text-sm text-gray-300">
@@ -71,6 +73,63 @@ export default function RenpyTab() {
       <pre className="bg-ink border border-edge rounded-xl p-4 text-xs font-mono text-gray-200 overflow-x-auto max-h-[58vh] whitespace-pre leading-relaxed">
         {files[active]?.content}
       </pre>
+    </div>
+  );
+}
+
+function FolderSync({ approvedCount }: { approvedCount: number }) {
+  const supported = useStore((s) => s.folderSupported);
+  const folderName = useStore((s) => s.folderName);
+  const syncToFolder = useStore((s) => s.syncToFolder);
+  const changeFolder = useStore((s) => s.changeFolder);
+  const disconnectFolder = useStore((s) => s.disconnectFolder);
+  const [busy, setBusy] = useState(false);
+
+  const doSync = async () => {
+    setBusy(true);
+    try {
+      await syncToFolder();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!supported) {
+    return (
+      <div className="card border-edge p-3 mb-4 text-xs text-gray-500">
+        ⚡ <b className="text-gray-400">폴더 직접 쓰기</b>는 Chrome/Edge 데스크톱에서 지원됩니다. 현재 브라우저는
+        미지원이라 ZIP 다운로드를 사용하세요.
+      </div>
+    );
+  }
+
+  return (
+    <div className="card border-accent/40 bg-accent2/5 p-4 mb-4">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-sm font-semibold text-accent">⚡ Ren'Py 폴더에 직접 쓰기 (반복 테스트)</span>
+        {folderName && (
+          <span className="chip border-emerald-500/50 text-emerald-700">📁 {folderName}</span>
+        )}
+      </div>
+      <p className="text-[11px] text-gray-500 mb-3 leading-snug">
+        Ren'Py 프로젝트 폴더를 한 번 연결하면, 이후 <b className="text-gray-400">"폴더에 쓰기"</b> 버튼 → Ren'Py
+        게임 창에서 <b className="text-accent">Shift+R</b>(리로드) 만으로 즉시 반영됩니다. 다운로드·압축풀기 불필요.
+      </p>
+      <div className="flex gap-2 flex-wrap items-center">
+        <button className="btn-primary" disabled={busy || approvedCount === 0} onClick={doSync}>
+          {busy ? <Spinner label="기록 중" /> : folderName ? '⚡ 폴더에 쓰기' : '📁 폴더 연결 후 쓰기'}
+        </button>
+        {folderName && (
+          <>
+            <button className="btn-ghost" disabled={busy} onClick={changeFolder}>
+              폴더 변경
+            </button>
+            <button className="btn-ghost text-gray-500" disabled={busy} onClick={disconnectFolder}>
+              연결 해제
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

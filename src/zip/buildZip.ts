@@ -39,11 +39,21 @@ export interface ZipResult {
   placeholders: number;
 }
 
-export async function buildRenpyZip(project: Project): Promise<ZipResult> {
-  const { files, refs } = generateRenpyFiles(project);
-  const zip = new JSZip();
+/** Ren'Py 프로젝트의 모든 파일(텍스트+바이너리). path 는 프로젝트 루트 기준. */
+export interface ProjectFile {
+  path: string;
+  data: string | Blob;
+}
 
-  for (const f of files) zip.file(f.path, f.content);
+/**
+ * 프로젝트의 전체 파일 목록을 수집한다(ZIP·폴더 직접쓰기 공용).
+ * 미생성 배경/CG/BGM 은 폴백으로 채우고, 한글 폰트도 포함한다.
+ */
+export async function collectProjectFiles(
+  project: Project,
+): Promise<{ files: ProjectFile[]; placeholders: number }> {
+  const { files: textFiles, refs } = generateRenpyFiles(project);
+  const out: ProjectFile[] = textFiles.map((f) => ({ path: f.path, data: f.content }));
 
   let placeholders = 0;
   for (const ref of refs) {
@@ -59,13 +69,13 @@ export async function buildRenpyZip(project: Project): Promise<ZipResult> {
       project.height,
     );
     if (!hadBg) placeholders++;
-    zip.file(`game/images/${ref.bgFile}`, bg);
+    out.push({ path: `game/images/${ref.bgFile}`, data: bg });
 
     // CG (모델에 별도 assetId 미보관 → 항상 폴백)
     for (let j = 0; j < ref.cgFiles.length; j++) {
       const cg = await canvasImage(s.cg[j], `CG: ${s.cg[j]}`, project.width, project.height);
       placeholders++;
-      zip.file(`game/images/${ref.cgFiles[j]}`, cg);
+      out.push({ path: `game/images/${ref.cgFiles[j]}`, data: cg });
     }
 
     // BGM
@@ -73,30 +83,40 @@ export async function buildRenpyZip(project: Project): Promise<ZipResult> {
       const hadBgm = !!s.bgmAssetId && !!(await getAsset(s.bgmAssetId));
       const bgm = await blobForBgm(s.bgmAssetId, s.bgm || s.title);
       if (!hadBgm) placeholders++;
-      zip.file(`game/audio/${ref.bgmFile}`, bgm);
+      out.push({ path: `game/audio/${ref.bgmFile}`, data: bgm });
     }
   }
 
-  // 한글 폰트(나눔고딕, OFL) 포함 — Ren'Py 기본 폰트는 한글 글리프가 없다.
-  await addKoreanFont(zip);
+  // 한글 폰트(나눔고딕, OFL) — Ren'Py 기본 폰트는 한글 글리프가 없다.
+  for (const f of await koreanFontFiles()) out.push(f);
+
+  return { files: out, placeholders };
+}
+
+export async function buildRenpyZip(project: Project): Promise<ZipResult> {
+  const { files, placeholders } = await collectProjectFiles(project);
+  const zip = new JSZip();
+  for (const f of files) zip.file(f.path, f.data);
 
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   const safeName = (project.title || 'visual-novel').replace(/[^\w가-힣-]+/g, '_').slice(0, 40);
   return { blob, filename: `${safeName}_renpy.zip`, placeholders };
 }
 
-/** 앱에 번들된 한글 폰트를 game/fonts/ 로 복사. 실패해도 ZIP 생성은 계속한다. */
-async function addKoreanFont(zip: JSZip): Promise<void> {
+/** 앱에 번들된 한글 폰트 파일들. 실패 시 빈 배열(한글이 □ 로 보일 수 있음). */
+async function koreanFontFiles(): Promise<ProjectFile[]> {
   const base = import.meta.env.BASE_URL || '/';
   try {
     const [font, license] = await Promise.all([
       fetch(`${base}fonts/NanumGothic.ttf`),
       fetch(`${base}fonts/OFL.txt`),
     ]);
-    if (font.ok) zip.file('game/fonts/NanumGothic.ttf', await font.blob());
-    if (license.ok) zip.file('game/fonts/OFL.txt', await license.text());
+    const files: ProjectFile[] = [];
+    if (font.ok) files.push({ path: 'game/fonts/NanumGothic.ttf', data: await font.blob() });
+    if (license.ok) files.push({ path: 'game/fonts/OFL.txt', data: await license.text() });
+    return files;
   } catch {
-    /* 폰트 누락 시 한글이 □ 로 보일 수 있으나 ZIP 자체는 정상 */
+    return [];
   }
 }
 

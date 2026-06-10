@@ -15,6 +15,13 @@ import {
 import { SAMPLE_STORY } from './sample';
 import { exportProjectFile, importProjectFile } from './project/transfer';
 import { downloadBlob } from './zip/buildZip';
+import {
+  isFolderSyncSupported,
+  connectProjectFolder,
+  getConnectedFolderName,
+  disconnectFolder as fsDisconnectFolder,
+  syncProjectToFolder,
+} from './project/folderSync';
 
 export type Tab = 'scenes' | 'assets' | 'renpy';
 
@@ -67,6 +74,13 @@ interface State {
   // 프로젝트 파일 (기기 간 이동)
   exportProject: () => Promise<void>;
   importProject: (file: File) => Promise<void>;
+
+  // Ren'Py 폴더 직접 쓰기 (반복 테스트용)
+  folderSupported: boolean;
+  folderName: string | null;
+  syncToFolder: () => Promise<void>;
+  changeFolder: () => Promise<void>;
+  disconnectFolder: () => Promise<void>;
 }
 
 export const useStore = create<State>((set, get) => {
@@ -109,6 +123,8 @@ export const useStore = create<State>((set, get) => {
     busy: {},
     toast: null,
     toastType: 'info',
+    folderSupported: isFolderSyncSupported(),
+    folderName: null,
 
     setRawInput: (text) => {
       set((s) => ({ project: { ...s.project, rawInput: text } }));
@@ -282,6 +298,10 @@ export const useStore = create<State>((set, get) => {
       } else {
         set({ apiKey });
       }
+      // 이전에 연결한 Ren'Py 폴더 이름 복원(권한 프롬프트 없이 표시만).
+      getConnectedFolderName().then((name) => {
+        if (name) set({ folderName: name });
+      });
     },
 
     resetAll: () => {
@@ -327,6 +347,46 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         flash(`가져오기 실패: ${(e as Error).message}`);
       }
+    },
+
+    syncToFolder: async () => {
+      if (!isFolderSyncSupported()) {
+        flash('이 브라우저는 폴더 직접 쓰기를 지원하지 않습니다. Chrome/Edge 를 쓰거나 ZIP 으로 받으세요.');
+        return;
+      }
+      const { project } = get();
+      if (project.scenes.length === 0) {
+        flash('내보낼 장면이 없습니다. 먼저 분석하세요.');
+        return;
+      }
+      try {
+        flash("Ren'Py 폴더에 기록 중…");
+        const { count, folderName } = await syncProjectToFolder(project);
+        set({ folderName });
+        flash(`"${folderName}" 에 ${count}개 파일 기록 완료. Ren'Py 에서 Shift+R 로 새로고침!`);
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (/abort/i.test(msg)) return; // 폴더 선택 취소
+        flash(`폴더 쓰기 실패: ${msg}`);
+      }
+    },
+
+    changeFolder: async () => {
+      try {
+        const name = await connectProjectFolder();
+        set({ folderName: name });
+        flash(`폴더 연결: ${name}. 이제 "폴더에 쓰기" 로 바로 반영됩니다.`);
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (/abort/i.test(msg)) return;
+        flash(`폴더 연결 실패: ${msg}`);
+      }
+    },
+
+    disconnectFolder: async () => {
+      await fsDisconnectFolder();
+      set({ folderName: null });
+      flash('폴더 연결을 해제했습니다.');
     },
   };
 });
