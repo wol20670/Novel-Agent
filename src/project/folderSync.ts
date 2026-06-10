@@ -117,6 +117,30 @@ export async function syncProjectToFolder(project: Project): Promise<SyncResult>
     throw new Error('폴더 쓰기 권한이 거부되었습니다.');
   }
   const { files, placeholders } = await collectProjectFiles(project);
-  for (const f of files) await writeFile(handle, f.path, f.data);
+  try {
+    for (const f of files) await writeFile(handle, f.path, f.data);
+  } catch (e) {
+    if (isStaleHandleError(e)) {
+      // 폴더 핸들이 낡음(OneDrive 동기화 등) → 캐시/저장 비우고 재연결 유도.
+      cached = null;
+      await persist(null).catch(() => {});
+      throw new Error(
+        '폴더 상태가 변경되었습니다(OneDrive 동기화 등). "폴더 변경"으로 폴더를 다시 선택하면 됩니다. ' +
+          '반복되면 OneDrive 밖 경로(예: C:\\renpy-projects)에 프로젝트를 두세요.',
+      );
+    }
+    throw e;
+  }
   return { count: files.length, placeholders, folderName: handle.name };
+}
+
+/** 낡은 핸들/상태 변경 오류인지 판별. */
+function isStaleHandleError(e: unknown): boolean {
+  const name = (e as DOMException)?.name;
+  const msg = (e as Error)?.message ?? '';
+  return (
+    name === 'InvalidStateError' ||
+    name === 'NotReadableError' ||
+    /state had changed|cached in an interface/i.test(msg)
+  );
 }
