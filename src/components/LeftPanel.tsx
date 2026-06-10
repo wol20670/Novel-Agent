@@ -1,6 +1,11 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { downloadExcelTemplate, downloadTextTemplate } from '../template';
+import { GENRE_OPTIONS, DEFAULT_GENRE, resolveTheme } from '../renpy/gui';
+import type { GenreId, GuiTheme } from '../renpy/gui';
+import { canvasMenuArt } from '../generators/image/canvasMenu';
+import Spinner from './Spinner';
+import UploadButton from './UploadButton';
 
 export default function LeftPanel() {
   const project = useStore((s) => s.project);
@@ -197,6 +202,170 @@ function ProjectMeta() {
           />
         </div>
       </div>
+      <div>
+        <span className="label">GUI 테마 (장르)</span>
+        <select
+          className="field"
+          value={project.genre ?? DEFAULT_GENRE}
+          onChange={(e) => update({ genre: e.target.value as GenreId })}
+        >
+          {GENRE_OPTIONS.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <p className="text-[11px] text-gray-500 leading-snug mt-1">
+          메인/게임 메뉴·대사창·색·전환이 장르에 맞게 바뀝니다. 자체 제작 GUI(외부 GUI 이미지 의존 없음).
+        </p>
+      </div>
+
+      <ThemeStudio />
     </section>
+  );
+}
+
+function ThemeStudio() {
+  const project = useStore((s) => s.project);
+  const update = useStore((s) => s.updateProjectMeta);
+  const generateAiTheme = useStore((s) => s.generateAiTheme);
+  const clearAiTheme = useStore((s) => s.clearAiTheme);
+  const importMenuArt = useStore((s) => s.importMenuArt);
+  const clearMenuArt = useStore((s) => s.clearMenuArt);
+  const busy = useStore((s) => s.aiThemeBusy);
+  const apiKey = useStore((s) => s.apiKey);
+
+  const theme = resolveTheme(project.genre, project.guiTheme);
+  const custom = !!project.guiTheme;
+
+  return (
+    <div className="rounded-lg border border-accent/30 bg-accent2/5 p-2.5 flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-accent">✨ AI 테마 스튜디오</span>
+        <span className="text-[10px] text-gray-500">{apiKey ? 'AI 모드' : '오프라인 모드'}</span>
+      </div>
+
+      <div>
+        <span className="label">분위기 · 요청 (선택)</span>
+        <textarea
+          className="field text-xs h-14 resize-y"
+          placeholder={'예) 비 내리는 네온 도시, 차가운 사이버펑크\n예) 따뜻한 봄날의 풋풋한 첫사랑'}
+          value={project.mood ?? ''}
+          onChange={(e) => update({ mood: e.target.value })}
+        />
+      </div>
+
+      <div className="flex gap-2">
+        <button className="btn-primary flex-1" disabled={busy} onClick={generateAiTheme}>
+          {busy ? <Spinner label="생성 중" /> : custom ? '🔄 테마 재생성' : '✨ AI 테마 생성'}
+        </button>
+        {custom && (
+          <button className="btn-ghost text-gray-500" disabled={busy} onClick={clearAiTheme} title="장르 프리셋으로 되돌리기">
+            프리셋
+          </button>
+        )}
+      </div>
+
+      <div className="text-[11px] text-gray-400 flex items-center gap-1.5">
+        <span className={`w-1.5 h-1.5 rounded-full ${custom ? 'bg-accent' : 'bg-gray-600'}`} />
+        {custom ? `커스텀: ${theme.label}` : `프리셋: ${theme.label}`}
+      </div>
+
+      <ThemePreview theme={theme} />
+
+      <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
+        <span className="label">메뉴 배경 직접 업로드 (외부 AI 제작)</span>
+        <div className="flex gap-2">
+          <UploadButton
+            onFile={(f) => importMenuArt('main', f)}
+            label={project.menuArt?.main ? '메인 ✓ 교체' : '메인 배경'}
+            className="btn-ghost flex-1 text-[11px]"
+            title="메인 메뉴 배경 이미지 업로드"
+          />
+          <UploadButton
+            onFile={(f) => importMenuArt('game', f)}
+            label={project.menuArt?.game ? '게임 ✓ 교체' : '게임 배경'}
+            className="btn-ghost flex-1 text-[11px]"
+            title="게임 메뉴(인게임 메뉴) 배경 이미지 업로드"
+          />
+        </div>
+        {(project.menuArt?.main || project.menuArt?.game) && (
+          <button
+            className="text-[10px] text-gray-500 hover:text-rose-600 self-start"
+            onClick={() => {
+              clearMenuArt('main');
+              clearMenuArt('game');
+            }}
+          >
+            업로드 해제 (Canvas 생성으로 복귀)
+          </button>
+        )}
+        <p className="text-[10px] text-gray-500 leading-snug">
+          업로드한 메뉴 배경은 ZIP·폴더쓰기 결과에 반영됩니다(위 미리보기는 Canvas 생성본 기준).
+        </p>
+      </div>
+
+      {!apiKey && (
+        <p className="text-[10px] text-gray-500 leading-snug">
+          키 없이도 스토리·분위기 기반 변형이 적용됩니다. 위 OpenAI 키를 넣으면 더 정교한 AI 생성으로 업그레이드됩니다.
+        </p>
+      )}
+    </div>
+  );
+}
+
+const SWATCHES: { key: keyof GuiTheme; label: string }[] = [
+  { key: 'accent', label: '강조' },
+  { key: 'bgTop', label: '배경' },
+  { key: 'dialogueBox', label: '대사창' },
+  { key: 'dialogueText', label: '대사글' },
+  { key: 'nameText', label: '이름' },
+];
+
+function ThemePreview({ theme }: { theme: GuiTheme }) {
+  const [url, setUrl] = useState<string>();
+
+  useEffect(() => {
+    let alive = true;
+    let made: string | undefined;
+    canvasMenuArt(theme, 384, 216, 'main').then((blob) => {
+      if (!alive) return;
+      made = URL.createObjectURL(blob);
+      setUrl(made);
+    });
+    return () => {
+      alive = false;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [theme]);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="relative rounded-md overflow-hidden border border-edge aspect-video bg-ink">
+        {url && <img src={url} alt="테마 미리보기" className="w-full h-full object-cover" />}
+        {/* 메뉴 레이아웃 근사: 좌측 내비 + 우하단 타이틀 */}
+        <div
+          className="absolute inset-y-0 left-0 w-[30%] flex flex-col justify-center gap-0.5 px-2"
+          style={{ background: theme.menuOverlay }}
+        >
+          {['시작', '불러오기', '설정', '종료'].map((t, i) => (
+            <span key={t} className="text-[8px] font-semibold leading-tight" style={{ color: i === 0 ? theme.accent : theme.interfaceText }}>
+              {t}
+            </span>
+          ))}
+        </div>
+        <span className="absolute bottom-1 right-2 text-[11px] font-bold" style={{ color: theme.accent }}>
+          {useStore.getState().project.title}
+        </span>
+      </div>
+      <div className="flex gap-1">
+        {SWATCHES.map((s) => (
+          <div key={s.key} className="flex-1 flex flex-col items-center gap-0.5">
+            <span className="w-full h-4 rounded border border-edge/50" style={{ background: theme[s.key] as string }} />
+            <span className="text-[8px] text-gray-500">{s.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

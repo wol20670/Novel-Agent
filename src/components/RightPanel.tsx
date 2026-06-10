@@ -3,11 +3,13 @@ import { useAssetUrl } from './useAssetUrl';
 import { getAsset } from '../storage/assetStore';
 import { downloadBlob } from '../zip/buildZip';
 import Spinner from './Spinner';
+import UploadButton from './UploadButton';
 
 export default function RightPanel() {
   const sceneId = useStore((s) => s.selectedSceneId);
   const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId) ?? null);
   const genBg = useStore((s) => s.generateBackground);
+  const importBg = useStore((s) => s.importBackground);
   const genBgm = useStore((s) => s.generateBgm);
   const busyBg = useStore((s) => (sceneId ? s.busy[`${sceneId}:bg`] : false));
   const busyBgm = useStore((s) => (sceneId ? s.busy[`${sceneId}:bgm`] : false));
@@ -50,6 +52,11 @@ export default function RightPanel() {
             <button className="btn-primary flex-1" disabled={busyBg} onClick={() => genBg(scene.id)}>
               {busyBg ? <Spinner label="생성 중" /> : '🖼 배경 생성'}
             </button>
+            <UploadButton
+              onFile={(f) => importBg(scene.id, f)}
+              label="↥ 업로드"
+              title="외부 제작 이미지를 이 배경으로 사용"
+            />
             <button className="btn-ghost" disabled={!scene.backgroundAssetId} onClick={savePng}>
               ↓ PNG
             </button>

@@ -3,6 +3,7 @@
 
 import type { Project, Scene, Character, Expression } from '../types';
 import { SlugMap } from './slug';
+import { generateGuiFiles, resolveTheme } from './gui';
 
 export interface RenpyFile {
   path: string; // game/ 이하 경로
@@ -145,7 +146,12 @@ function scenePositions(scene: Scene, ids: Map<string, string>): Map<string, str
   return pos;
 }
 
-function scriptBody(refs: SceneAssetRef[], ids: Map<string, string>, sprites: SpriteRef[]): string {
+function scriptBody(
+  refs: SceneAssetRef[],
+  ids: Map<string, string>,
+  sprites: SpriteRef[],
+  transition: string,
+): string {
   const resolve = makeResolver(refs);
   const spritesByChar = new Map<string, SpriteRef[]>();
   for (const sp of sprites) {
@@ -163,7 +169,7 @@ function scriptBody(refs: SceneAssetRef[], ids: Map<string, string>, sprites: Sp
     const pos = scenePositions(s, ids);
     out.push(`# ── ${s.title} ──`);
     out.push(`label ${r.label}:`);
-    out.push(`${indent(1)}scene ${r.bgTag} with fade`);
+    out.push(`${indent(1)}scene ${r.bgTag} with ${transition}`);
     if (r.bgmFile) out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
     // CG 컷
     r.cgTags.forEach((tag) => out.push(`${indent(1)}show ${tag} with dissolve`));
@@ -220,6 +226,7 @@ function optionsRpy(project: Project): string {
     `define config.has_music = True`,
     `define config.window_title = "${esc(project.title)}"`,
     `define build.name = "${esc(project.title)}"`,
+    `define gui.about = _("제작: ${esc(project.author)}")`,
     '',
     `## 저자: ${esc(project.author)}`,
     `init python:`,
@@ -229,94 +236,39 @@ function optionsRpy(project: Project): string {
   ].join('\n');
 }
 
-// 버전에 거의 안 타는 최소 자립형 화면 정의.
-// - 메인메뉴를 건너뛰고 바로 start (label main_menu: return 트릭)
-// - 게임메뉴(Esc/우클릭) 비활성화 → 누락 화면 오류 방지
-// - say/choice 만 직접 정의(화면 언어 핵심 — 7.x~8.x 안정).
-// 정식 출시 시에는 Ren'Py 런처의 풀 GUI 프로젝트로 교체할 것.
-const SCREENS_RPY = `# 자동 생성: 최소 자립형 화면 (테스트용)
-# 정식 출시 전에는 Ren'Py 런처가 만든 풀 GUI(screens.rpy/gui.rpy)로 교체하세요.
+function readme(theme: { label: string }): string {
+  return `# Ren'Py 프로젝트 (Novel-Agent 자동 생성)
 
-# 메인 메뉴를 건너뛰고 곧바로 start 로 진입
-label main_menu:
-    return
+적용 테마: **${theme.label}**
 
-init python:
-    # 한글 폰트 지정 (기본 DejaVuSans 는 한글 글리프가 없어 □ 로 깨짐)
-    style.default.font = "fonts/NanumGothic.ttf"
-    # 최소 구성에서 누락된 화면으로 인한 오류를 막기 위해 게임 메뉴 비활성화
-    config.keymap['game_menu'] = []
-    config.keymap['hide_windows'] = []
-    # 창 닫기 시 종료 확인창(yesno) 대신 즉시 종료 (확인 화면 미포함)
-    config.quit_action = Quit(confirm=False)
-
-# 대사 화면 — 하단 반투명 박스 + 흰 글씨
-screen say(who, what):
-    window:
-        style "empty"
-        background "#000000cc"
-        xfill True
-        yalign 1.0
-        xpadding 50
-        ypadding 28
-        vbox:
-            spacing 6
-            if who is not None:
-                text who id "who" color "#ffd479" size 28 bold True
-            text what id "what" color "#ffffff" size 26
-
-# 선택지 화면 — 화면 중앙 버튼 목록
-screen choice(items):
-    vbox:
-        xalign 0.5
-        yalign 0.5
-        spacing 14
-        for i in items:
-            textbutton i.caption:
-                action i.action
-                xpadding 36
-                ypadding 12
-                background "#00000099"
-                hover_background "#6366f1cc"
-                text_color "#ffffff"
-                text_size 26
-                text_xalign 0.5
-`;
-
-const README = `# Ren'Py 프로젝트 (Novel-Agent 자동 생성)
-
-## 실행 방법 (간편 — 최소 자립형)
+## 실행 방법
 1. Ren'Py SDK (https://www.renpy.org/) 설치 후 런처 실행
 2. 이 폴더를 런처의 projects 디렉터리에 두거나, 런처에서 프로젝트로 추가
 3. 프로젝트 선택 → Launch Project
-   → 메인 메뉴 없이 곧바로 첫 장면이 재생됩니다.
+   → 자체 제작 메인 메뉴(테마 적용)가 뜨고, 시작을 누르면 첫 장면이 재생됩니다.
 
-이 프로젝트는 버전에 안정적인 최소 화면(대사/선택지)만 포함해 바로 실행되도록 만들어졌습니다.
-화면 모양은 검은 박스 + 흰 글씨의 소박한 테스트용입니다.
-
-## 폴백 (위가 안 될 때 — 항상 작동)
-1. 런처에서 "새 프로젝트 만들기"로 빈 프로젝트 생성(해상도 동일하게)
-2. 그 프로젝트의 game/ 안에 이 폴더의 다음만 복사:
-   script.rpy, characters.rpy, assets.rpy, images/, audio/
-   (options.rpy, screens.rpy 는 복사하지 말 것 — 새 프로젝트 것과 충돌)
-3. 새 프로젝트의 기본 script.rpy 는 우리 것으로 덮어쓰기 → Launch
+이 프로젝트는 **자체 제작 풀 GUI**(메인/게임 메뉴·저장/불러오기·설정·기록·도움말 등)를
+포함합니다. 메뉴 배경 외 인터페이스는 전부 코드(Solid) 기반이라 외부 GUI 이미지 의존이 없습니다.
 
 ## 포함 파일
-- game/script.rpy     : 승인된 장면의 대사·연출·분기
-- game/characters.rpy : 캐릭터 정의
-- game/assets.rpy     : 이미지·오디오 에셋 정의
-- game/options.rpy    : 해상도·제목·저자
-- game/screens.rpy    : 최소 자립형 화면(대사/선택지) — 정식 출시 시 풀 GUI 로 교체
-- game/fonts/         : 한글 폰트(나눔고딕, OFL) + 라이선스
-- game/images/        : 배경/CG PNG (생성된 것 또는 임시)
-- game/audio/         : BGM WAV
+- game/script.rpy      : 승인된 장면의 대사·연출·분기
+- game/characters.rpy  : 캐릭터 정의
+- game/assets.rpy      : 이미지·오디오 에셋 정의
+- game/options.rpy     : 해상도·제목·저자
+- game/gui.rpy         : 테마 변수(색·폰트·전환) — 자체 GUI
+- game/screens.rpy     : 자체 제작 화면 전체 (zero-PNG)
+- game/guisupport.rpy  : gui.scale 정의
+- game/gui/            : 메뉴 배경(main_menu/game_menu PNG, Canvas 생성)
+- game/fonts/          : 한글 폰트(나눔고딕, OFL) + 라이선스
+- game/images/         : 배경/CG/스프라이트 PNG (생성된 것 또는 임시)
+- game/audio/          : BGM WAV
 
 ## 상업 배포 전
-- 임시 배경/합성 BGM 은 테스트용입니다. 정식 일러스트·BGM·SFX 로 교체하세요.
-- screens.rpy 를 Ren'Py 런처의 풀 GUI(screens.rpy/gui.rpy)로 교체하세요.
+- 임시 배경/합성 BGM/Canvas 메뉴 배경은 테스트용입니다. 정식 일러스트·BGM·SFX 로 교체하세요.
 - 폰트 라이선스(OFL 등) 를 확인하세요.
 - 실제 Windows 환경에서 Ren'Py 빌드를 테스트하세요.
 `;
+}
 
 /** Ren'Py 텍스트 파일 전체를 생성한다. */
 export function generateRenpyFiles(project: Project): {
@@ -328,14 +280,15 @@ export function generateRenpyFiles(project: Project): {
   const refs = resolveSceneAssets(project);
   const ids = charIdMap(project);
   const sprites = resolveSprites(project, ids);
+  const theme = resolveTheme(project.genre, project.guiTheme);
 
   const files: RenpyFile[] = [
-    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites) },
+    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition) },
     { path: 'game/characters.rpy', content: characterDefs(project, ids) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
-    { path: 'game/screens.rpy', content: SCREENS_RPY },
-    { path: 'README.md', content: README },
+    ...generateGuiFiles(theme, project.width, project.height),
+    { path: 'README.md', content: readme(theme) },
   ];
   return { files, refs, sprites, characters: project.characters };
 }
