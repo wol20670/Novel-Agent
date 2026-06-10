@@ -99,11 +99,27 @@ async function writeFile(root: DirHandle, path: string, data: string | Blob): Pr
 export interface SyncResult {
   count: number;
   placeholders: number;
-  folderName: string;
+  /** 연결한 부모 폴더 이름 (예: renpy_scenario). */
+  parentName: string;
+  /** 이번에 기록한 프로젝트 하위 폴더 이름 (예: 나의_비주얼노벨). */
+  projectFolder: string;
+}
+
+/** 프로젝트 제목 → 파일시스템 안전 하위 폴더명(한글 유지). Ren'Py 런처가 프로젝트로 인식. */
+export function projectFolderName(project: Project): string {
+  const name = (project.title || '')
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '') // 윈도우 금지문자 제거
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  return name || 'visual-novel';
 }
 
 /**
- * 현재 프로젝트의 모든 파일을 연결된 폴더에 쓴다.
+ * 현재 프로젝트를 연결된 폴더 아래의 "프로젝트 제목" 하위 폴더에 쓴다.
+ * (연결 폴더 = 여러 프로젝트의 부모 디렉터리 = Ren'Py 런처의 projects 디렉터리)
  * 미연결이면 폴더 선택 다이얼로그를 먼저 띄운다(사용자 제스처에서 호출할 것).
  */
 export async function syncProjectToFolder(project: Project): Promise<SyncResult> {
@@ -117,8 +133,12 @@ export async function syncProjectToFolder(project: Project): Promise<SyncResult>
     throw new Error('폴더 쓰기 권한이 거부되었습니다.');
   }
   const { files, placeholders } = await collectProjectFiles(project);
+  const projectFolder = projectFolderName(project);
   try {
-    for (const f of files) await writeFile(handle, f.path, f.data);
+    // 제목별 하위 폴더에 기록. 매번 game/ 을 비워 낡은 스크립트·에셋 잔존을 막는다.
+    const projDir = (await handle.getDirectoryHandle(projectFolder, { create: true })) as DirHandle;
+    await projDir.removeEntry('game', { recursive: true }).catch(() => {});
+    for (const f of files) await writeFile(projDir, f.path, f.data);
   } catch (e) {
     if (isStaleHandleError(e)) {
       // 폴더 핸들이 낡음(OneDrive 동기화 등) → 캐시/저장 비우고 재연결 유도.
@@ -131,7 +151,7 @@ export async function syncProjectToFolder(project: Project): Promise<SyncResult>
     }
     throw e;
   }
-  return { count: files.length, placeholders, folderName: handle.name };
+  return { count: files.length, placeholders, parentName: handle.name, projectFolder };
 }
 
 /** 낡은 핸들/상태 변경 오류인지 판별. */

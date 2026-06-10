@@ -112,8 +112,11 @@ function FolderSync({ approvedCount }: { approvedCount: number }) {
         )}
       </div>
       <p className="text-[11px] text-gray-500 mb-3 leading-snug">
-        Ren'Py 프로젝트 폴더를 한 번 연결하면, 이후 <b className="text-gray-400">"폴더에 쓰기"</b> 버튼 → Ren'Py
-        게임 창에서 <b className="text-accent">Shift+R</b>(리로드) 만으로 즉시 반영됩니다. 다운로드·압축풀기 불필요.
+        <b className="text-gray-400">프로젝트들의 부모 폴더</b>(= Ren'Py 런처의 projects 디렉터리)를 한 번 연결하면, 이후{' '}
+        <b className="text-gray-400">"폴더에 쓰기"</b> 시 <b className="text-gray-400">제목별 하위 폴더</b>(예{' '}
+        <code className="text-accent">renpy_scenario\나의_비주얼노벨</code>)에 기록됩니다. 매번 그 프로젝트의 옛
+        내용을 비우고 새로 써서 <b className="text-gray-400">낡은 스크립트가 남지 않습니다.</b> 런처에서 해당 프로젝트
+        실행 → <b className="text-accent">Shift+R</b> 로 즉시 반영(다운로드·압축풀기 불필요).
       </p>
       <div className="flex gap-2 flex-wrap items-center">
         <button className="btn-primary" disabled={busy || approvedCount === 0} onClick={doSync}>

@@ -4,6 +4,7 @@ import { EXPRESSIONS, type Expression } from '../types';
 import { ALL_MOODS } from '../generators/audio/moods';
 import { useAssetUrl } from './useAssetUrl';
 import Spinner from './Spinner';
+import UploadButton from './UploadButton';
 
 export default function AssetsTab() {
   const characters = useStore((s) => s.project.characters);
@@ -38,6 +39,20 @@ export default function AssetsTab() {
       </section>
 
       <section>
+        <h3 className="section-title mb-1">🎬 CG 컷 (업로드)</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          대본의 <code className="text-accent">#CG 설명</code> 마다 한 컷. 외부 제작 이미지를 업로드하면 그대로 사용됩니다(없으면 Canvas 임시).
+        </p>
+        {scenes.every((s) => s.cg.length === 0) ? (
+          <p className="text-gray-600 text-sm">CG 컷 없음</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {scenes.flatMap((s) => s.cg.map((_, i) => <CgRow key={`${s.id}:${i}`} sceneId={s.id} index={i} />))}
+          </div>
+        )}
+      </section>
+
+      <section>
         <h3 className="section-title mb-3">🎵 오디오 (BGM)</h3>
         <div className="flex flex-col gap-2">
           {scenes.map((s) => (
@@ -54,6 +69,7 @@ function CharacterCard({ name }: { name: string }) {
   const updateChar = useStore((s) => s.updateCharacter);
   const genAll = useStore((s) => s.generateCharacterSprites);
   const genOne = useStore((s) => s.generateCharacterSprite);
+  const importSprite = useStore((s) => s.importSprite);
   const clearAll = useStore((s) => s.clearCharacterSprites);
   const busy = useStore((s) => s.busy[`sprite:${name}`]);
   const hasAny = EXPRESSIONS.some((ex) => c.expressions[ex as Expression]);
@@ -76,7 +92,14 @@ function CharacterCard({ name }: { name: string }) {
       </div>
       <div className="grid grid-cols-3 gap-1.5">
         {EXPRESSIONS.map((ex) => (
-          <ExpressionThumb key={ex} name={name} expr={ex as Expression} busy={!!busy} onGen={() => genOne(name, ex as Expression)} />
+          <ExpressionThumb
+            key={ex}
+            name={name}
+            expr={ex as Expression}
+            busy={!!busy}
+            onGen={() => genOne(name, ex as Expression)}
+            onUpload={(f) => importSprite(name, ex as Expression, f)}
+          />
         ))}
       </div>
       {hasAny && (
@@ -93,30 +116,42 @@ function ExpressionThumb({
   expr,
   busy,
   onGen,
+  onUpload,
 }: {
   name: string;
   expr: Expression;
   busy: boolean;
   onGen: () => void;
+  onUpload: (file: File) => void;
 }) {
   const assetId = useStore((s) => s.project.characters.find((x) => x.name === name)?.expressions[expr]);
   const url = useAssetUrl(assetId);
   return (
-    <button
-      onClick={onGen}
-      disabled={busy}
-      title={`${expr} ${url ? '재생성' : '생성'}`}
-      className="relative aspect-[3/4] rounded-lg border border-edge bg-ink overflow-hidden flex items-center justify-center group"
-    >
-      {url ? (
-        <img src={url} className="w-full h-full object-contain" />
-      ) : (
-        <span className="text-[10px] text-gray-500">{expr}</span>
-      )}
-      <span className="absolute bottom-0 inset-x-0 bg-black/45 text-white text-[9px] py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+    <div className="relative aspect-[3/4] rounded-lg border border-edge bg-ink overflow-hidden group">
+      <button
+        onClick={onGen}
+        disabled={busy}
+        title={`${expr} ${url ? '재생성' : '생성'}`}
+        className="w-full h-full flex items-center justify-center"
+      >
+        {url ? (
+          <img src={url} className="w-full h-full object-contain" />
+        ) : (
+          <span className="text-[10px] text-gray-500">{expr}</span>
+        )}
+      </button>
+      <div className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <UploadButton
+          onFile={onUpload}
+          label="↥"
+          className="bg-black/55 text-white text-[10px] rounded px-1 py-0.5 hover:bg-black/75"
+          title={`${expr} 입화 직접 업로드`}
+        />
+      </div>
+      <span className="absolute bottom-0 inset-x-0 bg-black/45 text-white text-[9px] py-0.5 text-center pointer-events-none">
         {expr}
       </span>
-    </button>
+    </div>
   );
 }
 
@@ -124,6 +159,7 @@ function BackgroundRow({ sceneId }: { sceneId: string }) {
   const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId))!;
   const update = useStore((s) => s.updateScene);
   const genBg = useStore((s) => s.generateBackground);
+  const importBg = useStore((s) => s.importBackground);
   const busy = useStore((s) => s.busy[`${sceneId}:bg`]);
   const url = useAssetUrl(scene.backgroundAssetId);
   return (
@@ -140,9 +176,43 @@ function BackgroundRow({ sceneId }: { sceneId: string }) {
           onChange={(e) => update(sceneId, { background: e.target.value })}
         />
       </div>
-      <button className="btn-ghost shrink-0" disabled={busy} onClick={() => genBg(sceneId)}>
-        {busy ? <Spinner /> : '재생성'}
-      </button>
+      <div className="flex flex-col gap-1 shrink-0">
+        <button className="btn-ghost" disabled={busy} onClick={() => genBg(sceneId)}>
+          {busy ? <Spinner /> : '재생성'}
+        </button>
+        <UploadButton onFile={(f) => importBg(sceneId, f)} label="↥ 업로드" className="btn-ghost text-[11px]" />
+      </div>
+    </div>
+  );
+}
+
+function CgRow({ sceneId, index }: { sceneId: string; index: number }) {
+  const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId))!;
+  const importCg = useStore((s) => s.importCg);
+  const clearCg = useStore((s) => s.clearCg);
+  const assetId = scene.cgAssetIds?.[index] || undefined;
+  const url = useAssetUrl(assetId);
+  return (
+    <div className="card border-edge p-3 flex gap-3 items-center">
+      <div className="w-24 aspect-video rounded-lg border border-edge overflow-hidden bg-ink shrink-0 flex items-center justify-center text-[10px] text-gray-600">
+        {url ? <img src={url} className="w-full h-full object-cover" /> : '임시'}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-gray-400 truncate">{scene.title}</p>
+        <p className="text-xs text-gray-300 truncate">{scene.cg[index]}</p>
+      </div>
+      <div className="flex flex-col gap-1 shrink-0">
+        <UploadButton
+          onFile={(f) => importCg(sceneId, index, f)}
+          label={url ? '↥ 교체' : '↥ 업로드'}
+          className="btn-ghost text-[11px]"
+        />
+        {url && (
+          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => clearCg(sceneId, index)}>
+            해제
+          </button>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,7 @@
 // 도메인 데이터 모델 — 파서 출력, UI 상태, Ren'Py 생성이 모두 공유한다.
 
+import type { GenreId, GuiTheme } from './renpy/gui/theme';
+
 export type SceneStatus = 'review' | 'approved' | 'needs_fix';
 
 export const SCENE_STATUS_LABEL: Record<SceneStatus, string> = {
@@ -29,7 +31,9 @@ export interface Scene {
   background?: string; // #배경
   bgm?: string; // #BGM
   direction: string[]; // #연출 (AI 프롬프트에 반영)
-  cg: string[]; // #CG
+  cg: string[]; // #CG (설명/프롬프트)
+  /** cg[i] 에 대응하는 업로드 이미지 assetId(선택). 없으면 Canvas 임시 생성. */
+  cgAssetIds?: string[];
   lines: Line[];
   choices: Choice[];
   jumpTo?: string; // #점프 대상 장면 제목
@@ -67,6 +71,14 @@ export interface Project {
   scenes: Scene[];
   characters: Character[];
   rawInput: string;
+  /** GUI 테마(장르 프리셋). 미지정이면 기본 프리셋이 적용된다. */
+  genre?: GenreId;
+  /** AI/오프라인으로 생성한 커스텀 테마. 있으면 genre 프리셋보다 우선한다. */
+  guiTheme?: GuiTheme;
+  /** AI 테마 생성에 쓰는 분위기/요청 텍스트(선택). */
+  mood?: string;
+  /** 외부에서 업로드한 메뉴 배경(자체 GUI 위에 덮어씀). 없으면 Canvas 생성. */
+  menuArt?: { main?: string; game?: string };
 }
 
 export function emptyProject(): Project {
@@ -78,5 +90,6 @@ export function emptyProject(): Project {
     scenes: [],
     characters: [],
     rawInput: '',
+    genre: 'romance',
   };
 }

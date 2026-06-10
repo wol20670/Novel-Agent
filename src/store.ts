@@ -15,6 +15,7 @@ import {
 import { SAMPLE_STORY } from './sample';
 import { exportProjectFile, importProjectFile } from './project/transfer';
 import { downloadBlob } from './zip/buildZip';
+import { generateTheme } from './generators/theme';
 import {
   isFolderSyncSupported,
   connectProjectFolder,
@@ -58,6 +59,11 @@ interface State {
   updateProjectMeta: (patch: Partial<Project>) => void;
   updateCharacter: (name: string, patch: Partial<Character>) => void;
 
+  // GUI 테마 (AI/오프라인 생성)
+  aiThemeBusy: boolean;
+  generateAiTheme: () => Promise<void>;
+  clearAiTheme: () => void;
+
   // 캐릭터 스프라이트 (표정별 입화)
   generateCharacterSprites: (name: string) => Promise<void>;
   generateCharacterSprite: (name: string, expr: Expression) => Promise<void>;
@@ -67,6 +73,14 @@ interface State {
   generateBackground: (sceneId: string) => Promise<void>;
   generateBgm: (sceneId: string, opts?: SynthOptions) => Promise<void>;
   assetUrl: (id: string | undefined) => Promise<string | undefined>;
+
+  // 외부 제작 이미지 업로드 (직접 적용)
+  importBackground: (sceneId: string, file: File) => Promise<void>;
+  importSprite: (name: string, expr: Expression, file: File) => Promise<void>;
+  importCg: (sceneId: string, index: number, file: File) => Promise<void>;
+  clearCg: (sceneId: string, index: number) => Promise<void>;
+  importMenuArt: (which: 'main' | 'game', file: File) => Promise<void>;
+  clearMenuArt: (which: 'main' | 'game') => Promise<void>;
 
   // 설정/저장
   setApiKey: (key: string) => void;
@@ -116,6 +130,24 @@ export const useStore = create<State>((set, get) => {
     setTimeout(() => {
       if (get().toast === msg) set({ toast: null });
     }, 3500);
+  };
+
+  // 외부 업로드 이미지를 에셋으로 저장하고 id 반환.
+  const uploadAsset = async (file: File, kind: AssetMeta['kind'], filename: string): Promise<string> => {
+    if (!file.type.startsWith('image/')) throw new Error('이미지 파일(PNG/JPG 등)만 업로드할 수 있습니다.');
+    const id = assetId();
+    await putAsset(id, file);
+    const meta: AssetMeta = {
+      id,
+      kind,
+      prompt: '(직접 업로드)',
+      mime: file.type,
+      source: 'upload',
+      filename,
+      createdAt: Date.now(),
+    };
+    set((s) => ({ assets: { ...s.assets, [id]: meta } }));
+    return id;
   };
 
   return {
@@ -188,6 +220,37 @@ export const useStore = create<State>((set, get) => {
     updateProjectMeta: (patch) => {
       set((s) => ({ project: { ...s.project, ...patch } }));
       autoSave();
+    },
+
+    aiThemeBusy: false,
+    generateAiTheme: async () => {
+      const { project, apiKey } = get();
+      if (project.scenes.length === 0 && !(project.mood ?? '').trim()) {
+        flash('먼저 스토리를 분석하거나 분위기를 입력하세요.');
+        return;
+      }
+      set({ aiThemeBusy: true });
+      flash(apiKey ? 'AI 테마 생성 중…' : '오프라인 테마 변형 생성 중…');
+      try {
+        const { theme, source, note } = await generateTheme({
+          project,
+          mood: project.mood,
+          apiKey: apiKey || undefined,
+        });
+        set((s) => ({ project: { ...s.project, guiTheme: theme } }));
+        autoSave();
+        const tag = source === 'ai' ? '🤖 AI' : '🎨 오프라인';
+        flash(`${tag} 테마 적용: ${theme.label}${note ? ` — ${note}` : ''}`);
+      } catch (e) {
+        flash(`테마 생성 실패: ${(e as Error).message}`);
+      } finally {
+        set({ aiThemeBusy: false });
+      }
+    },
+    clearAiTheme: () => {
+      set((s) => ({ project: { ...s.project, guiTheme: undefined } }));
+      autoSave();
+      flash('프리셋 테마로 복귀했습니다.');
     },
 
     generateCharacterSprite: async (name, expr) => {
@@ -336,6 +399,95 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    importBackground: async (sceneId, file) => {
+      const scene = get().project.scenes.find((s) => s.id === sceneId);
+      if (!scene) return;
+      try {
+        const id = await uploadAsset(file, 'background', `bg_${sceneId}.png`);
+        const prev = scene.backgroundAssetId;
+        get().updateScene(sceneId, { backgroundAssetId: id });
+        if (prev) await deleteAsset(prev).catch(() => {});
+        flash('업로드한 배경을 적용했습니다.');
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    importSprite: async (name, expr, file) => {
+      const char = get().project.characters.find((c) => c.name === name);
+      if (!char) return;
+      try {
+        const id = await uploadAsset(file, 'sprite', `sprite_${name}_${expr}.png`);
+        const prev = char.expressions[expr];
+        set((s) => ({
+          project: {
+            ...s.project,
+            characters: s.project.characters.map((c) =>
+              c.name === name ? { ...c, expressions: { ...c.expressions, [expr]: id } } : c,
+            ),
+          },
+        }));
+        if (prev) await deleteAsset(prev).catch(() => {});
+        autoSave();
+        flash(`${name} · ${expr} 입화를 업로드했습니다.`);
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    importCg: async (sceneId, index, file) => {
+      const scene = get().project.scenes.find((s) => s.id === sceneId);
+      if (!scene) return;
+      try {
+        const id = await uploadAsset(file, 'cg', `cg_${sceneId}_${index + 1}.png`);
+        const arr = [...(scene.cgAssetIds ?? [])];
+        while (arr.length <= index) arr.push('');
+        const prev = arr[index];
+        arr[index] = id;
+        get().updateScene(sceneId, { cgAssetIds: arr });
+        if (prev) await deleteAsset(prev).catch(() => {});
+        flash('업로드한 CG를 적용했습니다.');
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    clearCg: async (sceneId, index) => {
+      const scene = get().project.scenes.find((s) => s.id === sceneId);
+      if (!scene?.cgAssetIds) return;
+      const arr = [...scene.cgAssetIds];
+      const prev = arr[index];
+      arr[index] = '';
+      if (prev) await deleteAsset(prev).catch(() => {});
+      get().updateScene(sceneId, { cgAssetIds: arr });
+      flash('CG 업로드를 해제했습니다(Canvas 임시로 복귀).');
+    },
+
+    importMenuArt: async (which, file) => {
+      try {
+        const id = await uploadAsset(file, 'background', `${which === 'main' ? 'main_menu' : 'game_menu'}.png`);
+        const prev = get().project.menuArt?.[which];
+        set((s) => ({ project: { ...s.project, menuArt: { ...s.project.menuArt, [which]: id } } }));
+        if (prev) await deleteAsset(prev).catch(() => {});
+        autoSave();
+        flash(`${which === 'main' ? '메인' : '게임'} 메뉴 배경을 업로드했습니다.`);
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    clearMenuArt: async (which) => {
+      const prev = get().project.menuArt?.[which];
+      if (prev) await deleteAsset(prev).catch(() => {});
+      set((s) => {
+        const menuArt = { ...s.project.menuArt };
+        delete menuArt[which];
+        return { project: { ...s.project, menuArt } };
+      });
+      autoSave();
+      flash(`${which === 'main' ? '메인' : '게임'} 메뉴 배경 업로드를 해제했습니다(Canvas 생성으로 복귀).`);
+    },
+
     assetUrl: (id) => getAssetUrl(id ?? ''),
 
     setApiKey: (key) => {
@@ -420,9 +572,12 @@ export const useStore = create<State>((set, get) => {
       }
       try {
         flash("Ren'Py 폴더에 기록 중…");
-        const { count, folderName } = await syncProjectToFolder(project);
-        set({ folderName });
-        flash(`"${folderName}" 에 ${count}개 파일 기록 완료. Ren'Py 에서 Shift+R 로 새로고침!`);
+        const { count, parentName, projectFolder } = await syncProjectToFolder(project);
+        set({ folderName: parentName });
+        flash(
+          `"${parentName}\\${projectFolder}" 에 ${count}개 파일 기록 완료. ` +
+            `런처에서 "${projectFolder}" 프로젝트 실행 → Shift+R 새로고침!`,
+        );
       } catch (e) {
         const msg = (e as Error).message;
         if (/abort/i.test(msg)) return; // 폴더 선택 취소

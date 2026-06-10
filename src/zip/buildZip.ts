@@ -8,7 +8,9 @@ import { generateRenpyFiles } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
+import { canvasMenuArt, solidPng, buttonBgAssets } from '../generators/image/canvasMenu';
 import { synthBgm } from '../generators/audio/synthProvider';
+import { resolveTheme } from '../renpy/gui';
 
 async function blobForBackground(
   assetId: string | undefined,
@@ -83,10 +85,12 @@ export async function collectProjectFiles(
     if (!hadBg) placeholders++;
     out.push({ path: `game/images/${ref.bgFile}`, data: bg });
 
-    // CG (모델에 별도 assetId 미보관 → 항상 폴백)
+    // CG (업로드본 우선, 없으면 Canvas 임시)
     for (let j = 0; j < ref.cgFiles.length; j++) {
-      const cg = await canvasImage(s.cg[j], `CG: ${s.cg[j]}`, project.width, project.height);
-      placeholders++;
+      const upId = s.cgAssetIds?.[j];
+      const up = upId ? await getAsset(upId) : null;
+      const cg = up ?? (await canvasImage(s.cg[j], `CG: ${s.cg[j]}`, project.width, project.height));
+      if (!up) placeholders++;
       out.push({ path: `game/images/${ref.cgFiles[j]}`, data: cg });
     }
 
@@ -97,6 +101,26 @@ export async function collectProjectFiles(
       if (!hadBgm) placeholders++;
       out.push({ path: `game/audio/${ref.bgmFile}`, data: bgm });
     }
+  }
+
+  // 자체 GUI 메뉴 배경(테마별 Canvas 생성) — gui.rpy 가 참조하는 유일한 그림.
+  const theme = resolveTheme(project.genre, project.guiTheme);
+  // 업로드한 메뉴 배경이 있으면 그것을, 없으면 Canvas 생성본을 쓴다.
+  const menuArtFor = async (which: 'main' | 'game'): Promise<Blob> => {
+    const upId = project.menuArt?.[which];
+    if (upId) {
+      const up = await getAsset(upId);
+      if (up) return up;
+    }
+    placeholders += 1;
+    return canvasMenuArt(theme, project.width, project.height, which);
+  };
+  out.push({ path: 'game/gui/main_menu.png', data: await menuArtFor('main') });
+  out.push({ path: 'game/gui/game_menu.png', data: await menuArtFor('game') });
+
+  // 버튼 배경 PNG(gui.button_properties 요구) — 제네릭 prefix 세트.
+  for (const b of buttonBgAssets(theme)) {
+    out.push({ path: `game/gui/button/${b.name}`, data: await solidPng(b.color) });
   }
 
   // 한글 폰트(나눔고딕, OFL) — Ren'Py 기본 폰트는 한글 글리프가 없다.
