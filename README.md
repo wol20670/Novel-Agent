@@ -12,7 +12,9 @@
 ```
 
 - **AI 키 없이도 완전 동작**: 배경은 Canvas 임시 이미지, BGM 은 Web Audio 합성기로 오프라인 생성.
-- **OpenAI 키 입력 시**: `gpt-image-1` 으로 실제 배경 생성. 키는 브라우저(localStorage)에만 저장.
+- **OpenAI 키 입력 시**: `gpt-image-1` 으로 실제 배경·스프라이트 생성. 키는 브라우저(localStorage)에만 저장.
+- **자체 제작 풀 GUI**: 메인/게임 메뉴·저장/불러오기·설정·기록·도움말 등 전 화면을 직접 정의(외부 GUI 이미지 의존 0). 장르 프리셋 5종 + AI 테마 생성으로 작품 분위기에 맞게 룩을 전환.
+- **직접 업로드**: 외부 AI(미드저니/DALL·E 등)로 만든 이미지를 배경·스프라이트·CG·메뉴 배경 슬롯에 그대로 업로드 가능(키 불필요).
 
 ## 실행
 
@@ -34,12 +36,39 @@ npm run build    # 타입체크 + 프로덕션 빌드 (dist/)
 
 ## Ren'Py 빠른 반복 (폴더 직접 쓰기)
 
-Chrome/Edge 데스크톱에서는 **Ren'Py 탭 → "⚡ 폴더에 쓰기"** 로 프로젝트 폴더를 한 번 연결하면,
-이후 버튼 클릭만으로 생성 파일을 폴더에 직접 기록합니다(다운로드·압축풀기 불필요).
+Chrome/Edge 데스크톱에서는 **Ren'Py 탭 → "⚡ 폴더에 쓰기"** 로 **프로젝트들의 부모 폴더**(= Ren'Py
+런처의 projects 디렉터리)를 한 번 연결하면, 이후 버튼 클릭만으로 생성 파일을 직접 기록합니다(다운로드·압축풀기 불필요).
 기록 후 Ren'Py 게임 창에서 **Shift+R**(리로드)을 누르면 즉시 반영됩니다.
 
+- 기록 위치는 `<연결 폴더>/<프로젝트 제목>/game/...` — 제목별 하위 폴더로 분리되어 런처에서 프로젝트로 선택됩니다.
+- 매 동기화마다 그 프로젝트의 `game/` 을 비우고 새로 써서 **낡은 스크립트·에셋이 남지 않습니다.**
 - 폴더 핸들은 IndexedDB 에 저장되어 새로고침 후에도 재사용(권한은 첫 쓰기 때 1회 허용).
 - 미지원 브라우저는 기존 ZIP 다운로드를 사용하세요.
+
+## GUI 테마 (장르 프리셋 · AI 테마 스튜디오)
+
+내보내는 Ren'Py 프로젝트는 **자체 제작 풀 GUI**를 포함한다. 메뉴 배경 외 인터페이스는 전부 코드(Solid)
+기반이라 외부 GUI 이미지 의존이 없고, 메뉴 배경만 테마색으로 Canvas 생성된다.
+
+- **장르 프리셋 5종**: 로맨스 · 공포 · SF · 스릴러 · 일상. 좌측 **프로젝트 설정 → GUI 테마**에서 선택하면
+  메인/게임 메뉴·대사창·색·전환이 장르에 맞게 바뀐다.
+- **AI 테마 스튜디오**: 분위기/요청을 입력하고 **✨ AI 테마 생성** → 스토리·장르 기반으로 팔레트·메뉴 아트
+  스타일·전환을 생성한다.
+  - 핵심: AI 는 **테마 데이터(JSON)만** 출력하고, 결정적 컴파일러가 항상 유효한 `gui.rpy`/`screens.rpy` 로
+    변환한다. 명암대비를 강제 보정해 **가독성을 보장**한다.
+  - **키 없이도 동작**: 스토리·분위기 시드로 프리셋을 변형해 적용. OpenAI 키를 넣으면 더 정교한 생성으로 업그레이드.
+  - "프리셋" 버튼으로 언제든 장르 기본값 복귀.
+
+## 에셋 · UI 업로드 (외부 제작 이미지 직접 적용)
+
+외부 생성형 AI 로 만든 이미지를 각 슬롯에 그대로 업로드할 수 있다(키 불필요). 키로 생성하는 방식과 **공존**한다.
+
+- **배경**: 미리보기 패널 / 에셋 탭 배경 행의 **↥ 업로드**
+- **캐릭터 스프라이트**: 에셋 탭 표정 썸네일에 마우스를 올리면 나오는 **↥** (표정별 개별 업로드)
+- **CG**: 에셋 탭 **🎬 CG 컷** 섹션에서 컷별 업로드
+- **메뉴 배경(UI 스킨)**: 좌측 **AI 테마 스튜디오 → 메뉴 배경 직접 업로드**(메인/게임). 해제 시 Canvas 생성으로 복귀.
+
+업로드 에셋은 IndexedDB 에 저장되어 ZIP·폴더쓰기·`.npproj.zip` 내보내기에 모두 포함되고, 새로고침 후에도 유지된다.
 
 ## 입력 포맷
 
@@ -83,12 +112,14 @@ A열 = 화자 이름, B열 = 대사 · 지문 · 태그.
 | 영역 | 모듈 |
 |---|---|
 | 파싱 | `src/parser/` — 텍스트/엑셀 → 공통 `Scene[]` (`sceneBuilder` 공유) |
-| 이미지 | `src/generators/image/` — 어댑터(키 있으면 OpenAI, 없으면 Canvas) |
+| 이미지 | `src/generators/image/` — 어댑터(키 있으면 OpenAI, 없으면 Canvas) + 메뉴/버튼 아트(`canvasMenu`) |
 | 오디오 | `src/generators/audio/` — Web Audio 무드 합성 → WAV |
+| GUI 테마 | `src/renpy/gui/` — `GuiTheme` → `gui.rpy`/`screens.rpy` 컴파일러(프리셋 5종, zero-PNG) |
+| AI 테마 | `src/generators/theme/` — 색·대비(WCAG) · 빌더 · OpenAI JSON · 오케스트레이터 |
 | Ren'Py | `src/renpy/` — 승인 장면 → `.rpy` 파일 집합 (label/menu/jump) |
-| ZIP | `src/zip/buildZip.ts` — JSZip, 미생성 에셋은 폴백으로 자동 채움 |
+| ZIP | `src/zip/buildZip.ts` — JSZip, 미생성 에셋은 폴백으로 자동 채움(업로드본 우선) |
 | 저장 | `src/storage/` — 메타=localStorage, 바이너리=IndexedDB |
-| 이동 | `src/project/transfer.ts` — 프로젝트 내보내기/가져오기 (`.npproj.zip`) |
+| 이동/폴더 | `src/project/transfer.ts`(`.npproj.zip`) · `folderSync.ts`(폴더 직접 쓰기) |
 | 상태 | `src/store.ts` — zustand |
 
 > AI 호출은 모두 어댑터로 추상화되어 있어, 추후 **백엔드 프록시(SaaS 과금)** 나
@@ -97,16 +128,27 @@ A열 = 화자 이름, B열 = 대사 · 지문 · 태그.
 ## 검증 (순수 로직)
 
 ```bash
-npx tsx scripts/verify.ts        # 샘플 파싱 → Ren'Py 스크립트(분기/점프) 생성 검증
-npx tsx scripts/verify-excel.ts  # 엑셀 A/B열 파싱 검증
+npx tsx scripts/verify.ts          # 샘플 파싱 → Ren'Py 스크립트(분기/점프) 생성 검증
+npx tsx scripts/verify-excel.ts    # 엑셀 A/B열 파싱 검증
+npx tsx scripts/gen-lint.ts <장르> ["분위기"]   # 테마 적용 프로젝트 생성(이미지 스텁) → Ren'Py lint 용
+npx tsx scripts/build-zip.ts <장르>             # 실제 생성기(헤드리스)로 ZIP 빌드 + 폴더 풀기
+npx tsx scripts/preview-menus.ts   # 5종 장르 메뉴 미리보기 PNG (.preview/)
 ```
 
+> Ren'Py `lint` 는 DynamicImage(버튼/Frame) 누락이나 런타임 화면 오류를 못 잡는다. GUI 변경 시
+> `renpy.exe <proj> test <testcase>` 로 메뉴·인게임을 실제로 클릭하는 런타임 스모크 테스트를 권장.
+
 ## 상업 배포 전 체크
-- Canvas 임시 배경 / 합성 BGM 은 **테스트용**. 정식 일러스트·BGM·SFX 로 교체.
+- Canvas 임시 배경 / 합성 BGM / Canvas 메뉴 배경 은 **테스트용**. 정식 일러스트·BGM·SFX 로 교체(또는 직접 업로드).
 - 폰트 라이선스(OFL 등) 확인.
 - 실제 Windows 환경에서 Ren'Py 빌드 테스트.
 
 ## 로드맵 (v1 이후)
-- AI 음악 provider 연결 (현재 합성기만 / 어댑터 자리 확보됨)
-- 캐릭터 스프라이트 일관성: 기본표정 1장 → edit 레퍼런스로 표정 변형
-- Electron 래퍼(.exe) / 백엔드 과금(SaaS)
+- [x] 자체 제작 풀 GUI (장르 프리셋 5종, zero-PNG, lint+런타임 검증)
+- [x] AI/오프라인 적응형 테마 생성 (대비 보정·스키마 제약)
+- [x] 외부 제작 이미지 업로드 (배경·스프라이트·CG·메뉴 배경)
+- [ ] 에셋 생성 시 프롬프트 개입 창 (최종 프롬프트 편집)
+- [ ] 장르별 폰트 번들 + AI 폰트 선택
+- [ ] 이미지 모델로 메뉴/프레임 GUI 아트 생성
+- [ ] AI 음악 provider 연결 (현재 합성기만 / 어댑터 자리 확보됨)
+- [ ] 캐릭터 스프라이트 일관성 / Electron 래퍼(.exe) / 백엔드 과금(SaaS)
