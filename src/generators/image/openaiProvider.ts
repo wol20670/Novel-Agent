@@ -22,6 +22,8 @@ export interface OpenAIImageOpts {
   height: number;
   model?: string;
   quality?: 'low' | 'medium' | 'high' | 'auto';
+  /** 투명 배경(캐릭터 스프라이트용). gpt-image-1 의 background 파라미터. */
+  transparent?: boolean;
 }
 
 export async function openaiImage(prompt: string, opts: OpenAIImageOpts): Promise<Blob> {
@@ -37,6 +39,7 @@ export async function openaiImage(prompt: string, opts: OpenAIImageOpts): Promis
       n: 1,
       size: normalizeSize(opts.width, opts.height),
       quality: opts.quality ?? 'medium',
+      ...(opts.transparent ? { background: 'transparent' } : {}),
     }),
   });
 

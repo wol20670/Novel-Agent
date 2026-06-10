@@ -1,12 +1,55 @@
 // 승인된 장면들로 Ren'Py 프로젝트 파일 집합을 생성한다.
 // 파일 본문(텍스트)만 만들고, 바이너리 에셋(PNG/WAV)은 zip 빌더가 채운다.
 
-import type { Project, Scene, Character } from '../types';
+import type { Project, Scene, Character, Expression } from '../types';
 import { SlugMap } from './slug';
 
 export interface RenpyFile {
   path: string; // game/ 이하 경로
   content: string;
+}
+
+/** 한글 표정 → Ren'Py 이미지 속성(ASCII). 이미지 attribute 는 ASCII 가 안전. */
+export const EXPR_ATTR: Record<Expression, string> = {
+  기본: 'neutral',
+  기쁨: 'happy',
+  슬픔: 'sad',
+  화남: 'angry',
+  놀람: 'surprised',
+  수줍음: 'shy',
+};
+
+export interface SpriteRef {
+  charId: string; // c_1 …
+  charName: string;
+  expr: Expression;
+  attr: string; // neutral/happy/…
+  file: string; // sprite_c_1_happy.png
+  assetId: string;
+}
+
+/** 캐릭터 이름 → 안정적 Ren'Py 식별자. project.characters 순서로 발급(스프라이트와 공유). */
+export function charIdMap(project: Project): Map<string, string> {
+  const slug = new SlugMap('c');
+  const m = new Map<string, string>();
+  for (const c of project.characters) m.set(c.name, slug.get(c.name));
+  return m;
+}
+
+/** 생성된 캐릭터 스프라이트(표정별 assetId 보유)만 추려 ref 로 반환. */
+export function resolveSprites(project: Project, ids: Map<string, string>): SpriteRef[] {
+  const out: SpriteRef[] = [];
+  for (const c of project.characters) {
+    const charId = ids.get(c.name);
+    if (!charId) continue;
+    for (const expr of Object.keys(c.expressions) as Expression[]) {
+      const assetId = c.expressions[expr];
+      if (!assetId) continue;
+      const attr = EXPR_ATTR[expr] ?? 'neutral';
+      out.push({ charId, charName: c.name, expr, attr, file: `sprite_${charId}_${attr}.png`, assetId });
+    }
+  }
+  return out;
 }
 
 /** 승인 장면에 부여되는 결정적 에셋 이름(ordinal 기반). zip 빌더와 규칙을 공유한다. */
@@ -57,17 +100,16 @@ function makeResolver(refs: SceneAssetRef[]) {
   };
 }
 
-function characterDefs(project: Project, charSlug: SlugMap): string {
+function characterDefs(project: Project, ids: Map<string, string>): string {
   const lines = ['# 자동 생성: 캐릭터 정의', ''];
   for (const c of project.characters) {
-    const id = charSlug.get(c.name);
-    lines.push(`define ${id} = Character("${esc(c.name)}", color="${c.color}")`);
+    lines.push(`define ${ids.get(c.name)} = Character("${esc(c.name)}", color="${c.color}")`);
   }
   if (project.characters.length === 0) lines.push('# (등장 캐릭터 없음)');
   return lines.join('\n') + '\n';
 }
 
-function assetDefs(refs: SceneAssetRef[]): string {
+function assetDefs(refs: SceneAssetRef[], sprites: SpriteRef[]): string {
   const lines = ['# 자동 생성: 이미지·오디오 에셋 정의', ''];
   for (const r of refs) {
     lines.push(`image ${r.bgTag} = "images/${r.bgFile}"`);
@@ -75,11 +117,40 @@ function assetDefs(refs: SceneAssetRef[]): string {
       lines.push(`image ${tag} = "images/${r.cgFiles[j]}"`);
     });
   }
+  if (sprites.length) {
+    lines.push('', '# 캐릭터 스프라이트');
+    for (const sp of sprites) {
+      lines.push(`image ${sp.charId} ${sp.attr} = "images/${sp.file}"`);
+    }
+  }
   return lines.join('\n') + '\n';
 }
 
-function scriptBody(refs: SceneAssetRef[], charSlug: SlugMap): string {
+const POSITIONS = ['left', 'right', 'center'];
+
+/** 한 장면 안에서 말하는 캐릭터들에게 등장 위치를 배정. 1명이면 center. */
+function scenePositions(scene: Scene, ids: Map<string, string>): Map<string, string> {
+  const order: string[] = [];
+  for (const line of scene.lines) {
+    if (line.kind !== 'dialogue') continue;
+    const id = ids.get(line.speaker);
+    if (id && !order.includes(id)) order.push(id);
+  }
+  const pos = new Map<string, string>();
+  if (order.length === 1) {
+    pos.set(order[0], 'center');
+  } else {
+    order.forEach((id, i) => pos.set(id, POSITIONS[i] ?? 'center'));
+  }
+  return pos;
+}
+
+function scriptBody(refs: SceneAssetRef[], ids: Map<string, string>, sprites: SpriteRef[]): string {
   const resolve = makeResolver(refs);
+  const spritesByChar = new Map<string, SpriteRef[]>();
+  for (const sp of sprites) {
+    (spritesByChar.get(sp.charId) ?? spritesByChar.set(sp.charId, []).get(sp.charId)!).push(sp);
+  }
   const out: string[] = [];
   out.push('# 자동 생성: 메인 스크립트', '');
   out.push('label start:');
@@ -89,6 +160,7 @@ function scriptBody(refs: SceneAssetRef[], charSlug: SlugMap): string {
 
   for (const r of refs) {
     const s = r.scene;
+    const pos = scenePositions(s, ids);
     out.push(`# ── ${s.title} ──`);
     out.push(`label ${r.label}:`);
     out.push(`${indent(1)}scene ${r.bgTag} with fade`);
@@ -99,7 +171,16 @@ function scriptBody(refs: SceneAssetRef[], charSlug: SlugMap): string {
 
     for (const line of s.lines) {
       if (line.kind === 'dialogue') {
-        const id = charSlug.get(line.speaker);
+        const id = ids.get(line.speaker)!;
+        // 스프라이트가 있으면 화자 등장(표정 반영)
+        const owned = spritesByChar.get(id);
+        if (owned && owned.length) {
+          const want = line.emotion ? EXPR_ATTR[line.emotion as Expression] : undefined;
+          const attr =
+            (want && owned.some((o) => o.attr === want) && want) ||
+            (owned.some((o) => o.attr === 'neutral') ? 'neutral' : owned[0].attr);
+          out.push(`${indent(1)}show ${id} ${attr} at ${pos.get(id) ?? 'center'}`);
+        }
         out.push(`${indent(1)}${id} "${esc(line.text)}"`);
       } else {
         out.push(`${indent(1)}"${esc(line.text)}"`);
@@ -241,18 +322,20 @@ const README = `# Ren'Py 프로젝트 (Novel-Agent 자동 생성)
 export function generateRenpyFiles(project: Project): {
   files: RenpyFile[];
   refs: SceneAssetRef[];
+  sprites: SpriteRef[];
   characters: Character[];
 } {
   const refs = resolveSceneAssets(project);
-  const charSlug = new SlugMap('c');
+  const ids = charIdMap(project);
+  const sprites = resolveSprites(project, ids);
 
   const files: RenpyFile[] = [
-    { path: 'game/script.rpy', content: scriptBody(refs, charSlug) },
-    { path: 'game/characters.rpy', content: characterDefs(project, charSlug) },
-    { path: 'game/assets.rpy', content: assetDefs(refs) },
+    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites) },
+    { path: 'game/characters.rpy', content: characterDefs(project, ids) },
+    { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
     { path: 'game/screens.rpy', content: SCREENS_RPY },
     { path: 'README.md', content: README },
   ];
-  return { files, refs, characters: project.characters };
+  return { files, refs, sprites, characters: project.characters };
 }

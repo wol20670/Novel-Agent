@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
-import { emptyProject } from './types';
+import { emptyProject, EXPRESSIONS } from './types';
 import { parseText, parseWorkbook } from './parser';
-import { generateImage, buildBackgroundPrompt } from './generators/image';
+import { generateImage, generateSprite, buildBackgroundPrompt } from './generators/image';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
 import {
@@ -56,8 +56,12 @@ interface State {
 
   // 프로젝트 메타
   updateProjectMeta: (patch: Partial<Project>) => void;
-  setCharacterExpression: (name: string, expr: Expression) => void;
   updateCharacter: (name: string, patch: Partial<Character>) => void;
+
+  // 캐릭터 스프라이트 (표정별 입화)
+  generateCharacterSprites: (name: string) => Promise<void>;
+  generateCharacterSprite: (name: string, expr: Expression) => Promise<void>;
+  clearCharacterSprites: (name: string) => Promise<void>;
 
   // 에셋 생성
   generateBackground: (sceneId: string) => Promise<void>;
@@ -186,16 +190,71 @@ export const useStore = create<State>((set, get) => {
       autoSave();
     },
 
-    setCharacterExpression: (name, expr) => {
+    generateCharacterSprite: async (name, expr) => {
+      const char = get().project.characters.find((c) => c.name === name);
+      if (!char) return;
+      const key = `sprite:${name}`;
+      set((s) => ({ busy: { ...s.busy, [key]: true } }));
+      try {
+        const { blob, source } = await generateSprite({
+          name,
+          expression: expr,
+          color: char.color,
+          apiKey: get().apiKey,
+        });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'sprite',
+          prompt: `${name} ${expr}`,
+          mime: 'image/png',
+          source,
+          filename: `sprite_${name}_${expr}.png`,
+          createdAt: Date.now(),
+        };
+        const prev = char.expressions[expr];
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            characters: s.project.characters.map((c) =>
+              c.name === name ? { ...c, expressions: { ...c.expressions, [expr]: id } } : c,
+            ),
+          },
+        }));
+        if (prev) await deleteAsset(prev).catch(() => {});
+        autoSave();
+      } catch (e) {
+        flash(`스프라이트 생성 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [key]: false } }));
+      }
+    },
+
+    generateCharacterSprites: async (name) => {
+      for (const expr of EXPRESSIONS) {
+        await get().generateCharacterSprite(name, expr);
+      }
+      flash(`${name} 스프라이트 ${EXPRESSIONS.length}종 생성 완료.`);
+    },
+
+    clearCharacterSprites: async (name) => {
+      const char = get().project.characters.find((c) => c.name === name);
+      if (!char) return;
+      for (const id of Object.values(char.expressions)) {
+        if (id) await deleteAsset(id).catch(() => {});
+      }
       set((s) => ({
         project: {
           ...s.project,
           characters: s.project.characters.map((c) =>
-            c.name === name ? { ...c, expressions: { ...c.expressions, [expr]: expr } } : c,
+            c.name === name ? { ...c, expressions: {} } : c,
           ),
         },
       }));
       autoSave();
+      flash(`${name} 스프라이트를 비웠습니다.`);
     },
 
     updateCharacter: (name, patch) => {

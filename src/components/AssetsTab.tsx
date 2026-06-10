@@ -15,9 +15,10 @@ export default function AssetsTab() {
   return (
     <div className="flex flex-col gap-7 max-w-3xl mx-auto">
       <section>
-        <h3 className="section-title mb-1">🧑‍🎨 캐릭터 표정 세트</h3>
+        <h3 className="section-title mb-1">🧑‍🎨 캐릭터 스프라이트</h3>
         <p className="text-xs text-gray-500 mb-3">
-          표정 세트를 선택해 ZIP 정의에 반영합니다. (스프라이트 이미지 생성은 일관성 이슈로 추후 추가 예정)
+          표정별 입화를 생성합니다. 키 없으면 Canvas 임시 입화(투명 PNG). 대본에서{' '}
+          <code className="text-accent">이름(기쁨): 대사</code> 처럼 적으면 그 표정으로 등장합니다.
         </p>
         {characters.length === 0 && <p className="text-gray-600 text-sm">등장 캐릭터 없음</p>}
         <div className="grid grid-cols-2 gap-3">
@@ -50,8 +51,13 @@ export default function AssetsTab() {
 
 function CharacterCard({ name }: { name: string }) {
   const c = useStore((s) => s.project.characters.find((x) => x.name === name))!;
-  const setExpr = useStore((s) => s.setCharacterExpression);
   const updateChar = useStore((s) => s.updateCharacter);
+  const genAll = useStore((s) => s.generateCharacterSprites);
+  const genOne = useStore((s) => s.generateCharacterSprite);
+  const clearAll = useStore((s) => s.clearCharacterSprites);
+  const busy = useStore((s) => s.busy[`sprite:${name}`]);
+  const hasAny = EXPRESSIONS.some((ex) => c.expressions[ex as Expression]);
+
   return (
     <div className="card border-edge p-3">
       <div className="flex items-center gap-2 mb-2.5">
@@ -59,27 +65,58 @@ function CharacterCard({ name }: { name: string }) {
           type="color"
           value={c.color}
           onChange={(e) => updateChar(name, { color: e.target.value })}
-          className="w-6 h-6 rounded border border-edge bg-transparent"
+          className="w-6 h-6 rounded border border-edge bg-transparent shrink-0"
         />
-        <span className="font-semibold text-sm" style={{ color: c.color }}>
+        <span className="font-semibold text-sm flex-1 truncate" style={{ color: c.color }}>
           {name}
         </span>
+        <button className="btn-primary !px-2 !py-1 text-xs" disabled={busy} onClick={() => genAll(name)}>
+          {busy ? <Spinner /> : hasAny ? '전체 재생성' : '스프라이트 생성'}
+        </button>
       </div>
-      <div className="flex flex-wrap gap-1">
-        {EXPRESSIONS.map((ex) => {
-          const on = !!c.expressions[ex as Expression];
-          return (
-            <button
-              key={ex}
-              onClick={() => setExpr(name, ex as Expression)}
-              className={`chip ${on ? 'border-accent text-accent bg-accent2/20' : 'border-edge text-gray-500 hover:text-gray-300'}`}
-            >
-              {ex}
-            </button>
-          );
-        })}
+      <div className="grid grid-cols-3 gap-1.5">
+        {EXPRESSIONS.map((ex) => (
+          <ExpressionThumb key={ex} name={name} expr={ex as Expression} busy={!!busy} onGen={() => genOne(name, ex as Expression)} />
+        ))}
       </div>
+      {hasAny && (
+        <button className="text-[11px] text-gray-500 hover:text-rose-600 mt-2" onClick={() => clearAll(name)}>
+          스프라이트 비우기
+        </button>
+      )}
     </div>
+  );
+}
+
+function ExpressionThumb({
+  name,
+  expr,
+  busy,
+  onGen,
+}: {
+  name: string;
+  expr: Expression;
+  busy: boolean;
+  onGen: () => void;
+}) {
+  const assetId = useStore((s) => s.project.characters.find((x) => x.name === name)?.expressions[expr]);
+  const url = useAssetUrl(assetId);
+  return (
+    <button
+      onClick={onGen}
+      disabled={busy}
+      title={`${expr} ${url ? '재생성' : '생성'}`}
+      className="relative aspect-[3/4] rounded-lg border border-edge bg-ink overflow-hidden flex items-center justify-center group"
+    >
+      {url ? (
+        <img src={url} className="w-full h-full object-contain" />
+      ) : (
+        <span className="text-[10px] text-gray-500">{expr}</span>
+      )}
+      <span className="absolute bottom-0 inset-x-0 bg-black/45 text-white text-[9px] py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        {expr}
+      </span>
+    </button>
   );
 }
 

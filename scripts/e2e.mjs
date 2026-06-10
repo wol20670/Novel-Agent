@@ -56,13 +56,27 @@ try {
   assert(true, 'BGM 오디오(blob) 생성·표시');
   await page.screenshot({ path: join(shotDir, '2-generated.png'), fullPage: true });
 
+  // 4.5) 에셋 탭 — 첫 캐릭터 스프라이트 생성 (Canvas 임시 입화)
+  await page.getByRole('button', { name: /^🎨 에셋$/ }).click();
+  await page.waitForTimeout(300);
+  const before = await page.locator('img[src^="blob:"]').count();
+  await page.getByRole('button', { name: /스프라이트 생성/ }).first().click();
+  await page.waitForFunction(
+    (n) => document.querySelectorAll('img[src^="blob:"]').length > n,
+    before,
+    { timeout: 20000 },
+  );
+  assert(true, '캐릭터 스프라이트(Canvas) 생성·표시');
+  await page.screenshot({ path: join(shotDir, '4-sprites.png'), fullPage: true });
+
   // 5) Ren'Py 탭 — 스크립트 내용 확인
   await page.getByRole('button', { name: /Ren'Py/ }).click();
   await page.waitForTimeout(300);
   const pre = await page.locator('pre').first().innerText();
-  log('  --- script.rpy 앞부분 ---\n' + pre.split('\n').slice(0, 12).map((l) => '    ' + l).join('\n'));
+  log('  --- script.rpy 앞부분 ---\n' + pre.split('\n').slice(0, 14).map((l) => '    ' + l).join('\n'));
   assert(/label scene_1\b/.test(pre), "script.rpy 에 label scene_1 존재");
   assert(/menu:/.test(pre), 'script.rpy 에 menu 블록 존재');
+  assert(/show c_\d+ \w+ at /.test(pre), 'script.rpy 에 캐릭터 show 문 존재');
   await page.screenshot({ path: join(shotDir, '3-renpy.png'), fullPage: true });
 
   // 6) ZIP 생성 → 다운로드 → 내용물 검증
@@ -86,6 +100,7 @@ try {
   assert(names.includes('game/options.rpy'), 'ZIP: game/options.rpy');
   assert(names.includes('game/screens.rpy'), 'ZIP: game/screens.rpy (최소 자립형 화면)');
   assert(names.includes('game/fonts/NanumGothic.ttf'), 'ZIP: 한글 폰트(나눔고딕) 포함');
+  assert(names.some((n) => n.startsWith('game/images/sprite_') && n.endsWith('.png')), 'ZIP: 캐릭터 스프라이트 PNG 포함');
   assert(names.some((n) => n.startsWith('game/images/bg_') && n.endsWith('.png')), 'ZIP: 배경 PNG 포함');
   assert(names.some((n) => n.startsWith('game/audio/bgm_') && n.endsWith('.wav')), 'ZIP: BGM WAV 포함');
 

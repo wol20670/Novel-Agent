@@ -1,7 +1,8 @@
 // 텍스트/엑셀 파서가 공유하는 장면 누적기.
 // 두 파서 모두 (화자, 본문) 형태의 "행"으로 정규화한 뒤 이 빌더에 흘려보낸다.
 
-import type { Scene, Choice, Character } from '../types';
+import type { Scene, Choice, Character, Expression } from '../types';
+import { EXPRESSIONS } from '../types';
 
 const PALETTE = [
   '#9fd3ff', '#ffb3c7', '#c8ffc8', '#ffe5a3',
@@ -58,9 +59,18 @@ export class SceneBuilder {
 
   addDialogue(speaker: string, text: string, emotion?: string) {
     const sc = this.ensureScene();
-    const name = speaker.trim();
+    // "이름(표정)" 형태에서 표정 추출. 괄호는 반각/전각 모두 허용.
+    let name = speaker.trim();
+    let emo = emotion;
+    const m = name.match(/^(.+?)\s*[(（]\s*(.+?)\s*[)）]\s*$/);
+    if (m) {
+      name = m[1].trim();
+      emo = m[2].trim();
+    }
+    const valid =
+      emo && (EXPRESSIONS as readonly string[]).includes(emo) ? (emo as Expression) : undefined;
     this.speakers.add(name);
-    sc.lines.push({ kind: 'dialogue', speaker: name, text: text.trim(), emotion });
+    sc.lines.push({ kind: 'dialogue', speaker: name, text: text.trim(), emotion: valid });
   }
 
   addNarration(text: string) {

@@ -7,6 +7,7 @@ import type { Project } from '../types';
 import { generateRenpyFiles } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
+import { canvasSprite } from '../generators/image/canvasSprite';
 import { synthBgm } from '../generators/audio/synthProvider';
 
 async function blobForBackground(
@@ -52,10 +53,21 @@ export interface ProjectFile {
 export async function collectProjectFiles(
   project: Project,
 ): Promise<{ files: ProjectFile[]; placeholders: number }> {
-  const { files: textFiles, refs } = generateRenpyFiles(project);
+  const { files: textFiles, refs, sprites } = generateRenpyFiles(project);
   const out: ProjectFile[] = textFiles.map((f) => ({ path: f.path, data: f.content }));
 
   let placeholders = 0;
+
+  // 캐릭터 스프라이트 (생성된 assetId → blob, 없으면 Canvas 폴백)
+  for (const sp of sprites) {
+    let blob = await getAsset(sp.assetId);
+    if (!blob) {
+      const color = project.characters.find((c) => c.name === sp.charName)?.color ?? '#9fd3ff';
+      blob = await canvasSprite(sp.charName, sp.expr, color);
+      placeholders++;
+    }
+    out.push({ path: `game/images/${sp.file}`, data: blob });
+  }
   for (const ref of refs) {
     const s = ref.scene;
 
