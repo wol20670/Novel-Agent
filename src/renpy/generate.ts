@@ -109,16 +109,27 @@ export function resolveSprites(
   return out;
 }
 
-/** 승인 장면에 부여되는 결정적 에셋 이름(ordinal 기반). zip 빌더와 규칙을 공유한다. */
+/** 승인 장면의 에셋 참조. 배경/BGM/CG 는 "이름(의미)" 기준으로 공유된다(같은 이름 = 같은 파일). */
 export interface SceneAssetRef {
   scene: Scene;
   ordinal: number; // 1-based, 승인 장면 순서
-  label: string;
-  bgTag: string; // 배경 이미지 태그/파일베이스 (bg_1)
+  label: string; // scene_1 (장면은 고유)
+  bgTag: string; // 배경 이미지 태그 — 같은 배경 이름이면 동일 (bg_1)
   bgFile: string; // bg_1.png
-  bgmFile?: string; // bgm_1.wav (BGM 지정 시)
-  cgTags: string[]; // cg_1_1 ...
-  cgFiles: string[]; // cg_1_1.png ...
+  bgmFile?: string; // bgm_1.wav (BGM 지정 시, 같은 BGM 이름이면 동일)
+  cgTags: string[]; // 같은 CG 설명이면 동일
+  cgFiles: string[];
+}
+
+/** 에셋 공유 키 — 같은 키를 가진 장면들은 같은 배경/BGM/CG 파일을 공유한다. */
+export function backgroundKey(s: Scene): string {
+  return (s.background || s.title).trim();
+}
+export function bgmKey(s: Scene): string {
+  return (s.bgm || s.title).trim();
+}
+export function hasBgm(s: Scene): boolean {
+  return !!(s.bgm || s.bgmAssetId);
 }
 
 const indent = (n: number) => '    '.repeat(n);
@@ -127,19 +138,28 @@ function esc(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ').trim();
 }
 
-/** 승인 장면 + 결정적 에셋 이름을 계산. zip 빌더가 동일 함수로 파일명을 안다. */
+/**
+ * 승인 장면 + 에셋 이름을 계산. 배경/BGM/CG 태그는 "이름" 기준 SlugMap 으로 발급되어
+ * 같은 이름을 쓰는 여러 장면이 **같은 파일을 공유**한다(생성 1회 + 시각 일관성).
+ * zip 빌더가 동일 함수로 파일명을 안다.
+ */
 export function resolveSceneAssets(project: Project): SceneAssetRef[] {
   const approved = project.scenes.filter((s) => s.status === 'approved');
+  const bgSlugs = new SlugMap('bg');
+  const bgmSlugs = new SlugMap('bgm');
+  const cgSlugs = new SlugMap('cg');
   return approved.map((scene, i) => {
     const ordinal = i + 1;
-    const cgTags = scene.cg.map((_, j) => `cg_${ordinal}_${j + 1}`);
+    const bgTag = bgSlugs.get(backgroundKey(scene));
+    const bgmTag = hasBgm(scene) ? bgmSlugs.get(bgmKey(scene)) : undefined;
+    const cgTags = scene.cg.map((desc) => cgSlugs.get(desc.trim() || `${scene.title}_cg`));
     return {
       scene,
       ordinal,
       label: `scene_${ordinal}`,
-      bgTag: `bg_${ordinal}`,
-      bgFile: `bg_${ordinal}.png`,
-      bgmFile: scene.bgm || scene.bgmAssetId ? `bgm_${ordinal}.wav` : undefined,
+      bgTag,
+      bgFile: `${bgTag}.png`,
+      bgmFile: bgmTag ? `${bgmTag}.wav` : undefined,
       cgTags,
       cgFiles: cgTags.map((t) => `${t}.png`),
     };
@@ -168,9 +188,16 @@ function characterDefs(project: Project, ids: Map<string, string>): string {
 
 function assetDefs(refs: SceneAssetRef[], sprites: SpriteRef[]): string {
   const lines = ['# 자동 생성: 이미지·오디오 에셋 정의', ''];
+  // 공유 태그는 1회만 정의(같은 이름 배경/CG 가 여러 장면에 쓰여도 image 선언은 하나).
+  const seen = new Set<string>();
   for (const r of refs) {
-    lines.push(`image ${r.bgTag} = "images/${r.bgFile}"`);
+    if (!seen.has(r.bgTag)) {
+      seen.add(r.bgTag);
+      lines.push(`image ${r.bgTag} = "images/${r.bgFile}"`);
+    }
     r.cgTags.forEach((tag, j) => {
+      if (seen.has(tag)) return;
+      seen.add(tag);
       lines.push(`image ${tag} = "images/${r.cgFiles[j]}"`);
     });
   }

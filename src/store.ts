@@ -16,6 +16,7 @@ import { SAMPLE_STORY } from './sample';
 import { exportProjectFile, importProjectFile } from './project/transfer';
 import { downloadBlob } from './zip/buildZip';
 import { generateTheme } from './generators/theme';
+import { backgroundKey, bgmKey } from './renpy/generate';
 import {
   isFolderSyncSupported,
   connectProjectFolder,
@@ -356,11 +357,30 @@ export const useStore = create<State>((set, get) => {
           filename: `bg_${sceneId}.png`,
           createdAt: Date.now(),
         };
-        const prev = scene.backgroundAssetId;
-        set((s) => ({ assets: { ...s.assets, [id]: meta } }));
-        get().updateScene(sceneId, { backgroundAssetId: id });
-        if (prev) await deleteAsset(prev).catch(() => {});
-        flash(source === 'openai' ? 'OpenAI 배경을 생성했습니다.' : '임시 배경(Canvas)을 생성했습니다.');
+        // 같은 배경 이름을 쓰는 모든 장면에 함께 적용(생성 1회 = 일관성 + 비용 절감).
+        const key = backgroundKey(scene);
+        const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === key);
+        const prevs = new Set(
+          targets.map((t) => t.backgroundAssetId).filter((x): x is string => !!x && x !== id),
+        );
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) =>
+              backgroundKey(sc) === key ? { ...sc, backgroundAssetId: id } : sc,
+            ),
+          },
+        }));
+        autoSave();
+        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        flash(
+          targets.length > 1
+            ? `'${key}' 배경을 ${targets.length}개 장면에 적용했습니다.`
+            : source === 'openai'
+              ? 'OpenAI 배경을 생성했습니다.'
+              : '임시 배경(Canvas)을 생성했습니다.',
+        );
       } catch (e) {
         flash(`배경 생성 실패: ${(e as Error).message}`);
       } finally {
@@ -387,11 +407,30 @@ export const useStore = create<State>((set, get) => {
           filename: `bgm_${sceneId}.wav`,
           createdAt: Date.now(),
         };
-        const prev = scene.bgmAssetId;
-        set((s) => ({ assets: { ...s.assets, [id]: meta } }));
-        get().updateScene(sceneId, { bgmAssetId: id, bgm: scene.bgm || scene.title });
-        if (prev) await deleteAsset(prev).catch(() => {});
-        flash(`BGM 생성 완료 (${moodName}).`);
+        // 같은 BGM 이름을 쓰는 모든 장면에 함께 적용.
+        const key = bgmKey(scene);
+        const targets = get().project.scenes.filter((sc) => bgmKey(sc) === key);
+        const prevs = new Set(
+          targets.map((t) => t.bgmAssetId).filter((x): x is string => !!x && x !== id),
+        );
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) =>
+              bgmKey(sc) === key
+                ? { ...sc, bgmAssetId: id, ...(sc.id === sceneId ? { bgm: scene.bgm || scene.title } : {}) }
+                : sc,
+            ),
+          },
+        }));
+        autoSave();
+        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        flash(
+          targets.length > 1
+            ? `'${key}' BGM을 ${targets.length}개 장면에 적용했습니다.`
+            : `BGM 생성 완료 (${moodName}).`,
+        );
       } catch (e) {
         flash(`BGM 생성 실패: ${(e as Error).message}`);
       } finally {
@@ -404,10 +443,26 @@ export const useStore = create<State>((set, get) => {
       if (!scene) return;
       try {
         const id = await uploadAsset(file, 'background', `bg_${sceneId}.png`);
-        const prev = scene.backgroundAssetId;
-        get().updateScene(sceneId, { backgroundAssetId: id });
-        if (prev) await deleteAsset(prev).catch(() => {});
-        flash('업로드한 배경을 적용했습니다.');
+        const key = backgroundKey(scene);
+        const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === key);
+        const prevs = new Set(
+          targets.map((t) => t.backgroundAssetId).filter((x): x is string => !!x && x !== id),
+        );
+        set((s) => ({
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) =>
+              backgroundKey(sc) === key ? { ...sc, backgroundAssetId: id } : sc,
+            ),
+          },
+        }));
+        autoSave();
+        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        flash(
+          targets.length > 1
+            ? `업로드한 배경을 ${targets.length}개 장면에 적용했습니다.`
+            : '업로드한 배경을 적용했습니다.',
+        );
       } catch (e) {
         flash((e as Error).message);
       }

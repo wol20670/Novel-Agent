@@ -70,37 +70,61 @@ export async function collectProjectFiles(
     }
     out.push({ path: `game/images/${sp.file}`, data: blob });
   }
+  // 배경/BGM/CG 는 "이름" 기준으로 공유되므로, 파일 1개당 1회만 생성한다.
+  // (같은 파일을 여러 장면이 참조 → 800장면이라도 고유 배경 수만큼만 생성/포함)
+  // assetId 가 있는 장면을 대표로 우선 선택(실제 생성/업로드본 사용).
+  interface AssetPick {
+    assetId?: string;
+    prompt: string;
+    label: string;
+  }
+  const bgByFile = new Map<string, AssetPick>();
+  const bgmByFile = new Map<string, AssetPick>();
+  const cgByFile = new Map<string, AssetPick>();
+  const consider = (
+    map: Map<string, AssetPick>,
+    file: string,
+    assetId: string | undefined,
+    prompt: string,
+    label: string,
+  ) => {
+    const cur = map.get(file);
+    if (!cur) map.set(file, { assetId, prompt, label });
+    else if (assetId && !cur.assetId) cur.assetId = assetId; // 대표를 실제 에셋 보유 장면으로 승격
+  };
+
   for (const ref of refs) {
     const s = ref.scene;
-
-    // 배경
-    const hadBg = !!s.backgroundAssetId && !!(await getAsset(s.backgroundAssetId));
-    const bg = await blobForBackground(
+    consider(
+      bgByFile,
+      ref.bgFile,
       s.backgroundAssetId,
       [s.background || s.title, ...s.direction].join(', '),
       s.background || s.title,
-      project.width,
-      project.height,
     );
-    if (!hadBg) placeholders++;
-    out.push({ path: `game/images/${ref.bgFile}`, data: bg });
+    ref.cgFiles.forEach((file, j) =>
+      consider(cgByFile, file, s.cgAssetIds?.[j], s.cg[j], `CG: ${s.cg[j]}`),
+    );
+    if (ref.bgmFile) consider(bgmByFile, ref.bgmFile, s.bgmAssetId, s.bgm || s.title, s.bgm || s.title);
+  }
 
-    // CG (업로드본 우선, 없으면 Canvas 임시)
-    for (let j = 0; j < ref.cgFiles.length; j++) {
-      const upId = s.cgAssetIds?.[j];
-      const up = upId ? await getAsset(upId) : null;
-      const cg = up ?? (await canvasImage(s.cg[j], `CG: ${s.cg[j]}`, project.width, project.height));
-      if (!up) placeholders++;
-      out.push({ path: `game/images/${ref.cgFiles[j]}`, data: cg });
-    }
-
-    // BGM
-    if (ref.bgmFile) {
-      const hadBgm = !!s.bgmAssetId && !!(await getAsset(s.bgmAssetId));
-      const bgm = await blobForBgm(s.bgmAssetId, s.bgm || s.title);
-      if (!hadBgm) placeholders++;
-      out.push({ path: `game/audio/${ref.bgmFile}`, data: bgm });
-    }
+  for (const [file, p] of bgByFile) {
+    const had = !!p.assetId && !!(await getAsset(p.assetId));
+    const bg = await blobForBackground(p.assetId, p.prompt, p.label, project.width, project.height);
+    if (!had) placeholders++;
+    out.push({ path: `game/images/${file}`, data: bg });
+  }
+  for (const [file, p] of cgByFile) {
+    const up = p.assetId ? await getAsset(p.assetId) : null;
+    const cg = up ?? (await canvasImage(p.prompt, p.label, project.width, project.height));
+    if (!up) placeholders++;
+    out.push({ path: `game/images/${file}`, data: cg });
+  }
+  for (const [file, p] of bgmByFile) {
+    const had = !!p.assetId && !!(await getAsset(p.assetId));
+    const bgm = await blobForBgm(p.assetId, p.prompt);
+    if (!had) placeholders++;
+    out.push({ path: `game/audio/${file}`, data: bgm });
   }
 
   // 자체 GUI 메뉴 배경(테마별 Canvas 생성) — gui.rpy 가 참조하는 유일한 그림.
