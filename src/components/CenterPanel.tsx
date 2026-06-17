@@ -2,6 +2,7 @@ import { useStore, type Tab } from '../store';
 import SceneCard from './SceneCard';
 import AssetsTab from './AssetsTab';
 import RenpyTab from './RenpyTab';
+import Spinner from './Spinner';
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: 'scenes', label: '장면', icon: '🎬' },
@@ -14,6 +15,9 @@ export default function CenterPanel() {
   const setActiveTab = useStore((s) => s.setActiveTab);
   const scenes = useStore((s) => s.project.scenes);
   const approveAll = useStore((s) => s.approveAll);
+  const genAllBg = useStore((s) => s.generateAllBackgrounds);
+  const genAllBgm = useStore((s) => s.generateAllBgm);
+  const batchBusy = useStore((s) => !!(s.busy['batch:bg'] || s.busy['batch:bgm']));
 
   const approved = scenes.filter((s) => s.status === 'approved').length;
   const allApproved = scenes.length > 0 && approved === scenes.length;
@@ -36,13 +40,26 @@ export default function CenterPanel() {
           </button>
         ))}
         {activeTab === 'scenes' && scenes.length > 0 && (
-          <button
-            className={`ml-auto ${allApproved ? 'btn-ghost' : 'btn-soft'}`}
-            onClick={approveAll}
-            disabled={allApproved}
-          >
-            {allApproved ? '✓ 전체 승인됨' : '전체 승인'}
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              className="btn-soft"
+              onClick={async () => {
+                await genAllBg();
+                await genAllBgm();
+              }}
+              disabled={batchBusy}
+              title="장면들의 배경·BGM 을 고유 이름마다 한 번씩 일괄 생성"
+            >
+              {batchBusy ? <Spinner /> : '🎨 배경·음악 일괄 생성'}
+            </button>
+            <button
+              className={allApproved ? 'btn-ghost' : 'btn-soft'}
+              onClick={approveAll}
+              disabled={allApproved}
+            >
+              {allApproved ? '✓ 전체 승인됨' : '전체 승인'}
+            </button>
+          </div>
         )}
       </div>
 
