@@ -1,10 +1,65 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { EXPRESSIONS, type Expression } from '../types';
+import { EXPRESSIONS, type Expression, type Scene } from '../types';
+import { backgroundKey, bgmKey, hasBgm } from '../renpy/generate';
 import { ALL_MOODS } from '../generators/audio/moods';
 import { useAssetUrl } from './useAssetUrl';
 import Spinner from './Spinner';
 import UploadButton from './UploadButton';
+
+// ── 이름(의미) 기준 그룹화 — 같은 이름 = 하나의 에셋(생성 1회, 모든 장면 공유) ──
+
+interface Group {
+  key: string; // 공유 키 (배경/BGM 이름, CG 설명)
+  name: string; // 표시 이름(비었으면 이름 없음)
+  repTitle: string; // 대표 장면 제목
+  sceneIds: string[];
+  count: number; // 사용 장면 수
+  repAssetId?: string; // 미리보기용 (생성/업로드된 에셋)
+}
+
+function groupBy(scenes: Scene[], keyOf: (s: Scene) => string, nameOf: (s: Scene) => string, assetOf: (s: Scene) => string | undefined, include: (s: Scene) => boolean): Group[] {
+  const map = new Map<string, Group>();
+  for (const s of scenes) {
+    if (!include(s)) continue;
+    const key = keyOf(s);
+    let g = map.get(key);
+    if (!g) {
+      g = { key, name: nameOf(s), repTitle: s.title, sceneIds: [], count: 0, repAssetId: undefined };
+      map.set(key, g);
+    }
+    g.sceneIds.push(s.id);
+    g.count += 1;
+    if (!g.name && nameOf(s)) g.name = nameOf(s);
+    if (!g.repAssetId && assetOf(s)) g.repAssetId = assetOf(s);
+  }
+  return [...map.values()];
+}
+
+interface CgGroup {
+  desc: string;
+  count: number;
+  repTitle: string;
+  repAssetId?: string;
+}
+
+function cgGroups(scenes: Scene[]): CgGroup[] {
+  const map = new Map<string, CgGroup>();
+  for (const s of scenes) {
+    s.cg.forEach((desc, i) => {
+      const key = desc.trim();
+      let g = map.get(key);
+      if (!g) {
+        g = { desc, count: 0, repTitle: s.title, repAssetId: undefined };
+        map.set(key, g);
+      }
+      g.count += 1;
+      const aid = s.cgAssetIds?.[i] || undefined;
+      if (!g.repAssetId && aid) g.repAssetId = aid;
+    });
+  }
+  return [...map.values()];
+}
 
 export default function AssetsTab() {
   const characters = useStore((s) => s.project.characters);
@@ -13,13 +68,23 @@ export default function AssetsTab() {
   if (scenes.length === 0)
     return <p className="text-gray-500 text-sm text-center mt-16">먼저 스토리를 분석하세요.</p>;
 
+  const bgs = groupBy(scenes, backgroundKey, (s) => s.background ?? '', (s) => s.backgroundAssetId, () => true);
+  const cgs = cgGroups(scenes);
+  const bgms = groupBy(scenes, bgmKey, (s) => s.bgm ?? '', (s) => s.bgmAssetId, hasBgm);
+
   return (
     <div className="flex flex-col gap-7 max-w-3xl mx-auto">
+      <p className="text-xs text-gray-500 -mb-2">
+        🗂 <b>에셋 라이브러리</b> — 같은 이름의 배경·BGM·CG는 <b>하나로 묶여 한 번만 생성</b>되고 해당
+        이름의 모든 장면에 동일하게 적용됩니다(시각 일관성 + 비용 절감). 캐릭터는 이름별로 항상 공유됩니다.
+      </p>
+
       <section>
         <h3 className="section-title mb-1">🧑‍🎨 캐릭터 스프라이트</h3>
         <p className="text-xs text-gray-500 mb-3">
           표정별 입화를 생성합니다. 키 없으면 Canvas 임시 입화(투명 PNG). 대본에서{' '}
-          <code className="text-accent">이름(기쁨): 대사</code> 처럼 적으면 그 표정으로 등장합니다.
+          <code className="text-accent">이름(기쁨): 대사</code> 처럼 적으면 그 표정으로 등장하고, 표정을
+          안 적어도 대사 문맥으로 자동 선택됩니다.
         </p>
         {characters.length === 0 && <p className="text-gray-600 text-sm">등장 캐릭터 없음</p>}
         <div className="grid grid-cols-2 gap-3">
@@ -30,37 +95,57 @@ export default function AssetsTab() {
       </section>
 
       <section>
-        <h3 className="section-title mb-3">🖼 배경 / CG</h3>
+        <h3 className="section-title mb-1">🖼 배경 <span className="text-gray-500 font-normal text-xs">· {bgs.length}종 / 장면 {scenes.length}개</span></h3>
+        <p className="text-xs text-gray-500 mb-3">
+          배경 이름이 같으면 한 번만 생성해 모든 장면에 적용됩니다. (이름 없는 배경은 장면별로 분리됩니다 — 재사용하려면 이름을 지정하세요.)
+        </p>
         <div className="flex flex-col gap-2">
-          {scenes.map((s) => (
-            <BackgroundRow key={s.id} sceneId={s.id} />
+          {bgs.map((g) => (
+            <BgGroupRow key={g.key} group={g} />
           ))}
         </div>
       </section>
 
       <section>
-        <h3 className="section-title mb-1">🎬 CG 컷 (업로드)</h3>
+        <h3 className="section-title mb-1">🎬 CG 컷 <span className="text-gray-500 font-normal text-xs">· {cgs.length}종</span></h3>
         <p className="text-xs text-gray-500 mb-3">
-          대본의 <code className="text-accent">#CG 설명</code> 마다 한 컷. 외부 제작 이미지를 업로드하면 그대로 사용됩니다(없으면 Canvas 임시).
+          대본의 <code className="text-accent">#CG 설명</code> 단위. 같은 설명이면 한 컷으로 공유됩니다. 외부 제작 이미지를 업로드하면 그대로 사용됩니다(없으면 Canvas 임시).
         </p>
-        {scenes.every((s) => s.cg.length === 0) ? (
+        {cgs.length === 0 ? (
           <p className="text-gray-600 text-sm">CG 컷 없음</p>
         ) : (
           <div className="flex flex-col gap-2">
-            {scenes.flatMap((s) => s.cg.map((_, i) => <CgRow key={`${s.id}:${i}`} sceneId={s.id} index={i} />))}
+            {cgs.map((g) => (
+              <CgGroupRow key={g.desc} group={g} />
+            ))}
           </div>
         )}
       </section>
 
       <section>
-        <h3 className="section-title mb-3">🎵 오디오 (BGM)</h3>
-        <div className="flex flex-col gap-2">
-          {scenes.map((s) => (
-            <AudioRow key={s.id} sceneId={s.id} />
-          ))}
-        </div>
+        <h3 className="section-title mb-1">🎵 BGM <span className="text-gray-500 font-normal text-xs">· {bgms.length}종</span></h3>
+        <p className="text-xs text-gray-500 mb-3">
+          BGM 이름이 같으면 한 번만 생성해 모든 장면에 적용됩니다.
+        </p>
+        {bgms.length === 0 ? (
+          <p className="text-gray-600 text-sm">BGM 지정 장면 없음</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {bgms.map((g) => (
+              <BgmGroupRow key={g.key} group={g} />
+            ))}
+          </div>
+        )}
       </section>
     </div>
+  );
+}
+
+function CountBadge({ n }: { n: number }) {
+  return (
+    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-edge/60 text-gray-300" title={`${n}개 장면에서 사용`}>
+      ×{n}
+    </span>
   );
 }
 
@@ -155,60 +240,68 @@ function ExpressionThumb({
   );
 }
 
-function BackgroundRow({ sceneId }: { sceneId: string }) {
-  const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId))!;
-  const update = useStore((s) => s.updateScene);
+function BgGroupRow({ group }: { group: Group }) {
+  const rename = useStore((s) => s.renameBackgroundGroup);
   const genBg = useStore((s) => s.generateBackground);
   const importBg = useStore((s) => s.importBackground);
-  const busy = useStore((s) => s.busy[`${sceneId}:bg`]);
-  const url = useAssetUrl(scene.backgroundAssetId);
+  const busy = useStore((s) => group.sceneIds.some((id) => s.busy[`${id}:bg`]));
+  const url = useAssetUrl(group.repAssetId);
+  const [draft, setDraft] = useState(group.name);
+  const rep = group.sceneIds[0];
+
   return (
     <div className="card border-edge p-3 flex gap-3 items-center">
       <div className="w-24 aspect-video rounded-lg border border-edge overflow-hidden bg-ink shrink-0 flex items-center justify-center text-[10px] text-gray-600">
         {url ? <img src={url} className="w-full h-full object-cover" /> : '미생성'}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-gray-400 truncate mb-1">{scene.title}</p>
+        <div className="flex items-center gap-1.5 mb-1">
+          <CountBadge n={group.count} />
+          <span className="text-[11px] text-gray-500 truncate">예: {group.repTitle}</span>
+        </div>
         <input
           className="field"
-          value={scene.background ?? ''}
-          placeholder="배경 프롬프트"
-          onChange={(e) => update(sceneId, { background: e.target.value })}
+          value={draft}
+          placeholder="배경 이름/프롬프트 (예: 교실) — 같은 이름끼리 공유"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => draft !== group.name && rename(group.key, draft)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
         />
       </div>
       <div className="flex flex-col gap-1 shrink-0">
-        <button className="btn-ghost" disabled={busy} onClick={() => genBg(sceneId)}>
-          {busy ? <Spinner /> : '재생성'}
+        <button className="btn-ghost" disabled={busy} onClick={() => genBg(rep)} title={`${group.count}개 장면에 적용`}>
+          {busy ? <Spinner /> : url ? '재생성' : '생성'}
         </button>
-        <UploadButton onFile={(f) => importBg(sceneId, f)} label="↥ 업로드" className="btn-ghost text-[11px]" />
+        <UploadButton onFile={(f) => importBg(rep, f)} label="↥ 업로드" className="btn-ghost text-[11px]" />
       </div>
     </div>
   );
 }
 
-function CgRow({ sceneId, index }: { sceneId: string; index: number }) {
-  const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId))!;
-  const importCg = useStore((s) => s.importCg);
-  const clearCg = useStore((s) => s.clearCg);
-  const assetId = scene.cgAssetIds?.[index] || undefined;
-  const url = useAssetUrl(assetId);
+function CgGroupRow({ group }: { group: CgGroup }) {
+  const importCg = useStore((s) => s.importCgGroup);
+  const clearCg = useStore((s) => s.clearCgGroup);
+  const url = useAssetUrl(group.repAssetId);
   return (
     <div className="card border-edge p-3 flex gap-3 items-center">
       <div className="w-24 aspect-video rounded-lg border border-edge overflow-hidden bg-ink shrink-0 flex items-center justify-center text-[10px] text-gray-600">
         {url ? <img src={url} className="w-full h-full object-cover" /> : '임시'}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-gray-400 truncate">{scene.title}</p>
-        <p className="text-xs text-gray-300 truncate">{scene.cg[index]}</p>
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <CountBadge n={group.count} />
+          <span className="text-[11px] text-gray-500 truncate">예: {group.repTitle}</span>
+        </div>
+        <p className="text-xs text-gray-300 truncate">{group.desc || '(설명 없음)'}</p>
       </div>
       <div className="flex flex-col gap-1 shrink-0">
         <UploadButton
-          onFile={(f) => importCg(sceneId, index, f)}
+          onFile={(f) => importCg(group.desc, f)}
           label={url ? '↥ 교체' : '↥ 업로드'}
           className="btn-ghost text-[11px]"
         />
         {url && (
-          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => clearCg(sceneId, index)}>
+          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => clearCg(group.desc)}>
             해제
           </button>
         )}
@@ -217,19 +310,22 @@ function CgRow({ sceneId, index }: { sceneId: string; index: number }) {
   );
 }
 
-function AudioRow({ sceneId }: { sceneId: string }) {
-  const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId))!;
+function BgmGroupRow({ group }: { group: Group }) {
   const genBgm = useStore((s) => s.generateBgm);
-  const busy = useStore((s) => s.busy[`${sceneId}:bgm`]);
-  const url = useAssetUrl(scene.bgmAssetId);
+  const busy = useStore((s) => group.sceneIds.some((id) => s.busy[`${id}:bgm`]));
+  const url = useAssetUrl(group.repAssetId);
   const [mood, setMood] = useState('');
   const [volume, setVolume] = useState(0.8);
   const [bpm, setBpm] = useState(0);
+  const rep = group.sceneIds[0];
 
   return (
     <div className="card border-edge p-3 flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-400 flex-1 truncate">{scene.title}</span>
+        <CountBadge n={group.count} />
+        <span className="text-xs text-gray-300 flex-1 truncate" title={group.repTitle}>
+          {group.name || `(이름 없음 · ${group.repTitle})`}
+        </span>
         <select className="field w-32" value={mood} onChange={(e) => setMood(e.target.value)}>
           <option value="">자동(프롬프트)</option>
           {ALL_MOODS.map((m) => (
@@ -241,9 +337,10 @@ function AudioRow({ sceneId }: { sceneId: string }) {
         <button
           className="btn-ghost shrink-0"
           disabled={busy}
-          onClick={() => genBgm(sceneId, { moodKey: mood || undefined, volume, bpm: bpm || undefined })}
+          onClick={() => genBgm(rep, { moodKey: mood || undefined, volume, bpm: bpm || undefined })}
+          title={`${group.count}개 장면에 적용`}
         >
-          {busy ? <Spinner /> : '생성'}
+          {busy ? <Spinner /> : url ? '재생성' : '생성'}
         </button>
       </div>
       <div className="flex items-center gap-3 text-[11px] text-gray-400">

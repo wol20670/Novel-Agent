@@ -80,6 +80,11 @@ interface State {
   importSprite: (name: string, expr: Expression, file: File) => Promise<void>;
   importCg: (sceneId: string, index: number, file: File) => Promise<void>;
   clearCg: (sceneId: string, index: number) => Promise<void>;
+
+  // 에셋 라이브러리 (이름 그룹 단위 — 같은 이름 장면 전체에 한 번에 적용)
+  renameBackgroundGroup: (key: string, name: string) => void;
+  importCgGroup: (desc: string, file: File) => Promise<void>;
+  clearCgGroup: (desc: string) => Promise<void>;
   importMenuArt: (which: 'main' | 'game', file: File) => Promise<void>;
   clearMenuArt: (which: 'main' | 'game') => Promise<void>;
 
@@ -515,6 +520,73 @@ export const useStore = create<State>((set, get) => {
       arr[index] = '';
       if (prev) await deleteAsset(prev).catch(() => {});
       get().updateScene(sceneId, { cgAssetIds: arr });
+      flash('CG 업로드를 해제했습니다(Canvas 임시로 복귀).');
+    },
+
+    // 같은 배경 이름을 쓰는 모든 장면의 배경 이름을 한 번에 변경(라이브러리 편집).
+    renameBackgroundGroup: (key, name) => {
+      set((s) => ({
+        project: {
+          ...s.project,
+          scenes: s.project.scenes.map((sc) =>
+            backgroundKey(sc) === key ? { ...sc, background: name } : sc,
+          ),
+        },
+      }));
+      autoSave();
+    },
+
+    // CG: 같은 설명(컷)을 쓰는 모든 장면에 업로드본을 한 번에 적용.
+    importCgGroup: async (desc, file) => {
+      const key = desc.trim();
+      try {
+        const id = await uploadAsset(file, 'cg', `cg_${Date.now().toString(36)}.png`);
+        const prevs = new Set<string>();
+        set((s) => ({
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) => {
+              if (!sc.cg.some((d) => d.trim() === key)) return sc;
+              const arr = [...(sc.cgAssetIds ?? [])];
+              sc.cg.forEach((d, i) => {
+                if (d.trim() !== key) return;
+                while (arr.length <= i) arr.push('');
+                if (arr[i] && arr[i] !== id) prevs.add(arr[i]);
+                arr[i] = id;
+              });
+              return { ...sc, cgAssetIds: arr };
+            }),
+          },
+        }));
+        autoSave();
+        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        flash('업로드한 CG를 같은 컷의 모든 장면에 적용했습니다.');
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    clearCgGroup: async (desc) => {
+      const key = desc.trim();
+      const prevs = new Set<string>();
+      set((s) => ({
+        project: {
+          ...s.project,
+          scenes: s.project.scenes.map((sc) => {
+            if (!sc.cgAssetIds || !sc.cg.some((d) => d.trim() === key)) return sc;
+            const arr = [...sc.cgAssetIds];
+            sc.cg.forEach((d, i) => {
+              if (d.trim() === key && arr[i]) {
+                prevs.add(arr[i]);
+                arr[i] = '';
+              }
+            });
+            return { ...sc, cgAssetIds: arr };
+          }),
+        },
+      }));
+      autoSave();
+      for (const p of prevs) await deleteAsset(p).catch(() => {});
       flash('CG 업로드를 해제했습니다(Canvas 임시로 복귀).');
     },
 
