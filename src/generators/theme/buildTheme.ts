@@ -110,6 +110,13 @@ export function buildTheme(coreIn: Partial<ThemeCore>, genre: GenreId, label: st
     : base.menuArtStyle) as MenuArtStyle;
   const sceneTransition = coreIn.sceneTransition === 'fade' ? 'fade' : 'dissolve';
 
+  // 선택지: 평상시 패널(가독 보장) + hover 는 accent 채움 위 대비 글자.
+  const choiceIdleBg = withAlpha(
+    mix(mix(bgTop, bgBottom, 0.5), light ? '#ffffff' : '#000000', 0.6),
+    0.88,
+  );
+  const choiceHoverText = enforceContrast(isLight(accent) ? '#1c1c1c' : '#ffffff', accent, 4.5);
+
   return {
     id: genre,
     label,
@@ -127,6 +134,8 @@ export function buildTheme(coreIn: Partial<ThemeCore>, genre: GenreId, label: st
     barTrack: mix(accent, light ? '#ffffff' : '#000000', 0.7),
     barThumb: accent,
     choiceHoverBg: mix(accent, light ? '#ffffff' : '#000000', 0.62),
+    choiceIdleBg,
+    choiceHoverText,
     textFont: p.textFont,
     nameFont: p.nameFont,
     interfaceFont: p.interfaceFont,

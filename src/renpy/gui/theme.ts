@@ -32,7 +32,9 @@ export interface GuiTheme {
   barThumb: string; // 채워진 부분/손잡이
 
   // ── 선택지 버튼 ──
-  choiceHoverBg: string; // hover 배경 (Solid)
+  choiceHoverBg: string; // hover 배경 (Solid) — 세이브 슬롯 등과 공용 보조 틴트
+  choiceIdleBg: string; // 선택지 평상시(비호버) 패널 배경 (반투명, 가시성 확보)
+  choiceHoverText: string; // 선택지 hover 글자색 (accent 채움 위에서 대비)
 
   // ── 폰트 (game/fonts/ 기준 경로 또는 엔진 내장) ──
   textFont: string;
@@ -67,6 +69,8 @@ export const PRESETS: Record<GenreId, GuiTheme> = {
     barTrack: '#e8d0dc',
     barThumb: '#d98aa6',
     choiceHoverBg: '#f3d9e4',
+    choiceIdleBg: '#ffffffdb',
+    choiceHoverText: '#2a2228',
     textFont: FONT,
     nameFont: FONT,
     interfaceFont: FONT,
@@ -91,6 +95,8 @@ export const PRESETS: Record<GenreId, GuiTheme> = {
     barTrack: '#2a1a1c',
     barThumb: '#b01e2e',
     choiceHoverBg: '#2a1012',
+    choiceIdleBg: '#1c1012e6',
+    choiceHoverText: '#ffffff',
     textFont: FONT,
     nameFont: FONT,
     interfaceFont: FONT,
@@ -115,6 +121,8 @@ export const PRESETS: Record<GenreId, GuiTheme> = {
     barTrack: '#142838',
     barThumb: '#2fd6e0',
     choiceHoverBg: '#0c2230',
+    choiceIdleBg: '#0c1a28e6',
+    choiceHoverText: '#03222a',
     textFont: FONT,
     nameFont: FONT,
     interfaceFont: FONT,
@@ -139,6 +147,8 @@ export const PRESETS: Record<GenreId, GuiTheme> = {
     barTrack: '#26282c',
     barThumb: '#e0a02f',
     choiceHoverBg: '#20160a',
+    choiceIdleBg: '#1a1c20e6',
+    choiceHoverText: '#241a06',
     textFont: FONT,
     nameFont: FONT,
     interfaceFont: FONT,
@@ -163,6 +173,8 @@ export const PRESETS: Record<GenreId, GuiTheme> = {
     barTrack: '#d0e6ea',
     barThumb: '#4fb0c4',
     choiceHoverBg: '#d6edf1',
+    choiceIdleBg: '#ffffffdb',
+    choiceHoverText: '#06262d',
     textFont: FONT,
     nameFont: FONT,
     interfaceFont: FONT,

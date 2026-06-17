@@ -203,8 +203,11 @@ style choice_vbox:
 
 style choice_button is default:
     properties gui.button_properties("choice_button")
-    background Solid("#00000000")
-    hover_background Solid(gui.choice_hover_bg)
+    padding (gui.scale(26), gui.scale(12))
+    background Solid(gui.choice_idle_bg)
+    hover_background Solid(gui.accent_color)
+    selected_background Solid(gui.accent_color)
+    insensitive_background Solid(gui.choice_idle_bg)
 
 style choice_button_text is default:
     properties gui.text_properties("choice_button")

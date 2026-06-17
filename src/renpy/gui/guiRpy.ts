@@ -37,6 +37,7 @@ define gui.frame_bg_color = "${theme.frameBg}"
 define gui.bar_track_color = "${theme.barTrack}"
 define gui.bar_thumb_color = "${theme.barThumb}"
 define gui.choice_hover_bg = "${theme.choiceHoverBg}"
+define gui.choice_idle_bg = "${theme.choiceIdleBg}"
 
 
 ## 폰트 (테마) ##################################################################
@@ -111,7 +112,8 @@ define gui.choice_button_text_font = gui.text_font
 define gui.choice_button_text_size = gui.text_size
 define gui.choice_button_text_xalign = 0.5
 define gui.choice_button_text_idle_color = "${theme.interfaceText}"
-define gui.choice_button_text_hover_color = "${theme.accent}"
+define gui.choice_button_text_hover_color = "${theme.choiceHoverText}"
+define gui.choice_button_text_selected_color = "${theme.choiceHoverText}"
 define gui.choice_button_text_insensitive_color = "#7f7f7f80"
 
 
