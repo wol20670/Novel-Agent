@@ -17,10 +17,13 @@ export function parseWorkbook(data: ArrayBuffer): BuildResult {
   });
 
   const b = new SceneBuilder();
-  for (const row of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
     const a = String(row[0] ?? '').trim();
     const col = String(row[1] ?? '').trim();
     if (!a && !col) continue;
+    // 양식의 설명용 헤더 행("A열: 화자…" / "B열: 대사…")은 데이터가 아니므로 건너뛴다.
+    if (i === 0 && (/^A열/.test(a) || /^B열/.test(col))) continue;
 
     if (a) {
       // 화자가 있으면 대사 (B열이 비어도 화자 표시만 있는 행은 건너뜀)
