@@ -64,6 +64,10 @@ function cgGroups(scenes: Scene[]): CgGroup[] {
 export default function AssetsTab() {
   const characters = useStore((s) => s.project.characters);
   const scenes = useStore((s) => s.project.scenes);
+  const genAllBg = useStore((s) => s.generateAllBackgrounds);
+  const genAllBgm = useStore((s) => s.generateAllBgm);
+  const bgBusy = useStore((s) => s.busy['batch:bg']);
+  const bgmBusy = useStore((s) => s.busy['batch:bgm']);
 
   if (scenes.length === 0)
     return <p className="text-gray-500 text-sm text-center mt-16">먼저 스토리를 분석하세요.</p>;
@@ -71,13 +75,29 @@ export default function AssetsTab() {
   const bgs = groupBy(scenes, backgroundKey, (s) => s.background ?? '', (s) => s.backgroundAssetId, () => true);
   const cgs = cgGroups(scenes);
   const bgms = groupBy(scenes, bgmKey, (s) => s.bgm ?? '', (s) => s.bgmAssetId, hasBgm);
+  const batchBusy = !!(bgBusy || bgmBusy);
 
   return (
     <div className="flex flex-col gap-7 max-w-3xl mx-auto">
-      <p className="text-xs text-gray-500 -mb-2">
-        🗂 <b>에셋 라이브러리</b> — 같은 이름의 배경·BGM·CG는 <b>하나로 묶여 한 번만 생성</b>되고 해당
-        이름의 모든 장면에 동일하게 적용됩니다(시각 일관성 + 비용 절감). 캐릭터는 이름별로 항상 공유됩니다.
-      </p>
+      <div className="card border-edge p-3">
+        <p className="text-xs text-gray-400 mb-2">
+          🗂 <b className="text-gray-200">에셋 라이브러리</b> — 같은 이름의 배경·BGM·CG는 <b>하나로 묶여 한 번만 생성</b>되고
+          해당 이름의 모든 장면에 동일하게 적용됩니다(일관성 + 비용 절감). 장면이 많아도 <b>고유 이름 수만큼만</b> 생성됩니다.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="btn-primary text-xs"
+            disabled={batchBusy}
+            onClick={async () => {
+              await genAllBg();
+              await genAllBgm();
+            }}
+            title="아직 안 만든 배경·BGM 을 고유 이름마다 한 번씩 생성"
+          >
+            {batchBusy ? <Spinner /> : `🚀 미생성 배경·BGM 전부 생성 (배경 ${bgs.length} · BGM ${bgms.length}종)`}
+          </button>
+        </div>
+      </div>
 
       <section>
         <h3 className="section-title mb-1">🧑‍🎨 캐릭터 스프라이트</h3>
@@ -95,7 +115,12 @@ export default function AssetsTab() {
       </section>
 
       <section>
-        <h3 className="section-title mb-1">🖼 배경 <span className="text-gray-500 font-normal text-xs">· {bgs.length}종 / 장면 {scenes.length}개</span></h3>
+        <div className="flex items-center gap-2 mb-1">
+          <h3 className="section-title flex-1">🖼 배경 <span className="text-gray-500 font-normal text-xs">· {bgs.length}종 / 장면 {scenes.length}개</span></h3>
+          <button className="btn-ghost text-[11px]" disabled={bgBusy} onClick={() => genAllBg()}>
+            {bgBusy ? <Spinner /> : '전체 생성'}
+          </button>
+        </div>
         <p className="text-xs text-gray-500 mb-3">
           배경 이름이 같으면 한 번만 생성해 모든 장면에 적용됩니다. (이름 없는 배경은 장면별로 분리됩니다 — 재사용하려면 이름을 지정하세요.)
         </p>
@@ -123,7 +148,14 @@ export default function AssetsTab() {
       </section>
 
       <section>
-        <h3 className="section-title mb-1">🎵 BGM <span className="text-gray-500 font-normal text-xs">· {bgms.length}종</span></h3>
+        <div className="flex items-center gap-2 mb-1">
+          <h3 className="section-title flex-1">🎵 BGM <span className="text-gray-500 font-normal text-xs">· {bgms.length}종</span></h3>
+          {bgms.length > 0 && (
+            <button className="btn-ghost text-[11px]" disabled={bgmBusy} onClick={() => genAllBgm()}>
+              {bgmBusy ? <Spinner /> : '전체 생성'}
+            </button>
+          )}
+        </div>
         <p className="text-xs text-gray-500 mb-3">
           BGM 이름이 같으면 한 번만 생성해 모든 장면에 적용됩니다.
         </p>

@@ -75,6 +75,10 @@ interface State {
   generateBgm: (sceneId: string, opts?: SynthOptions) => Promise<void>;
   assetUrl: (id: string | undefined) => Promise<string | undefined>;
 
+  // 일괄 생성 (고유 이름 단위 — 미생성분만, force 면 전체 재생성)
+  generateAllBackgrounds: (force?: boolean) => Promise<void>;
+  generateAllBgm: (force?: boolean) => Promise<void>;
+
   // 외부 제작 이미지 업로드 (직접 적용)
   importBackground: (sceneId: string, file: File) => Promise<void>;
   importSprite: (name: string, expr: Expression, file: File) => Promise<void>;
@@ -441,6 +445,55 @@ export const useStore = create<State>((set, get) => {
       } finally {
         set((s) => ({ busy: { ...s.busy, [key]: false } }));
       }
+    },
+
+    // 고유 배경 이름마다 1회 생성(이미 있으면 건너뜀; force=true 면 전체 재생성).
+    // generateBackground 가 같은 이름 모든 장면에 전파하므로 그룹당 1회면 충분.
+    generateAllBackgrounds: async (force = false) => {
+      const seen = new Map<string, { repId: string; hasAsset: boolean }>();
+      for (const s of get().project.scenes) {
+        const k = backgroundKey(s);
+        const e = seen.get(k);
+        if (!e) seen.set(k, { repId: s.id, hasAsset: !!s.backgroundAssetId });
+        else if (s.backgroundAssetId) e.hasAsset = true;
+      }
+      const todo = [...seen.values()].filter((e) => force || !e.hasAsset);
+      if (todo.length === 0) {
+        flash('이미 모든 배경이 생성되어 있습니다.');
+        return;
+      }
+      set((s) => ({ busy: { ...s.busy, 'batch:bg': true } }));
+      let done = 0;
+      for (const e of todo) {
+        flash(`배경 생성 중… (${++done}/${todo.length})`, 'info');
+        await get().generateBackground(e.repId);
+      }
+      set((s) => ({ busy: { ...s.busy, 'batch:bg': false } }));
+      flash(`배경 ${todo.length}종을 생성했습니다.`, 'success');
+    },
+
+    generateAllBgm: async (force = false) => {
+      const seen = new Map<string, { repId: string; hasAsset: boolean }>();
+      for (const s of get().project.scenes) {
+        if (!(s.bgm || s.bgmAssetId)) continue; // BGM 지정 장면만
+        const k = bgmKey(s);
+        const e = seen.get(k);
+        if (!e) seen.set(k, { repId: s.id, hasAsset: !!s.bgmAssetId });
+        else if (s.bgmAssetId) e.hasAsset = true;
+      }
+      const todo = [...seen.values()].filter((e) => force || !e.hasAsset);
+      if (todo.length === 0) {
+        flash('이미 모든 BGM이 생성되어 있습니다.');
+        return;
+      }
+      set((s) => ({ busy: { ...s.busy, 'batch:bgm': true } }));
+      let done = 0;
+      for (const e of todo) {
+        flash(`BGM 생성 중… (${++done}/${todo.length})`, 'info');
+        await get().generateBgm(e.repId);
+      }
+      set((s) => ({ busy: { ...s.busy, 'batch:bgm': false } }));
+      flash(`BGM ${todo.length}종을 생성했습니다.`, 'success');
     },
 
     importBackground: async (sceneId, file) => {
