@@ -1,9 +1,10 @@
 // 승인된 장면들로 Ren'Py 프로젝트 파일 집합을 생성한다.
 // 파일 본문(텍스트)만 만들고, 바이너리 에셋(PNG/WAV)은 zip 빌더가 채운다.
 
-import type { Project, Scene, Character, Expression } from '../types';
+import type { Project, Scene, Line, Character, Expression } from '../types';
 import { SlugMap } from './slug';
 import { generateGuiFiles, resolveTheme } from './gui';
+import { inferEmotion } from '../generators/emotion';
 
 export interface RenpyFile {
   path: string; // game/ 이하 경로
@@ -26,7 +27,36 @@ export interface SpriteRef {
   expr: Expression;
   attr: string; // neutral/happy/…
   file: string; // sprite_c_1_happy.png
-  assetId: string;
+  /** 사용자가 생성/업로드한 스프라이트. 없으면(자동 표정 슬롯) 빌더가 Canvas/AI 로 채운다. */
+  assetId?: string;
+}
+
+/**
+ * 대사 줄의 "유효 표정" — 명시 태그가 있으면 그대로, 없으면 문맥에서 추론.
+ * 이미지 API 연동 후에는 검수 단계에서 line.emotion 을 미리 채워두면 그 값이 우선한다.
+ */
+export function effectiveEmotion(line: Line, scene: Scene): Expression {
+  if (line.kind !== 'dialogue') return '기본';
+  return (
+    (line.emotion as Expression | undefined) ??
+    inferEmotion(line.text, { direction: scene.direction, background: scene.background })
+  );
+}
+
+/** 캐릭터별로 (인페어런스 포함) 대본에서 실제 쓰이는 표정 집합. 이미지 API 생성 대상 목록이기도 하다. */
+export function expressionPlan(project: Project, ids: Map<string, string>): Map<string, Set<Expression>> {
+  const plan = new Map<string, Set<Expression>>();
+  for (const scene of project.scenes) {
+    if (scene.status !== 'approved') continue;
+    for (const line of scene.lines) {
+      if (line.kind !== 'dialogue') continue;
+      const id = ids.get(line.speaker);
+      if (!id) continue;
+      const set = plan.get(id) ?? plan.set(id, new Set<Expression>()).get(id)!;
+      set.add(effectiveEmotion(line, scene));
+    }
+  }
+  return plan;
 }
 
 /** 캐릭터 이름 → 안정적 Ren'Py 식별자. project.characters 순서로 발급(스프라이트와 공유). */
@@ -37,17 +67,43 @@ export function charIdMap(project: Project): Map<string, string> {
   return m;
 }
 
-/** 생성된 캐릭터 스프라이트(표정별 assetId 보유)만 추려 ref 로 반환. */
-export function resolveSprites(project: Project, ids: Map<string, string>): SpriteRef[] {
+/**
+ * 캐릭터 스프라이트 ref 목록.
+ * 스프라이트를 하나라도 설정한(opt-in) 캐릭터는 대본에서 쓰이는 모든 표정 슬롯을 갖는다
+ * → 대사에 따라 표정이 자동 전환된다(미설정 표정은 빌더가 Canvas/AI 로 채움).
+ * 스프라이트를 전혀 설정하지 않은 캐릭터는 화면에 세우지 않는다(대사만).
+ */
+export function resolveSprites(
+  project: Project,
+  ids: Map<string, string>,
+  plan: Map<string, Set<Expression>> = expressionPlan(project, ids),
+): SpriteRef[] {
   const out: SpriteRef[] = [];
   for (const c of project.characters) {
     const charId = ids.get(c.name);
     if (!charId) continue;
-    for (const expr of Object.keys(c.expressions) as Expression[]) {
-      const assetId = c.expressions[expr];
-      if (!assetId) continue;
+
+    const stored = c.expressions;
+    const optedIn = Object.values(stored).some(Boolean);
+    if (!optedIn) continue; // 스프라이트 미사용 캐릭터
+
+    // 저장된 표정 + 대본에서 쓰인 표정(자동) + 기본(베이스라인)
+    const exprs = new Set<Expression>([
+      ...(Object.keys(stored) as Expression[]).filter((e) => stored[e]),
+      ...(plan.get(charId) ?? []),
+      '기본',
+    ]);
+
+    for (const expr of exprs) {
       const attr = EXPR_ATTR[expr] ?? 'neutral';
-      out.push({ charId, charName: c.name, expr, attr, file: `sprite_${charId}_${attr}.png`, assetId });
+      out.push({
+        charId,
+        charName: c.name,
+        expr,
+        attr,
+        file: `sprite_${charId}_${attr}.png`,
+        assetId: stored[expr],
+      });
     }
   }
   return out;
@@ -181,9 +237,9 @@ function scriptBody(
         // 스프라이트가 있으면 화자 등장(표정 반영)
         const owned = spritesByChar.get(id);
         if (owned && owned.length) {
-          const want = line.emotion ? EXPR_ATTR[line.emotion as Expression] : undefined;
+          const want = EXPR_ATTR[effectiveEmotion(line, s)];
           const attr =
-            (want && owned.some((o) => o.attr === want) && want) ||
+            (owned.some((o) => o.attr === want) && want) ||
             (owned.some((o) => o.attr === 'neutral') ? 'neutral' : owned[0].attr);
           out.push(`${indent(1)}show ${id} ${attr} at ${pos.get(id) ?? 'center'}`);
         }
@@ -279,7 +335,8 @@ export function generateRenpyFiles(project: Project): {
 } {
   const refs = resolveSceneAssets(project);
   const ids = charIdMap(project);
-  const sprites = resolveSprites(project, ids);
+  const plan = expressionPlan(project, ids);
+  const sprites = resolveSprites(project, ids, plan);
   const theme = resolveTheme(project.genre, project.guiTheme);
 
   const files: RenpyFile[] = [

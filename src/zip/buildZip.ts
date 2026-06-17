@@ -62,7 +62,7 @@ export async function collectProjectFiles(
 
   // 캐릭터 스프라이트 (생성된 assetId → blob, 없으면 Canvas 폴백)
   for (const sp of sprites) {
-    let blob = await getAsset(sp.assetId);
+    let blob = sp.assetId ? await getAsset(sp.assetId) : undefined;
     if (!blob) {
       const color = project.characters.find((c) => c.name === sp.charName)?.color ?? '#9fd3ff';
       blob = await canvasSprite(sp.charName, sp.expr, color);
