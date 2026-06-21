@@ -1,7 +1,13 @@
 import { useStore } from '../store';
-import { SCENE_STATUS_LABEL, type SceneStatus } from '../types';
+import { SCENE_STATUS_LABEL, EXPRESSIONS, type SceneStatus, type Expression, type Line } from '../types';
+import { inferEmotion } from '../generators/emotion';
 import { useAssetUrl } from './useAssetUrl';
 import Spinner from './Spinner';
+
+/** 표정 표시용 이모지. */
+const EXPR_EMOJI: Record<Expression, string> = {
+  기본: '😐', 기쁨: '😊', 슬픔: '😢', 화남: '😠', 놀람: '😲', 수줍음: '😳',
+};
 
 const STATUS_BTN: Record<SceneStatus, { on: string; dot: string }> = {
   review: { on: 'bg-gray-500/15 text-gray-300 border-gray-400', dot: 'bg-gray-400' },
@@ -119,9 +125,12 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
         {scene.lines.length === 0 && <span className="text-gray-600 text-xs">대사 없음</span>}
         {scene.lines.map((l, i) =>
           l.kind === 'dialogue' ? (
-            <p key={i}>
-              <b className="text-accent">{l.speaker}</b> <span className="text-gray-200">{l.text}</span>
-            </p>
+            <div key={i} className="flex items-center gap-1.5">
+              <p className="flex-1 min-w-0">
+                <b className="text-accent">{l.speaker}</b> <span className="text-gray-200">{l.text}</span>
+              </p>
+              <LineEmotion sceneId={sceneId} index={i} line={l} background={scene.background} direction={scene.direction} />
+            </div>
           ) : (
             <p key={i} className="text-gray-400 italic">
               {l.text}
@@ -161,5 +170,50 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
         )}
       </div>
     </div>
+  );
+}
+
+type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
+
+/** 대사 한 줄의 표정 선택 — 기본 "자동"(대사 분석 결과), 직접 6종 중 지정 가능. */
+function LineEmotion({
+  sceneId,
+  index,
+  line,
+  background,
+  direction,
+}: {
+  sceneId: string;
+  index: number;
+  line: DialogueLine;
+  background?: string;
+  direction: string[];
+}) {
+  const setEmotion = useStore((s) => s.setLineEmotion);
+  // 화면에 안 서는 화자(주인공 등)는 표정 의미가 없으니 선택기를 숨긴다.
+  const narrationOnly = useStore(
+    (s) => !line.members?.length && !!s.project.characters.find((c) => c.name === line.speaker)?.isProtagonist,
+  );
+  if (narrationOnly) return null;
+
+  const auto = inferEmotion(line.text, { direction, background });
+  const value = (line.emotion as Expression | undefined) ?? '';
+  return (
+    <select
+      className={`text-[11px] rounded px-1 py-0.5 shrink-0 border outline-none ${
+        value ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-400 bg-panel2'
+      }`}
+      value={value}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setEmotion(sceneId, index, (e.target.value || undefined) as Expression | undefined)}
+      title="이 대사의 표정 — 자동(대사 분석) 또는 직접 선택"
+    >
+      <option value="">자동 · {EXPR_EMOJI[auto]}{auto}</option>
+      {EXPRESSIONS.map((ex) => (
+        <option key={ex} value={ex}>
+          {EXPR_EMOJI[ex as Expression]} {ex}
+        </option>
+      ))}
+    </select>
   );
 }

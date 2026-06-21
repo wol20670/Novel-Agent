@@ -51,6 +51,8 @@ interface State {
 
   // 장면 편집
   updateScene: (id: string, patch: Partial<Scene>) => void;
+  /** 대사 한 줄의 표정을 수동 지정(undefined = 자동 추론으로 되돌림). */
+  setLineEmotion: (sceneId: string, lineIndex: number, emotion: Expression | undefined) => void;
   setSceneStatus: (id: string, status: Scene['status']) => void;
   approveAll: () => void;
   selectScene: (id: string | null) => void;
@@ -213,6 +215,18 @@ export const useStore = create<State>((set, get) => {
 
     updateScene: (id, patch) => {
       setScenes(get().project.scenes.map((sc) => (sc.id === id ? { ...sc, ...patch } : sc)));
+    },
+
+    setLineEmotion: (sceneId, lineIndex, emotion) => {
+      setScenes(
+        get().project.scenes.map((sc) => {
+          if (sc.id !== sceneId) return sc;
+          const lines = sc.lines.map((l, i) =>
+            i === lineIndex && l.kind === 'dialogue' ? { ...l, emotion } : l,
+          );
+          return { ...sc, lines };
+        }),
+      );
     },
 
     setSceneStatus: (id, status) => {
