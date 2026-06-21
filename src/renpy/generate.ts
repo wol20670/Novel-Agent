@@ -122,6 +122,7 @@ export function resolveSprites(
   for (const c of project.characters) {
     const charId = ids.get(c.name);
     if (!charId) continue;
+    if (c.isProtagonist) continue; // 내레이션·대사 전용(주인공) — 화면에 세우지 않음
 
     const stored = c.expressions;
     const optedIn = Object.values(stored).some(Boolean);
@@ -263,23 +264,35 @@ function assetDefs(refs: SceneAssetRef[], sprites: SpriteRef[]): string {
   return lines.join('\n') + '\n';
 }
 
-const POSITIONS = ['left', 'right', 'center'];
+/**
+ * N명을 가로 0~100 스케일로 배치한 중심 좌표(%).
+ * 1명=가운데(50), 2명=35·70, 3명+=균등 분배.
+ */
+export function spreadPositions(n: number): number[] {
+  if (n <= 1) return [50];
+  if (n === 2) return [35, 70];
+  return Array.from({ length: n }, (_, i) => Math.round(((i + 0.5) / n) * 100));
+}
 
-/** 한 장면 안에서 말하는 캐릭터들에게 등장 위치를 배정. 1명이면 center. */
-function scenePositions(scene: Scene, ids: Map<string, string>): Map<string, string> {
+/**
+ * 한 장면에서 "화면에 세울 캐릭터"(스프라이트 보유)들의 가로 위치(%)를 등장 순서대로 배정.
+ * 내레이션 전용(주인공)·스프라이트 없는 화자는 자리 계산에서 빠진다(겹침/빈자리 방지).
+ */
+function scenePositions(
+  scene: Scene,
+  ids: Map<string, string>,
+  shown: Set<string>,
+): Map<string, number> {
   const order: string[] = [];
   for (const line of scene.lines) {
     if (line.kind !== 'dialogue') continue;
     for (const id of lineSpeakerIds(line, ids)) {
-      if (!order.includes(id)) order.push(id);
+      if (shown.has(id) && !order.includes(id)) order.push(id);
     }
   }
-  const pos = new Map<string, string>();
-  if (order.length === 1) {
-    pos.set(order[0], 'center');
-  } else {
-    order.forEach((id, i) => pos.set(id, POSITIONS[i] ?? 'center'));
-  }
+  const xs = spreadPositions(order.length);
+  const pos = new Map<string, number>();
+  order.forEach((id, i) => pos.set(id, xs[i] ?? 50));
   return pos;
 }
 
@@ -289,14 +302,26 @@ function scriptBody(
   sprites: SpriteRef[],
   transition: string,
   joints: Map<string, JointSpeaker>,
+  screenH: number,
 ): string {
   const resolve = makeResolver(refs);
   const spritesByChar = new Map<string, SpriteRef[]>();
   for (const sp of sprites) {
     (spritesByChar.get(sp.charId) ?? spritesByChar.set(sp.charId, []).get(sp.charId)!).push(sp);
   }
+  const shown = new Set(spritesByChar.keys());
+  // 캐릭터 키 높이 = 화면의 90%(머리 잘림 방지). 원본 해상도 무관하게 fit 으로 정규화.
+  const charH = Math.round(screenH * 0.9);
   const out: string[] = [];
   out.push('# 자동 생성: 메인 스크립트', '');
+  // 캐릭터 배치·크기 transform — xpct(0~100) 중심, 바닥 정렬, 화면 높이에 맞춰 스케일.
+  out.push('# 캐릭터 배치: 가로 0~100 중심 좌표, 바닥 정렬, 화면 높이 90%로 스케일(어떤 해상도 이미지든 자동 맞춤)');
+  out.push('transform vn_char(xpct=50.0):');
+  out.push(`${indent(1)}fit "contain"`);
+  out.push(`${indent(1)}ysize ${charH}`);
+  out.push(`${indent(1)}xanchor 0.5 yanchor 1.0`);
+  out.push(`${indent(1)}xpos (xpct / 100.0) ypos 1.0`);
+  out.push('');
   out.push('label start:');
   if (refs.length > 0) out.push(`    jump ${refs[0].label}`);
   else out.push('    "승인된 장면이 없습니다."', '    return');
@@ -304,7 +329,7 @@ function scriptBody(
 
   for (const r of refs) {
     const s = r.scene;
-    const pos = scenePositions(s, ids);
+    const pos = scenePositions(s, ids, shown);
     out.push(`# ── ${s.title} ──`);
     out.push(`label ${r.label}:`);
     out.push(`${indent(1)}scene ${r.bgTag} with ${transition}`);
@@ -324,7 +349,7 @@ function scriptBody(
             const attr =
               (owned.some((o) => o.attr === want) && want) ||
               (owned.some((o) => o.attr === 'neutral') ? 'neutral' : owned[0].attr);
-            out.push(`${indent(1)}show ${sid} ${attr} at ${pos.get(sid) ?? 'center'}`);
+            out.push(`${indent(1)}show ${sid} ${attr} at vn_char(${pos.get(sid) ?? 50})`);
           }
         }
         // 말하는 주체: 합동이면 묶음 Character, 아니면 단일 화자.
@@ -430,7 +455,7 @@ export function generateRenpyFiles(project: Project): {
   const theme = resolveTheme(project.genre, project.guiTheme);
 
   const files: RenpyFile[] = [
-    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints) },
+    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height) },
     { path: 'game/characters.rpy', content: characterDefs(project, ids, joints) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
     { path: 'game/options.rpy', content: optionsRpy(project) },

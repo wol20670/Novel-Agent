@@ -108,10 +108,11 @@ export default function AssetsTab() {
         </p>
         {characters.length === 0 && <p className="text-gray-600 text-sm">등장 캐릭터 없음</p>}
         <div className="grid grid-cols-2 gap-3">
-          {characters.map((c) => (
+          {characters.filter((c) => !c.isProtagonist).map((c) => (
             <CharacterCard key={c.name} name={c.name} />
           ))}
         </div>
+        <NarrationOnlyRow />
       </section>
 
       <section>
@@ -181,6 +182,30 @@ function CountBadge({ n }: { n: number }) {
   );
 }
 
+/** 내레이션·대사 전용(주인공 등) 화자 목록 — 스프라이트를 만들지 않는다. 칩 클릭 시 스프라이트 캐릭터로 전환. */
+function NarrationOnlyRow() {
+  const narr = useStore((s) => s.project.characters.filter((c) => c.isProtagonist));
+  const updateChar = useStore((s) => s.updateCharacter);
+  if (narr.length === 0) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
+      <span title="주인공처럼 화면에 안 나오고 대사·내레이션만 하는 화자입니다.">
+        🗣 내레이션·대사 전용 (스프라이트 없음):
+      </span>
+      {narr.map((c) => (
+        <button
+          key={c.name}
+          className="chip border-edge hover:text-accent hover:border-accent"
+          onClick={() => updateChar(c.name, { isProtagonist: false })}
+          title="클릭하면 스프라이트를 쓰는 캐릭터로 전환합니다."
+        >
+          {c.name} <span className="text-gray-600">↩ 스프라이트 사용</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function CharacterCard({ name }: { name: string }) {
   const c = useStore((s) => s.project.characters.find((x) => x.name === name))!;
   const updateChar = useStore((s) => s.updateCharacter);
@@ -219,11 +244,20 @@ function CharacterCard({ name }: { name: string }) {
           />
         ))}
       </div>
-      {hasAny && (
-        <button className="text-[11px] text-gray-500 hover:text-rose-600 mt-2" onClick={() => clearAll(name)}>
-          스프라이트 비우기
+      <div className="flex items-center gap-3 mt-2">
+        {hasAny && (
+          <button className="text-[11px] text-gray-500 hover:text-rose-600" onClick={() => clearAll(name)}>
+            스프라이트 비우기
+          </button>
+        )}
+        <button
+          className="text-[11px] text-gray-500 hover:text-amber-600 ml-auto"
+          onClick={() => updateChar(name, { isProtagonist: true })}
+          title="주인공처럼 화면에 세우지 않고 대사·내레이션만 하게 합니다."
+        >
+          내레이션 전용으로
         </button>
-      )}
+      </div>
     </div>
   );
 }

@@ -9,6 +9,9 @@ const PALETTE = [
   '#d9b3ff', '#a3f0e0', '#ffc4a3', '#b3c4ff',
 ];
 
+/** 기본적으로 내레이션·대사 전용으로 보는 화자 이름(스프라이트 미생성). UI 에서 토글 가능. */
+const PROTAGONIST_NAMES = new Set(['주인공', '나', '플레이어']);
+
 let counter = 0;
 function uid(prefix: string): string {
   counter += 1;
@@ -158,12 +161,13 @@ export class SceneBuilder {
   }
 
   finish(): BuildResult {
-    // 화자 → 캐릭터. 주인공으로 보이는 이름은 첫 색을 우선 배정.
+    // 화자 → 캐릭터. "주인공" 류는 내레이션·대사 전용으로 표시(스프라이트 미생성).
     const names = [...this.speakers];
     const characters: Character[] = names.map((name, i) => ({
       name,
       color: PALETTE[i % PALETTE.length],
       expressions: {},
+      isProtagonist: PROTAGONIST_NAMES.has(name),
     }));
     return { scenes: this.scenes, characters };
   }

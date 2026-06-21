@@ -54,6 +54,11 @@ export interface Character {
   color: string;
   /** 표정 → assetId (스프라이트). v1에서는 선택만 보관. */
   expressions: Partial<Record<Expression, string>>;
+  /**
+   * 내레이션·대사 전용 화자(주인공 등). true 면 화면에 스프라이트를 세우지 않고
+   * 에셋 창의 스프라이트 관리에서도 제외한다. 대사 이름표·분기에는 정상 참여.
+   */
+  isProtagonist?: boolean;
 }
 
 export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm';
