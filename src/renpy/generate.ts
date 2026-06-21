@@ -50,10 +50,11 @@ export function expressionPlan(project: Project, ids: Map<string, string>): Map<
     if (scene.status !== 'approved') continue;
     for (const line of scene.lines) {
       if (line.kind !== 'dialogue') continue;
-      const id = ids.get(line.speaker);
-      if (!id) continue;
-      const set = plan.get(id) ?? plan.set(id, new Set<Expression>()).get(id)!;
-      set.add(effectiveEmotion(line, scene));
+      const emo = effectiveEmotion(line, scene);
+      for (const id of lineSpeakerIds(line, ids)) {
+        const set = plan.get(id) ?? plan.set(id, new Set<Expression>()).get(id)!;
+        set.add(emo);
+      }
     }
   }
   return plan;
@@ -65,6 +66,45 @@ export function charIdMap(project: Project): Map<string, string> {
   const m = new Map<string, string>();
   for (const c of project.characters) m.set(c.name, slug.get(c.name));
   return m;
+}
+
+/** 한 대사 줄을 "화면에 세울 화자 id 목록" 으로. 합동 대사면 멤버 전원, 아니면 화자 1명. */
+export function lineSpeakerIds(line: Line, ids: Map<string, string>): string[] {
+  if (line.kind !== 'dialogue') return [];
+  if (line.members && line.members.length) {
+    return line.members.map((m) => ids.get(m)).filter((x): x is string => !!x);
+  }
+  const id = ids.get(line.speaker);
+  return id ? [id] : [];
+}
+
+/** 합동 대사 화자(둘 이상 동시) — 이름표 묶음용 Character. 멤버는 실제 캐릭터를 그대로 공유한다. */
+export interface JointSpeaker {
+  id: string; // cj_1 …
+  label: string; // "한지수 & 강민주"
+  members: string[];
+  color: string;
+}
+
+/** 승인 장면에 등장하는 합동 대사 라벨 → JointSpeaker. 같은 라벨은 한 번만 정의된다. */
+export function resolveJointSpeakers(project: Project): Map<string, JointSpeaker> {
+  const slug = new SlugMap('cj');
+  const colorByName = new Map(project.characters.map((c) => [c.name, c.color]));
+  const out = new Map<string, JointSpeaker>();
+  for (const scene of project.scenes) {
+    if (scene.status !== 'approved') continue;
+    for (const line of scene.lines) {
+      if (line.kind !== 'dialogue' || !line.members || line.members.length < 2) continue;
+      if (out.has(line.speaker)) continue;
+      out.set(line.speaker, {
+        id: slug.get(line.speaker),
+        label: line.speaker,
+        members: line.members,
+        color: colorByName.get(line.members[0]) ?? '#ffffff',
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -170,6 +210,9 @@ export function resolveSceneAssets(project: Project): SceneAssetRef[] {
 function makeResolver(refs: SceneAssetRef[]) {
   return (title: string | undefined, fromOrdinal: number): string | undefined => {
     if (!title) return undefined;
+    const t = title.trim();
+    // 예약어: 이야기 종료 라벨로 점프(분기 엔딩이 다음 장면으로 새는 것을 막음).
+    if (t === '끝' || t === '_vn_end' || /^(end)$/i.test(t)) return '_vn_end';
     const matches = refs.filter((r) => r.scene.title.trim() === title.trim());
     if (matches.length === 0) return undefined;
     const after = matches.find((m) => m.ordinal > fromOrdinal);
@@ -177,12 +220,22 @@ function makeResolver(refs: SceneAssetRef[]) {
   };
 }
 
-function characterDefs(project: Project, ids: Map<string, string>): string {
+function characterDefs(
+  project: Project,
+  ids: Map<string, string>,
+  joints: Map<string, JointSpeaker>,
+): string {
   const lines = ['# 자동 생성: 캐릭터 정의', ''];
   for (const c of project.characters) {
     lines.push(`define ${ids.get(c.name)} = Character("${esc(c.name)}", color="${c.color}")`);
   }
   if (project.characters.length === 0) lines.push('# (등장 캐릭터 없음)');
+  if (joints.size) {
+    lines.push('', '# 합동 대사 화자(둘 이상 동시) — 이름표만 묶음, 스프라이트는 멤버 각자');
+    for (const j of joints.values()) {
+      lines.push(`define ${j.id} = Character("${esc(j.label)}", color="${j.color}")`);
+    }
+  }
   return lines.join('\n') + '\n';
 }
 
@@ -217,8 +270,9 @@ function scenePositions(scene: Scene, ids: Map<string, string>): Map<string, str
   const order: string[] = [];
   for (const line of scene.lines) {
     if (line.kind !== 'dialogue') continue;
-    const id = ids.get(line.speaker);
-    if (id && !order.includes(id)) order.push(id);
+    for (const id of lineSpeakerIds(line, ids)) {
+      if (!order.includes(id)) order.push(id);
+    }
   }
   const pos = new Map<string, string>();
   if (order.length === 1) {
@@ -234,6 +288,7 @@ function scriptBody(
   ids: Map<string, string>,
   sprites: SpriteRef[],
   transition: string,
+  joints: Map<string, JointSpeaker>,
 ): string {
   const resolve = makeResolver(refs);
   const spritesByChar = new Map<string, SpriteRef[]>();
@@ -260,17 +315,24 @@ function scriptBody(
 
     for (const line of s.lines) {
       if (line.kind === 'dialogue') {
-        const id = ids.get(line.speaker)!;
-        // 스프라이트가 있으면 화자 등장(표정 반영)
-        const owned = spritesByChar.get(id);
-        if (owned && owned.length) {
-          const want = EXPR_ATTR[effectiveEmotion(line, s)];
-          const attr =
-            (owned.some((o) => o.attr === want) && want) ||
-            (owned.some((o) => o.attr === 'neutral') ? 'neutral' : owned[0].attr);
-          out.push(`${indent(1)}show ${id} ${attr} at ${pos.get(id) ?? 'center'}`);
+        const speakerIds = lineSpeakerIds(line, ids);
+        const want = EXPR_ATTR[effectiveEmotion(line, s)];
+        // 스프라이트가 있는 화자(들) 등장 — 합동 대사면 멤버 전원이 함께 선다.
+        for (const sid of speakerIds) {
+          const owned = spritesByChar.get(sid);
+          if (owned && owned.length) {
+            const attr =
+              (owned.some((o) => o.attr === want) && want) ||
+              (owned.some((o) => o.attr === 'neutral') ? 'neutral' : owned[0].attr);
+            out.push(`${indent(1)}show ${sid} ${attr} at ${pos.get(sid) ?? 'center'}`);
+          }
         }
-        out.push(`${indent(1)}${id} "${esc(line.text)}"`);
+        // 말하는 주체: 합동이면 묶음 Character, 아니면 단일 화자.
+        const voiceId =
+          line.members && line.members.length
+            ? joints.get(line.speaker)?.id ?? speakerIds[0] ?? ids.get(line.speaker)
+            : ids.get(line.speaker);
+        out.push(`${indent(1)}${voiceId} "${esc(line.text)}"`);
       } else {
         out.push(`${indent(1)}"${esc(line.text)}"`);
       }
@@ -364,11 +426,12 @@ export function generateRenpyFiles(project: Project): {
   const ids = charIdMap(project);
   const plan = expressionPlan(project, ids);
   const sprites = resolveSprites(project, ids, plan);
+  const joints = resolveJointSpeakers(project);
   const theme = resolveTheme(project.genre, project.guiTheme);
 
   const files: RenpyFile[] = [
-    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition) },
-    { path: 'game/characters.rpy', content: characterDefs(project, ids) },
+    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints) },
+    { path: 'game/characters.rpy', content: characterDefs(project, ids, joints) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
     ...generateGuiFiles(theme, project.width, project.height),

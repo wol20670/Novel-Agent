@@ -15,6 +15,18 @@ function uid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${counter}`;
 }
 
+/**
+ * 합동 화자 분해: "한지수, 강민주" / "한지수 & 강민주" → ["한지수","강민주"].
+ * 구분자(, & / · 、)가 없어 한 명이면 빈 배열을 돌려준다(= 일반 단일 화자).
+ */
+function splitJointSpeaker(raw: string): string[] {
+  const parts = raw
+    .split(/\s*[,&/·、＆]\s*/)
+    .map((p) => p.replace(/\s*[(（].*$/, '').trim()) // 끝의 (표정) 태그 제거
+    .filter(Boolean);
+  return parts.length >= 2 ? parts : [];
+}
+
 /** 정규화된 한 행. speaker 가 있으면 대사, 없으면 본문(지문/태그)이다. */
 export interface Row {
   speaker?: string;
@@ -57,8 +69,40 @@ export class SceneBuilder {
     this.scenes.push(this.current);
   }
 
+  /** 분할 장면의 표시 제목 루트(기존 " · 배경" 접미를 떼어 원 #S 제목만). */
+  private rootTitle(t: string): string {
+    const i = t.indexOf(' · ');
+    return (i >= 0 ? t.slice(0, i) : t).trim();
+  }
+
+  /**
+   * 한 장면 안에서 배경/BGM 이 "이미 무언가 보여준 뒤" 다시 바뀌면 새 비트로 자동 분할한다.
+   * (데이터 모델은 장면당 배경·BGM 1개라, 분할하지 않으면 마지막 값만 남고 앞 배경이 사라진다.)
+   * 분할 장면은 시각 연속성을 위해 직전 배경을 이어받고, 제목은 "원제목 · 새값" 으로 구분한다.
+   */
+  private splitBeat(label: string, carryBackground?: string) {
+    const root = this.current ? this.rootTitle(this.current.title) : '장면';
+    this.startScene(`${root} · ${label}`);
+    if (carryBackground) this.current!.background = carryBackground;
+  }
+
   addDialogue(speaker: string, text: string, emotion?: string) {
     const sc = this.ensureScene();
+
+    // 합동 대사: "한지수, 강민주" / "한지수 & 강민주" 처럼 둘 이상이 동시에 말하는 줄.
+    // 멤버(실제 등록 이름) 각각을 캐릭터로 등록하고, 표시 라벨은 " & " 로 묶는다(유령 캐릭터 없음).
+    const members = splitJointSpeaker(speaker);
+    if (members.length >= 2) {
+      members.forEach((m) => this.speakers.add(m));
+      sc.lines.push({
+        kind: 'dialogue',
+        speaker: members.join(' & '),
+        text: text.trim(),
+        members,
+      });
+      return;
+    }
+
     // "이름(표정)" 형태에서 표정 추출. 괄호는 반각/전각 모두 허용.
     let name = speaker.trim();
     let emo = emotion;
@@ -79,10 +123,26 @@ export class SceneBuilder {
   }
 
   setBackground(name: string) {
-    this.ensureScene().background = name.trim();
+    const sc = this.ensureScene();
+    const v = name.trim();
+    // 이미 대사/지문이 나온 장면에서 배경이 "다른 값"으로 바뀌면 새 비트로 분할.
+    if (sc.background && sc.background !== v && sc.lines.length > 0) {
+      this.splitBeat(v);
+      this.current!.background = v;
+    } else {
+      sc.background = v;
+    }
   }
   setBgm(name: string) {
-    this.ensureScene().bgm = name.trim();
+    const sc = this.ensureScene();
+    const v = name.trim();
+    // BGM 이 장면 도중 다른 곡으로 바뀌면 분할(직전 배경은 이어받아 화면은 그대로 유지).
+    if (sc.bgm && sc.bgm !== v && sc.lines.length > 0) {
+      this.splitBeat(sc.background || v, sc.background);
+      this.current!.bgm = v;
+    } else {
+      sc.bgm = v;
+    }
   }
   addDirection(note: string) {
     this.ensureScene().direction.push(note.trim());
@@ -137,6 +197,11 @@ export function applyTag(b: SceneBuilder, body: string): boolean {
   }
   if (t.startsWith('#점프')) {
     b.setJump(t.replace(/^#점프\s*/, ''));
+    return true;
+  }
+  // 이 장면에서 이야기를 끝맺음(분기 엔딩). 다음 라벨로 새지 않도록 종료로 점프.
+  if (t === '#끝' || t.startsWith('#끝') || /^#(END|end)\b/.test(t)) {
+    b.setJump('끝');
     return true;
   }
   if (t.startsWith('>')) {

@@ -15,7 +15,14 @@ export const EXPRESSIONS = ['기본', '기쁨', '슬픔', '화남', '놀람', '�
 export type Expression = (typeof EXPRESSIONS)[number];
 
 export type Line =
-  | { kind: 'dialogue'; speaker: string; text: string; emotion?: string }
+  | {
+      kind: 'dialogue';
+      speaker: string; // 표시 이름표 (합동 대사면 "한지수 & 강민주")
+      text: string;
+      emotion?: string;
+      /** 합동 대사(둘 이상이 동시에) — 등록 캐릭터 이름 배열. 있으면 speaker 는 묶음 라벨이다. */
+      members?: string[];
+    }
   | { kind: 'narration'; text: string };
 
 export interface Choice {
