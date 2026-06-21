@@ -5,6 +5,7 @@ import type { Project, Scene, Line, Character, Expression } from '../types';
 import { SlugMap } from './slug';
 import { generateGuiFiles, resolveTheme } from './gui';
 import { inferEmotion } from '../generators/emotion';
+import { enforceContrast } from '../generators/theme/color';
 
 export interface RenpyFile {
   path: string; // game/ 이하 경로
@@ -225,16 +226,19 @@ function characterDefs(
   project: Project,
   ids: Map<string, string>,
   joints: Map<string, JointSpeaker>,
+  dialogueBox: string,
 ): string {
+  // 이름표 색은 캐릭터 고유색을 쓰되, 대사창 배경 대비 읽히도록 보정(어두운 창=밝게/밝은 창=어둡게).
+  const nameColor = (hue: string) => enforceContrast(hue, dialogueBox, 4.5);
   const lines = ['# 자동 생성: 캐릭터 정의', ''];
   for (const c of project.characters) {
-    lines.push(`define ${ids.get(c.name)} = Character("${esc(c.name)}", color="${c.color}")`);
+    lines.push(`define ${ids.get(c.name)} = Character("${esc(c.name)}", color="${nameColor(c.color)}")`);
   }
   if (project.characters.length === 0) lines.push('# (등장 캐릭터 없음)');
   if (joints.size) {
     lines.push('', '# 합동 대사 화자(둘 이상 동시) — 이름표만 묶음, 스프라이트는 멤버 각자');
     for (const j of joints.values()) {
-      lines.push(`define ${j.id} = Character("${esc(j.label)}", color="${j.color}")`);
+      lines.push(`define ${j.id} = Character("${esc(j.label)}", color="${nameColor(j.color)}")`);
     }
   }
   return lines.join('\n') + '\n';
@@ -270,7 +274,7 @@ function assetDefs(refs: SceneAssetRef[], sprites: SpriteRef[]): string {
  */
 export function spreadPositions(n: number): number[] {
   if (n <= 1) return [50];
-  if (n === 2) return [35, 70];
+  if (n === 2) return [30, 70]; // 좌·우 대칭(양끝에서 30)
   return Array.from({ length: n }, (_, i) => Math.round(((i + 0.5) / n) * 100));
 }
 
@@ -456,7 +460,7 @@ export function generateRenpyFiles(project: Project): {
 
   const files: RenpyFile[] = [
     { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height) },
-    { path: 'game/characters.rpy', content: characterDefs(project, ids, joints) },
+    { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
     ...generateGuiFiles(theme, project.width, project.height),
