@@ -87,7 +87,10 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
   const name =
     cur?.kind === 'dialogue' ? (isJoint ? cur.members!.join(' & ') : cur.speaker) : null;
   const nameColor = name && !isJoint ? charByName.get(name)?.color : undefined;
+  // 주인공(내레이션 전용)은 얼굴이 없으니 대사창에 표정 라벨을 표시하지 않는다.
+  const curNarrOnly = cur?.kind === 'dialogue' && !isJoint && isNarrOnly(cur.speaker);
   const curEmo = cur ? emoOf(cur) : '기본';
+  const showEmo = !!cur && !curNarrOnly && curEmo !== '기본';
 
   return (
     <div>
@@ -108,7 +111,7 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
             {name && (
               <div className="font-bold text-sm mb-0.5" style={{ color: nameColor ?? '#ffffff' }}>
                 {name}
-                {curEmo !== '기본' && (
+                {showEmo && (
                   <span className="ml-1.5 text-[11px] font-normal opacity-90">
                     {EXPR_EMOJI[curEmo]} {curEmo}
                   </span>
