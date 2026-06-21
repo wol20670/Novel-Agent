@@ -4,6 +4,7 @@ import { getAsset } from '../storage/assetStore';
 import { downloadBlob } from '../zip/buildZip';
 import Spinner from './Spinner';
 import UploadButton from './UploadButton';
+import ScenePlayer from './ScenePlayer';
 
 export default function RightPanel() {
   const sceneId = useStore((s) => s.selectedSceneId);
@@ -43,9 +44,7 @@ export default function RightPanel() {
         <>
           <div>
             <p className="font-semibold mb-2 truncate text-gray-200">{scene.title}</p>
-            <div className="aspect-video rounded-xl border border-edge bg-ink overflow-hidden flex items-center justify-center text-xs text-gray-600">
-              {bgUrl ? <img src={bgUrl} className="w-full h-full object-cover" /> : '배경 미생성'}
-            </div>
+            <ScenePlayer scene={scene} bgUrl={bgUrl} />
           </div>
 
           <div className="flex gap-2">
