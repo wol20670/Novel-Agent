@@ -25,6 +25,14 @@ import {
   disconnectFolder as fsDisconnectFolder,
   syncProjectToFolder,
 } from './project/folderSync';
+import {
+  connectImageArchive,
+  getArchiveFolderName,
+  disconnectImageArchive,
+  archiveImage,
+  safeFileName,
+  timestamp,
+} from './project/imageArchive';
 
 export type Tab = 'scenes' | 'assets' | 'renpy';
 
@@ -113,6 +121,11 @@ interface State {
   syncToFolder: () => Promise<void>;
   changeFolder: () => Promise<void>;
   disconnectFolder: () => Promise<void>;
+
+  // 생성 이미지 자동 보관 폴더 (재생성해도 원본 보존)
+  archiveFolderName: string | null;
+  connectArchive: () => Promise<void>;
+  disconnectArchive: () => Promise<void>;
 }
 
 export const useStore = create<State>((set, get) => {
@@ -175,6 +188,7 @@ export const useStore = create<State>((set, get) => {
     toastType: 'info',
     folderSupported: isFolderSyncSupported(),
     folderName: null,
+    archiveFolderName: null,
 
     setRawInput: (text) => {
       set((s) => ({ project: { ...s.project, rawInput: text } }));
@@ -304,6 +318,10 @@ export const useStore = create<State>((set, get) => {
           filename: `sprite_${name}_${expr}.png`,
           createdAt: Date.now(),
         };
+        // 비용 들인 AI 입화는 보관 폴더에 사본을 쌓아둔다(재생성해도 원본 보존).
+        if (source === 'openai') {
+          void archiveImage(blob, `characters/${safeFileName(name)}/${safeFileName(expr)}_${timestamp()}.png`);
+        }
         const prev = char.expressions[expr];
         set((s) => ({
           assets: { ...s.assets, [id]: meta },
@@ -398,6 +416,10 @@ export const useStore = create<State>((set, get) => {
           filename: `bg_${sceneId}.png`,
           createdAt: Date.now(),
         };
+        // 비용 들인 AI 배경은 보관 폴더에 사본을 쌓아둔다(재생성해도 원본 보존).
+        if (source === 'openai') {
+          void archiveImage(blob, `backgrounds/${safeFileName(scene.background || scene.title)}_${timestamp()}.png`);
+        }
         // 같은 배경 이름을 쓰는 모든 장면에 함께 적용(생성 1회 = 일관성 + 비용 절감).
         const key = backgroundKey(scene);
         const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === key);
@@ -721,9 +743,12 @@ export const useStore = create<State>((set, get) => {
       } else {
         set({ apiKey });
       }
-      // 이전에 연결한 Ren'Py 폴더 이름 복원(권한 프롬프트 없이 표시만).
+      // 이전에 연결한 Ren'Py 폴더 / 이미지 보관 폴더 이름 복원(권한 프롬프트 없이 표시만).
       getConnectedFolderName().then((name) => {
         if (name) set({ folderName: name });
+      });
+      getArchiveFolderName().then((name) => {
+        if (name) set({ archiveFolderName: name });
       });
     },
 
@@ -813,6 +838,28 @@ export const useStore = create<State>((set, get) => {
       await fsDisconnectFolder();
       set({ folderName: null });
       flash('폴더 연결을 해제했습니다.');
+    },
+
+    connectArchive: async () => {
+      if (!isFolderSyncSupported()) {
+        flash('이 브라우저는 폴더 접근을 지원하지 않습니다. Chrome/Edge 를 사용하세요.');
+        return;
+      }
+      try {
+        const name = await connectImageArchive();
+        set({ archiveFolderName: name });
+        flash(`이미지 보관 폴더 연결: "${name}". 이제 생성하는 AI 이미지가 이 폴더에 자동 저장됩니다.`);
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (/abort/i.test(msg)) return; // 선택 취소
+        flash(`보관 폴더 연결 실패: ${msg}`);
+      }
+    },
+
+    disconnectArchive: async () => {
+      await disconnectImageArchive();
+      set({ archiveFolderName: null });
+      flash('이미지 보관 폴더 연결을 해제했습니다.');
     },
   };
 });

@@ -19,6 +19,10 @@ export default function LeftPanel() {
   const setApiKey = useStore((s) => s.setApiKey);
   const exportProject = useStore((s) => s.exportProject);
   const importProject = useStore((s) => s.importProject);
+  const folderSupported = useStore((s) => s.folderSupported);
+  const archiveFolderName = useStore((s) => s.archiveFolderName);
+  const connectArchive = useStore((s) => s.connectArchive);
+  const disconnectArchive = useStore((s) => s.disconnectArchive);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const projFileRef = useRef<HTMLInputElement>(null);
@@ -160,6 +164,37 @@ export default function LeftPanel() {
           {apiKey ? '키 저장됨 · OpenAI 모드' : '키 없음 · 오프라인(Canvas) 모드'}
         </div>
       </section>
+
+      {/* 이미지 보관 폴더 */}
+      {folderSupported && (
+        <section className="flex flex-col gap-2">
+          <h2 className="section-title">📁 이미지 보관 폴더 · 선택</h2>
+          <p className="text-[11px] text-gray-500 leading-snug">
+            폴더를 연결하면 <b className="text-gray-400">AI 로 생성한 배경·캐릭터 입화</b>가 생성될 때마다 그
+            폴더에 자동 저장됩니다(<code className="text-accent">backgrounds/</code>,{' '}
+            <code className="text-accent">characters/</code> 로 분류, 타임스탬프 파일명). 재생성해도 이전
+            이미지가 폴더에 그대로 남아 나중에 다시 고를 수 있습니다.
+          </p>
+          {archiveFolderName ? (
+            <div className="flex items-center gap-2">
+              <div className="text-[11px] flex items-center gap-1.5 text-emerald-600 flex-1 min-w-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                <span className="truncate">보관 중: {archiveFolderName}</span>
+              </div>
+              <button className="btn-ghost text-[11px]" onClick={connectArchive} title="다른 폴더로 변경">
+                변경
+              </button>
+              <button className="btn-ghost text-[11px] text-gray-500" onClick={disconnectArchive}>
+                해제
+              </button>
+            </div>
+          ) : (
+            <button className="btn-ghost" onClick={connectArchive}>
+              📂 보관 폴더 연결
+            </button>
+          )}
+        </section>
+      )}
     </div>
   );
 }
