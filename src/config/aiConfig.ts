@@ -30,6 +30,12 @@ export interface AiConfig {
     /** 배경/CG: 가로·세로 비율 → 실제 출력 사이즈 매핑 임계값. */
     landscapeRatio: number; // 이 값보다 가로가 길면 1536x1024
     portraitRatio: number; //  이 값보다 세로가 길면 1024x1536
+    /**
+     * 모든 이미지(배경·CG·스프라이트)에 공통으로 붙는 "그림체" 지시.
+     * 원하는 룩이 바뀌면 여기 한 줄만 고치면 전체 톤이 바뀐다.
+     * gpt-image-1 은 별도 네거티브 프롬프트가 없어, 피하고 싶은 것도 문장으로 적는다.
+     */
+    artStyle: string;
     /** 캐릭터 스프라이트(입화) 설정. */
     sprite: {
       /** 스프라이트는 세로로 길다 → 세로형 사이즈로 고정. */
@@ -65,6 +71,11 @@ export const aiConfig: AiConfig = {
     quality: 'medium',
     landscapeRatio: 1.2,
     portraitRatio: 0.83,
+    artStyle:
+      '일본풍 애니메이션 비주얼노벨 그림체, 2D 셀 셰이딩, 손그림 감성의 디테일한 일러스트, ' +
+      '부드러운 자연광, 선명한 라인아트, 채도 높은 색감. ' +
+      '(Japanese anime / visual-novel art style, 2D cel-shaded anime illustration, hand-drawn look, ' +
+      'soft lighting, clean line art — NOT photorealistic, NOT a 3D render, NOT a photo)',
     sprite: {
       size: '1024x1536',
       transparent: true,

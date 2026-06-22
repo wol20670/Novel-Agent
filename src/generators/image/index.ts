@@ -35,7 +35,7 @@ export async function generateImage(req: ImageRequest): Promise<ImageResult> {
   return { blob, source: 'canvas' };
 }
 
-/** 장면 정보 → 이미지 프롬프트 문자열. */
+/** 장면 정보 → 이미지 프롬프트 문자열. 그림체(artStyle)는 aiConfig 한 곳에서 관리. */
 export function buildBackgroundPrompt(
   background: string | undefined,
   title: string,
@@ -44,13 +44,14 @@ export function buildBackgroundPrompt(
   const parts = [
     background || title,
     ...directions,
-    '비주얼노벨 배경 일러스트, 인물 없음, 와이드 구도, 고품질 디지털 페인팅',
+    '비주얼노벨 배경(인물 없음), 와이드 구도',
+    aiConfig.image.artStyle,
   ].filter(Boolean);
   return parts.join(', ');
 }
 
 export function buildCgPrompt(desc: string, directions: string[]): string {
-  return [desc, ...directions, '비주얼노벨 CG 일러스트, 감정적인 한 장면, 고품질'].join(', ');
+  return [desc, ...directions, '비주얼노벨 CG 한 장면(감정적 연출)', aiConfig.image.artStyle].join(', ');
 }
 
 export interface SpriteRequest {
@@ -73,7 +74,8 @@ function spritePrompt(req: SpriteRequest): string {
     `비주얼노벨 캐릭터 입화(서 있는 전신), 이름 ${req.name}`,
     req.appearance,
     `표정: ${req.expression}`,
-    '투명 배경, 단일 인물, 깔끔한 셀 채색, 정면',
+    '투명 배경, 단일 인물, 정면',
+    aiConfig.image.artStyle,
   ]
     .filter(Boolean)
     .join(', ');
