@@ -4,7 +4,7 @@
 import { canvasImage } from './canvasProvider';
 import { canvasSprite } from './canvasSprite';
 import { openaiImage, openaiImageEdit } from './openaiProvider';
-import { aiConfig } from '../../config/aiConfig';
+import { aiConfig, type ImageQuality } from '../../config/aiConfig';
 import type { Expression } from '../../types';
 
 export interface ImageRequest {
@@ -15,6 +15,8 @@ export interface ImageRequest {
   width: number;
   height: number;
   apiKey?: string;
+  /** 생성 품질(비용 제어). 미지정 시 배경 기본값. */
+  quality?: ImageQuality;
 }
 
 export interface ImageResult {
@@ -28,6 +30,7 @@ export async function generateImage(req: ImageRequest): Promise<ImageResult> {
       apiKey: req.apiKey.trim(),
       width: req.width,
       height: req.height,
+      quality: req.quality ?? aiConfig.image.quality.background,
     });
     return { blob, source: 'openai' };
   }
@@ -91,11 +94,12 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
   const apiKey = req.apiKey?.trim();
   if (apiKey) {
     const { consistency, transparent, size } = aiConfig.image.sprite;
+    const quality = aiConfig.image.quality.sprite;
     if (req.reference && consistency === 'reference') {
       const blob = await openaiImageEdit(
         `이 캐릭터의 표정만 '${req.expression}'(으)로 바꾸고, 인물의 외형·의상·머리·색감은 그대로 유지`,
         req.reference,
-        { apiKey, transparent, size },
+        { apiKey, transparent, size, quality },
       );
       return { blob, source: 'openai' };
     }
@@ -104,6 +108,7 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
       width: 1024,
       height: 1536,
       transparent,
+      quality,
     });
     return { blob, source: 'openai' };
   }

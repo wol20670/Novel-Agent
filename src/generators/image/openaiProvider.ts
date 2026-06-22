@@ -51,7 +51,7 @@ export async function openaiImage(prompt: string, opts: OpenAIImageOpts): Promis
       prompt,
       n: 1,
       size: normalizeImageSize(opts.width, opts.height),
-      quality: opts.quality ?? aiConfig.image.quality,
+      quality: opts.quality ?? 'medium',
       ...(opts.transparent ? { background: 'transparent' } : {}),
     }),
   });
@@ -80,7 +80,7 @@ export async function openaiImageEdit(
   form.append('prompt', prompt);
   form.append('n', '1');
   form.append('size', opts.size ?? aiConfig.image.sprite.size);
-  form.append('quality', opts.quality ?? aiConfig.image.quality);
+  form.append('quality', opts.quality ?? 'medium');
   if (opts.transparent) form.append('background', 'transparent');
   form.append('image', reference, 'reference.png');
 

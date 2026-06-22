@@ -25,8 +25,13 @@ export interface AiConfig {
     editEndpoint: string;
     /** 이미지 모델. 실연동 시 변경 지점. */
     model: string;
-    /** 생성 품질. high = 더 또렷/고비용, low = 빠름/저비용. */
-    quality: ImageQuality;
+    /**
+     * 에셋 종류별 생성 품질 (비용에 직접 영향).
+     * gpt-image-1 단가(1024²): low ≈ $0.01 · medium ≈ $0.04 · high ≈ $0.17.
+     *  - background: 뒤에 깔리고 텍스트·캐릭터에 가려져 low 로도 충분(비용 4배↓). 최종본만 medium↑.
+     *  - cg/sprite: 초점이 되는 그림이라 medium 권장.
+     */
+    quality: { background: ImageQuality; cg: ImageQuality; sprite: ImageQuality };
     /** 배경/CG: 가로·세로 비율 → 실제 출력 사이즈 매핑 임계값. */
     landscapeRatio: number; // 이 값보다 가로가 길면 1536x1024
     portraitRatio: number; //  이 값보다 세로가 길면 1024x1536
@@ -68,7 +73,7 @@ export const aiConfig: AiConfig = {
     endpoint: 'https://api.openai.com/v1/images/generations',
     editEndpoint: 'https://api.openai.com/v1/images/edits',
     model: 'gpt-image-1',
-    quality: 'medium',
+    quality: { background: 'low', cg: 'medium', sprite: 'medium' },
     landscapeRatio: 1.2,
     portraitRatio: 0.83,
     artStyle:
