@@ -220,6 +220,16 @@ function ProjectMeta() {
         </p>
       </div>
 
+      <div>
+        <span className="label">크레딧 / 라이선스 고지 (게임 내 표시)</span>
+        <textarea
+          className="field text-xs h-20 resize-y"
+          placeholder={'사용한 일러스트·BGM·효과음·성우 등의 출처와 라이선스를 적으세요.\n예) 배경 일러스트: ○○○ / BGM: △△△ (CC-BY 4.0)\n상업 배포 전 반드시 정리 — 엔진·나눔고딕 라이선스는 자동 표기됩니다.'}
+          value={project.credits ?? ''}
+          onChange={(e) => update({ credits: e.target.value })}
+        />
+      </div>
+
       <ThemeStudio />
     </section>
   );

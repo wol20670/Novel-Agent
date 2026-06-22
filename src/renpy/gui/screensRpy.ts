@@ -293,6 +293,8 @@ screen navigation():
 
         textbutton _("정보") action ShowMenu("about")
 
+        textbutton _("크레딧") action ShowMenu("credits")
+
         if renpy.variant("pc") or (renpy.variant("web") and not renpy.variant("mobile")):
 
             textbutton _("도움말") action ShowMenu("help")
@@ -511,6 +513,34 @@ style about_text is gui_text
 
 style about_label_text:
     size gui.label_text_size
+
+
+## Credits screen #############################################################
+## 크레딧/라이선스 고지 — 사용한 에셋 출처와 엔진/폰트 라이선스를 표기(상업 배포용).
+## gui.credits_extra 는 game/credits.rpy 에서 항상 정의된다(작성 내용은 앱에서 입력).
+
+screen credits():
+
+    tag menu
+
+    use game_menu(_("크레딧"), scroll="viewport"):
+
+        style_prefix "about"
+
+        vbox:
+            spacing gui.scale(6)
+
+            label "[config.name!t]"
+            text _("버전 [config.version!t]\n")
+
+            if gui.about:
+                text "[gui.about!t]\n"
+
+            text "[gui.credits_extra]\n"
+
+            text _("{b}엔진{/b}\nMade with {a=https://www.renpy.org/}Ren'Py{/a} [renpy.version_only].\n[renpy.license!t]\n")
+
+            text _("{b}폰트{/b}\n나눔고딕(NanumGothic) — SIL Open Font License 1.1 (상업적 사용 허용).")
 
 
 ## Load and Save screens #######################################################

@@ -465,7 +465,8 @@ function readme(theme: { label: string }): string {
 - game/script.rpy      : 승인된 장면의 대사·연출·분기
 - game/characters.rpy  : 캐릭터 정의
 - game/assets.rpy      : 이미지·오디오 에셋 정의
-- game/options.rpy     : 해상도·제목·저자
+- game/options.rpy     : 해상도·제목·저자 + 배포 빌드 제외 규칙(build.classify)
+- game/credits.rpy     : 크레딧/라이선스 고지 데이터 (게임 내 "크레딧" 화면)
 - game/gui.rpy         : 테마 변수(색·폰트·전환) — 자체 GUI
 - game/screens.rpy     : 자체 제작 화면 전체 (zero-PNG)
 - game/guisupport.rpy  : gui.scale 정의
@@ -491,6 +492,32 @@ Ren'Py 런처 → **"Build Distributions"** → 플랫폼(Windows/Mac/Linux/Web)
 `;
 }
 
+/** Ren'Py 텍스트 리터럴용 안전 이스케이프: 따옴표·역슬래시·개행 + 텍스트태그([],{}) 무력화. */
+function escRpyText(s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\[/g, '[[')
+    .replace(/\{/g, '{{')
+    .replace(/\r?\n/g, '\\n')
+    .trim();
+}
+
+/**
+ * game/credits.rpy — 게임 내 "크레딧/라이선스 고지" 화면이 쓰는 데이터.
+ * screens.rpy 의 credits 화면이 gui.credits_extra 를 항상 참조하므로 이 파일은 늘 생성한다.
+ */
+function creditsRpy(project: Project): string {
+  const extra =
+    project.credits?.trim() ||
+    '여기에 사용한 일러스트·BGM·효과음·성우 등의 출처와 라이선스를 적으세요. (상업 배포 전 반드시 정리)';
+  return [
+    '# 자동 생성: 크레딧/라이선스 고지 데이터 (screens.rpy 의 credits 화면이 사용)',
+    `define gui.credits_extra = "${escRpyText(extra)}"`,
+    '',
+  ].join('\n');
+}
+
 /** Ren'Py 텍스트 파일 전체를 생성한다. */
 export function generateRenpyFiles(project: Project): {
   files: RenpyFile[];
@@ -510,6 +537,7 @@ export function generateRenpyFiles(project: Project): {
     { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
+    { path: 'game/credits.rpy', content: creditsRpy(project) },
     ...generateGuiFiles(theme, project.width, project.height),
     { path: 'README.md', content: readme(theme) },
   ];

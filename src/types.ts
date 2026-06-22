@@ -99,6 +99,11 @@ export interface Project {
   guiTheme?: GuiTheme;
   /** AI 테마 생성에 쓰는 분위기/요청 텍스트(선택). */
   mood?: string;
+  /**
+   * 게임 내 "크레딧/라이선스 고지" 화면에 표시할 자유 텍스트(선택).
+   * 사용한 일러스트·BGM·효과음·성우 등의 출처/라이선스를 적는다(상업 배포 전 필수 정리).
+   */
+  credits?: string;
   /** 외부에서 업로드한 메뉴 배경(자체 GUI 위에 덮어씀). 없으면 Canvas 생성. */
   menuArt?: { main?: string; game?: string };
 }
