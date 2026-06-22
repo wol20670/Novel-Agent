@@ -392,20 +392,57 @@ function scriptBody(
 }
 
 function optionsRpy(project: Project): string {
+  const t = esc(project.title);
   return [
     '# 자동 생성: 기본 옵션',
-    `define config.name = _("${esc(project.title)}")`,
+    `define config.name = _("${t}")`,
     `define config.version = "1.0"`,
     `define config.has_sound = True`,
     `define config.has_music = True`,
-    `define config.window_title = "${esc(project.title)}"`,
-    `define build.name = "${esc(project.title)}"`,
+    `define config.window_title = "${t}"`,
     `define gui.about = _("제작: ${esc(project.author)}")`,
     '',
     `## 저자: ${esc(project.author)}`,
     `init python:`,
     `    config.screen_width = ${project.width}`,
     `    config.screen_height = ${project.height}`,
+    '',
+    '    ## ── 배포본 빌드 설정 (Ren\'Py 런처 → "Build Distributions") ──',
+    `    build.name = "${t}"`,
+    '    ## classify(패턴, None) = 그 파일을 배포판에서 제외 → 개발용 파일이 유저에게 안 나가게.',
+    '    ## Ren\'Py 기본 제외(편집기 임시/백업/숨김 파일) — 직접 명시해 유지한다.',
+    "    build.classify('**~', None)",
+    "    build.classify('**.bak', None)",
+    "    build.classify('**/.**', None)",
+    "    build.classify('**/#**', None)",
+    "    build.classify('**/thumbs.db', None)",
+    '',
+    '    ## 원본 아트(레이어 파일) — 완성 PNG만 배포하고 소스 파일은 제외.',
+    "    build.classify('**.psd', None)",
+    "    build.classify('**.psb', None)",
+    "    build.classify('**.ai', None)",
+    "    build.classify('**.xcf', None)",
+    "    build.classify('**.kra', None)",
+    "    build.classify('**.clip', None)",
+    '',
+    '    ## 기획서·대본·문서 등 개발 산출물 — 폴더/확장자 단위로 제외.',
+    '    ## 개발용 파일은 dev/ 폴더에 모아두면 한 번에 걸러진다.',
+    "    build.classify('dev/**', None)",
+    "    build.classify('docs/**', None)",
+    "    build.classify('기획/**', None)",
+    "    build.classify('**.docx', None)",
+    "    build.classify('**.xlsx', None)",
+    "    build.classify('**.pptx', None)",
+    "    build.classify('**.hwp', None)",
+    '',
+    '    ## (선택) 스크립트 묶기: 주석을 해제하면 .rpy/.rpyc 를 아카이브로 배포한다.',
+    '    ## 완벽한 보호는 아니므로(디컴파일 가능) EULA/라이선스로 보완할 것.',
+    "    # build.classify('game/**.rpy', 'archive')",
+    "    # build.classify('game/**.rpyc', 'archive')",
+    '',
+    '    ## 사람이 읽는 문서로 취급(배포 폴더에 그대로 복사).',
+    "    build.documentation('*.html')",
+    "    build.documentation('*.txt')",
     '',
   ].join('\n');
 }
@@ -437,10 +474,20 @@ function readme(theme: { label: string }): string {
 - game/images/         : 배경/CG/스프라이트 PNG (생성된 것 또는 임시)
 - game/audio/          : BGM WAV
 
-## 상업 배포 전
-- 임시 배경/합성 BGM/Canvas 메뉴 배경은 테스트용입니다. 정식 일러스트·BGM·SFX 로 교체하세요.
-- 폰트 라이선스(OFL 등) 를 확인하세요.
-- 실제 Windows 환경에서 Ren'Py 빌드를 테스트하세요.
+## 배포본 빌드 (실행 파일 만들기)
+Ren'Py 런처 → **"Build Distributions"** → 플랫폼(Windows/Mac/Linux/Web) 선택 → Build.
+- options.rpy 에 **개발용 파일 제외 규칙(build.classify)** 이 들어가 있어, 빌드 시
+  PSD·기획서(docx/xlsx/hwp)·dev/·docs/·기획/ 폴더는 **배포판에서 자동 제외**됩니다.
+- 개발용 파일은 프로젝트 안 dev/ 폴더에 모아두면 한 번에 걸러집니다.
+- 빌드 후 배포 zip 을 풀어 **개발 파일이 안 들어갔는지 한 번 확인**하세요.
+
+## 상업/배포 전 체크리스트
+- [ ] 임시 배경/합성 BGM/Canvas 메뉴 배경 → **정식 일러스트·BGM·SFX 로 교체** (테스트용임)
+- [ ] 사용한 **에셋(이미지/폰트/음악)의 상업 라이선스** 확인 — 포함 나눔고딕은 OFL(상업 OK)
+- [ ] AI 생성물의 약관 확인 (예: OpenAI 생성 이미지의 상업적 사용·권리 귀속)
+- [ ] 폰트·BGM 의 **라이선스 고지 파일**을 배포판에 포함
+- [ ] 실제 대상 OS 에서 빌드 실행 테스트
+- [ ] (선택) EULA/저작권 고지, 연령 등급(필요 시) 표기
 `;
 }
 
