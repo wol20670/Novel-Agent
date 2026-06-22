@@ -210,11 +210,14 @@ function CharacterCard({ name }: { name: string }) {
   const c = useStore((s) => s.project.characters.find((x) => x.name === name))!;
   const updateChar = useStore((s) => s.updateCharacter);
   const genAll = useStore((s) => s.generateCharacterSprites);
+  const genBase = useStore((s) => s.generateCharacterBase);
   const genOne = useStore((s) => s.generateCharacterSprite);
+  const refineSprite = useStore((s) => s.refineSprite);
   const importSprite = useStore((s) => s.importSprite);
   const clearAll = useStore((s) => s.clearCharacterSprites);
   const busy = useStore((s) => s.busy[`sprite:${name}`]);
   const hasAny = EXPRESSIONS.some((ex) => c.expressions[ex as Expression]);
+  const hasBase = !!c.expressions['기본'];
 
   return (
     <div className="card border-edge p-3">
@@ -228,17 +231,30 @@ function CharacterCard({ name }: { name: string }) {
         <span className="font-semibold text-sm flex-1 truncate" style={{ color: c.color }}>
           {name}
         </span>
-        <button className="btn-primary !px-2 !py-1 text-xs" disabled={busy} onClick={() => genAll(name)}>
-          {busy ? <Spinner /> : hasAny ? '전체 재생성' : '스프라이트 생성'}
-        </button>
+        {busy ? (
+          <span className="!px-2 !py-1"><Spinner /></span>
+        ) : hasBase ? (
+          <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => genAll(name)} title="6종 표정을 한 번에(기본 기준)">
+            전체 생성
+          </button>
+        ) : (
+          <button className="btn-primary !px-2 !py-1 text-xs" onClick={() => genBase(name)} title="기본(메인) 입화 1장만 먼저 생성">
+            ① 기본 입화 생성
+          </button>
+        )}
       </div>
       <input
-        className="field text-xs mb-2"
+        className="field text-xs mb-1.5"
         placeholder="외형 설명 (예: 갈색 단발, 교복, 푸른 눈) — GPT 표정 일관성용"
         value={c.appearance ?? ''}
         onChange={(e) => updateChar(name, { appearance: e.target.value })}
-        title="GPT 이미지 생성 시 6종 표정에 공통 적용해 같은 인물로 보이게 합니다."
+        title="GPT 이미지 생성 시 표정에 공통 적용해 같은 인물로 보이게 합니다."
       />
+      <p className="text-[10px] text-gray-500 leading-snug mb-2">
+        {hasBase
+          ? '표정 썸네일을 누르면 기본 입화를 기준으로 그 표정만 생성됩니다(토큰 절약). 썸네일의 ✏️ 로 미세 수정.'
+          : '① 기본 입화를 먼저 만들고 → 표정 썸네일을 하나씩 눌러 생성하세요(기본을 기준으로 그려져 일관적 + 토큰 절약).'}
+      </p>
       <div className="grid grid-cols-3 gap-1.5">
         {EXPRESSIONS.map((ex) => (
           <ExpressionThumb
@@ -248,6 +264,10 @@ function CharacterCard({ name }: { name: string }) {
             busy={!!busy}
             onGen={() => genOne(name, ex as Expression)}
             onUpload={(f) => importSprite(name, ex as Expression, f)}
+            onRefine={() => {
+              const ins = window.prompt(`이 '${ex}' 입화를 어떻게 수정할까요? (예: 머리를 더 짧게, 표정을 더 환하게)`);
+              if (ins && ins.trim()) refineSprite(name, ex as Expression, ins.trim());
+            }}
           />
         ))}
       </div>
@@ -275,12 +295,14 @@ function ExpressionThumb({
   busy,
   onGen,
   onUpload,
+  onRefine,
 }: {
   name: string;
   expr: Expression;
   busy: boolean;
   onGen: () => void;
   onUpload: (file: File) => void;
+  onRefine: () => void;
 }) {
   const assetId = useStore((s) => s.project.characters.find((x) => x.name === name)?.expressions[expr]);
   const url = useAssetUrl(assetId);
@@ -298,7 +320,17 @@ function ExpressionThumb({
           <span className="text-[10px] text-gray-500">{expr}</span>
         )}
       </button>
-      <div className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        {url && (
+          <button
+            onClick={onRefine}
+            disabled={busy}
+            className="bg-black/55 text-white text-[10px] rounded px-1 py-0.5 hover:bg-black/75"
+            title={`${expr} 입화를 지시문대로 미세 수정`}
+          >
+            ✏️
+          </button>
+        )}
         <UploadButton
           onFile={onUpload}
           label="↥"

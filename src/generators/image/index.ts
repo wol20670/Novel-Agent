@@ -4,7 +4,7 @@
 import { canvasImage } from './canvasProvider';
 import { canvasSprite } from './canvasSprite';
 import { openaiImage, openaiImageEdit } from './openaiProvider';
-import { aiConfig, type ImageQuality } from '../../config/aiConfig';
+import { aiConfig, type ImageQuality, type GptImageSize } from '../../config/aiConfig';
 import type { Expression } from '../../types';
 
 export interface ImageRequest {
@@ -114,4 +114,26 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
   }
   const blob = await canvasSprite(req.name, req.expression, req.color);
   return { blob, source: 'canvas' };
+}
+
+/**
+ * 이미 생성된 이미지를 지시문대로 "조금만 수정"한다(gpt-image-1 edits).
+ * 마음에 드는 결과를 버리지 않고 부분만 손볼 때 사용. 키 필수(폴백 없음).
+ */
+export async function editImage(opts: {
+  blob: Blob;
+  instruction: string;
+  apiKey: string;
+  kind: 'background' | 'sprite';
+  /** 출력 사이즈(미지정 시 배경=가로형, 스프라이트=세로형). */
+  size?: GptImageSize;
+}): Promise<ImageResult> {
+  const isSprite = opts.kind === 'sprite';
+  const blob = await openaiImageEdit(opts.instruction, opts.blob, {
+    apiKey: opts.apiKey.trim(),
+    transparent: isSprite ? aiConfig.image.sprite.transparent : false,
+    size: opts.size ?? (isSprite ? aiConfig.image.sprite.size : '1536x1024'),
+    quality: isSprite ? aiConfig.image.quality.sprite : aiConfig.image.quality.background,
+  });
+  return { blob, source: 'openai' };
 }

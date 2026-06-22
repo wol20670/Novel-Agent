@@ -2,10 +2,10 @@ import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, EXPRESSIONS } from './types';
 import { parseText, parseWorkbook } from './parser';
-import { generateImage, generateSprite, buildBackgroundPrompt } from './generators/image';
+import { generateImage, generateSprite, editImage, buildBackgroundPrompt } from './generators/image';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
-import { putAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
-import { aiConfig } from './config/aiConfig';
+import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
+import { aiConfig, normalizeImageSize } from './config/aiConfig';
 import {
   saveProject,
   loadProject,
@@ -78,12 +78,18 @@ interface State {
 
   // 캐릭터 스프라이트 (표정별 입화)
   generateCharacterSprites: (name: string) => Promise<void>;
-  /** 한 표정 입화 생성. reference(기준 입화)를 주면 그 인물의 표정만 바꿔 일관성을 유지. 생성 blob 반환. */
+  /** 기본(메인) 입화만 1장 생성 — 이후 표정은 이 기본을 기준으로 하나씩 생성(토큰 절약). */
+  generateCharacterBase: (name: string) => Promise<void>;
+  /** 한 표정 입화 생성. reference(기준 입화)를 주거나, 없으면 저장된 '기본'을 자동 기준으로 일관성 유지. */
   generateCharacterSprite: (name: string, expr: Expression, reference?: Blob) => Promise<Blob | undefined>;
+  /** 이미 생성된 입화를 지시문대로 미세 수정(예: "머리를 더 길게"). 키 필요. */
+  refineSprite: (name: string, expr: Expression, instruction: string) => Promise<void>;
   clearCharacterSprites: (name: string) => Promise<void>;
 
   // 에셋 생성
   generateBackground: (sceneId: string) => Promise<void>;
+  /** 이미 생성된 배경을 지시문대로 미세 수정(예: "노을을 더 붉게"). 키 필요. */
+  refineBackground: (sceneId: string, instruction: string) => Promise<void>;
   generateBgm: (sceneId: string, opts?: SynthOptions) => Promise<void>;
   assetUrl: (id: string | undefined) => Promise<string | undefined>;
 
@@ -299,13 +305,20 @@ export const useStore = create<State>((set, get) => {
       const key = `sprite:${name}`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
+        // 표정(비-기본)을 개별 생성할 때, 명시 reference 가 없으면 저장된 '기본'을 자동 기준으로
+        // 삼아 같은 인물로 그린다(일관성 + 기본 1장만 마음에 들면 표정은 그걸 기반으로 생성).
+        let ref = reference;
+        if (!ref && expr !== '기본' && aiConfig.image.sprite.consistency === 'reference') {
+          const baseId = char.expressions['기본'];
+          if (baseId) ref = (await getAsset(baseId)) ?? undefined;
+        }
         const { blob, source } = await generateSprite({
           name,
           expression: expr,
           color: char.color,
           apiKey: get().apiKey,
           appearance: char.appearance,
-          reference,
+          reference: ref,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -360,6 +373,58 @@ export const useStore = create<State>((set, get) => {
         if (useRef && expr === '기본' && blob) reference = blob;
       }
       flash(`${name} 스프라이트 ${EXPRESSIONS.length}종 생성 완료.`);
+    },
+
+    generateCharacterBase: async (name) => {
+      const blob = await get().generateCharacterSprite(name, '기본');
+      if (blob) {
+        flash(`${name} 기본 입화를 만들었어요. 표정 썸네일을 눌러 하나씩 생성하면 이 기본을 기준으로 그려집니다(토큰 절약).`);
+      }
+    },
+
+    refineSprite: async (name, expr, instruction) => {
+      const char = get().project.characters.find((c) => c.name === name);
+      if (!char) return;
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('이미지 수정은 OpenAI 키가 필요합니다.');
+      if (!instruction.trim()) return;
+      const curId = char.expressions[expr];
+      if (!curId) return flash('먼저 이 표정 입화를 생성하세요.');
+      const src = await getAsset(curId);
+      if (!src) return flash('원본 입화를 찾지 못했습니다.');
+      const key = `sprite:${name}`;
+      set((s) => ({ busy: { ...s.busy, [key]: true } }));
+      try {
+        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite' });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'sprite',
+          prompt: `${name} ${expr} 수정: ${instruction}`,
+          mime: 'image/png',
+          source,
+          filename: `sprite_${name}_${expr}.png`,
+          createdAt: Date.now(),
+        };
+        void archiveImage(blob, `characters/${safeFileName(name)}/${safeFileName(expr)}_수정_${timestamp()}.png`);
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            characters: s.project.characters.map((c) =>
+              c.name === name ? { ...c, expressions: { ...c.expressions, [expr]: id } } : c,
+            ),
+          },
+        }));
+        await deleteAsset(curId).catch(() => {});
+        autoSave();
+        flash(`${name} · ${expr} 입화를 수정했습니다.`);
+      } catch (e) {
+        flash(`수정 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [key]: false } }));
+      }
     },
 
     clearCharacterSprites: async (name) => {
@@ -451,6 +516,62 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    refineBackground: async (sceneId, instruction) => {
+      const scene = get().project.scenes.find((s) => s.id === sceneId);
+      if (!scene) return;
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('이미지 수정은 OpenAI 키가 필요합니다.');
+      if (!instruction.trim()) return;
+      if (!scene.backgroundAssetId) return flash('먼저 배경을 생성하세요.');
+      const src = await getAsset(scene.backgroundAssetId);
+      if (!src) return flash('원본 배경을 찾지 못했습니다.');
+      const key = `${sceneId}:bg`;
+      set((s) => ({ busy: { ...s.busy, [key]: true } }));
+      try {
+        const { project } = get();
+        const { blob, source } = await editImage({
+          blob: src,
+          instruction,
+          apiKey,
+          kind: 'background',
+          size: normalizeImageSize(project.width, project.height),
+        });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'background',
+          prompt: `${scene.background || scene.title} 수정: ${instruction}`,
+          mime: 'image/png',
+          source,
+          filename: `bg_${sceneId}.png`,
+          createdAt: Date.now(),
+        };
+        void archiveImage(blob, `backgrounds/${safeFileName(scene.background || scene.title)}_수정_${timestamp()}.png`);
+        const bkey = backgroundKey(scene);
+        const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === bkey);
+        const prevs = new Set(
+          targets.map((t) => t.backgroundAssetId).filter((x): x is string => !!x && x !== id),
+        );
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) =>
+              backgroundKey(sc) === bkey ? { ...sc, backgroundAssetId: id } : sc,
+            ),
+          },
+        }));
+        autoSave();
+        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        flash(targets.length > 1 ? `수정한 배경을 ${targets.length}개 장면에 적용했습니다.` : '배경을 수정했습니다.');
+      } catch (e) {
+        flash(`배경 수정 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [key]: false } }));
+      }
+    },
+
     generateBgm: async (sceneId, opts) => {
       const scene = get().project.scenes.find((s) => s.id === sceneId);
       if (!scene) return;
@@ -470,6 +591,8 @@ export const useStore = create<State>((set, get) => {
           filename: `bgm_${sceneId}.wav`,
           createdAt: Date.now(),
         };
+        // 만든 BGM 도 보관 폴더에 사본 저장(재생성해도 원본 보존).
+        void archiveImage(blob, `music/${safeFileName(scene.bgm || scene.title)}_${timestamp()}.wav`);
         // 같은 BGM 이름을 쓰는 모든 장면에 함께 적용.
         const key = bgmKey(scene);
         const targets = get().project.scenes.filter((sc) => bgmKey(sc) === key);

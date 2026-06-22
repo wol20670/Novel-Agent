@@ -10,6 +10,7 @@ export default function RightPanel() {
   const sceneId = useStore((s) => s.selectedSceneId);
   const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId) ?? null);
   const genBg = useStore((s) => s.generateBackground);
+  const refineBg = useStore((s) => s.refineBackground);
   const importBg = useStore((s) => s.importBackground);
   const genBgm = useStore((s) => s.generateBgm);
   const busyBg = useStore((s) => (sceneId ? s.busy[`${sceneId}:bg`] : false));
@@ -50,6 +51,17 @@ export default function RightPanel() {
           <div className="flex gap-2">
             <button className="btn-primary flex-1" disabled={busyBg} onClick={() => genBg(scene.id)}>
               {busyBg ? <Spinner label="생성 중" /> : '🖼 배경 생성'}
+            </button>
+            <button
+              className="btn-ghost"
+              disabled={busyBg || !scene.backgroundAssetId}
+              title="이 배경을 지시문대로 미세 수정 (예: 노을을 더 붉게)"
+              onClick={() => {
+                const ins = window.prompt('이 배경을 어떻게 수정할까요? (예: 노을을 더 붉게, 조명을 따뜻하게)');
+                if (ins && ins.trim()) refineBg(scene.id, ins.trim());
+              }}
+            >
+              ✏️ 수정
             </button>
             <UploadButton
               onFile={(f) => importBg(scene.id, f)}
