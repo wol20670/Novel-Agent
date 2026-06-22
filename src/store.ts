@@ -99,6 +99,8 @@ interface State {
 
   // CG 컷 AI 생성 (같은 설명을 쓰는 모든 장면에 적용 + 보관)
   generateCg: (desc: string) => Promise<void>;
+  /** 이미 생성된 CG 컷을 지시문대로 미세 수정. 키 필요. */
+  refineCg: (desc: string, instruction: string) => Promise<void>;
 
   // 외부 제작 이미지 업로드 (직접 적용)
   importBackground: (sceneId: string, file: File) => Promise<void>;
@@ -783,6 +785,76 @@ export const useStore = create<State>((set, get) => {
         flash(source === 'openai' ? 'CG 컷을 생성했습니다.' : '임시 CG(Canvas)를 생성했습니다.');
       } catch (e) {
         flash(`CG 생성 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
+      }
+    },
+
+    refineCg: async (desc, instruction) => {
+      const key = desc.trim();
+      if (!key) return;
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('이미지 수정은 OpenAI 키가 필요합니다.');
+      if (!instruction.trim()) return;
+      // 이 컷의 현재 대표 에셋 찾기.
+      let curId: string | undefined;
+      outer: for (const sc of get().project.scenes) {
+        for (let i = 0; i < sc.cg.length; i++) {
+          if (sc.cg[i].trim() === key && sc.cgAssetIds?.[i]) {
+            curId = sc.cgAssetIds[i];
+            break outer;
+          }
+        }
+      }
+      if (!curId) return flash('먼저 이 CG 컷을 생성하세요.');
+      const src = await getAsset(curId);
+      if (!src) return flash('원본 CG 를 찾지 못했습니다.');
+      const busyKey = `cg:${key}`;
+      set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      try {
+        const { project } = get();
+        const { blob, source } = await editImage({
+          blob: src,
+          instruction,
+          apiKey,
+          kind: 'background',
+          size: normalizeImageSize(project.width, project.height),
+        });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'cg',
+          prompt: `${key} 수정: ${instruction}`,
+          mime: 'image/png',
+          source,
+          filename: `cg_${Date.now().toString(36)}.png`,
+          createdAt: Date.now(),
+        };
+        void archiveImage(blob, `cg/${safeFileName(key)}_수정_${timestamp()}.png`);
+        const prevs = new Set<string>();
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) => {
+              if (!sc.cg.some((d) => d.trim() === key)) return sc;
+              const arr = [...(sc.cgAssetIds ?? [])];
+              sc.cg.forEach((d, i) => {
+                if (d.trim() !== key) return;
+                while (arr.length <= i) arr.push('');
+                if (arr[i] && arr[i] !== id) prevs.add(arr[i]);
+                arr[i] = id;
+              });
+              return { ...sc, cgAssetIds: arr };
+            }),
+          },
+        }));
+        autoSave();
+        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        flash('CG 를 수정했습니다.');
+      } catch (e) {
+        flash(`CG 수정 실패: ${(e as Error).message}`);
       } finally {
         set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
       }

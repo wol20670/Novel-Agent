@@ -385,6 +385,7 @@ function BgGroupRow({ group }: { group: Group }) {
 
 function CgGroupRow({ group }: { group: CgGroup }) {
   const genCg = useStore((s) => s.generateCg);
+  const refineCg = useStore((s) => s.refineCg);
   const importCg = useStore((s) => s.importCgGroup);
   const clearCg = useStore((s) => s.clearCgGroup);
   const busy = useStore((s) => s.busy[`cg:${group.desc.trim()}`]);
@@ -410,6 +411,19 @@ function CgGroupRow({ group }: { group: CgGroup }) {
         >
           {busy ? <Spinner /> : url ? '재생성' : '생성'}
         </button>
+        {url && (
+          <button
+            className="btn-ghost text-[11px]"
+            disabled={busy}
+            title="이 CG 를 지시문대로 미세 수정"
+            onClick={() => {
+              const ins = window.prompt('이 CG 를 어떻게 수정할까요? (예: 두 사람을 더 가깝게, 노을 분위기로)');
+              if (ins && ins.trim()) refineCg(group.desc, ins.trim());
+            }}
+          >
+            ✏️ 수정
+          </button>
+        )}
         <UploadButton
           onFile={(f) => importCg(group.desc, f)}
           label={url ? '↥ 교체' : '↥ 업로드'}
