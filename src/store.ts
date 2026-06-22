@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, EXPRESSIONS } from './types';
 import { parseText, parseWorkbook } from './parser';
-import { generateImage, generateSprite, editImage, buildBackgroundPrompt } from './generators/image';
+import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt } from './generators/image';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
 import { aiConfig, normalizeImageSize } from './config/aiConfig';
@@ -96,6 +96,9 @@ interface State {
   // 일괄 생성 (고유 이름 단위 — 미생성분만, force 면 전체 재생성)
   generateAllBackgrounds: (force?: boolean) => Promise<void>;
   generateAllBgm: (force?: boolean) => Promise<void>;
+
+  // CG 컷 AI 생성 (같은 설명을 쓰는 모든 장면에 적용 + 보관)
+  generateCg: (desc: string) => Promise<void>;
 
   // 외부 제작 이미지 업로드 (직접 적용)
   importBackground: (sceneId: string, file: File) => Promise<void>;
@@ -722,6 +725,66 @@ export const useStore = create<State>((set, get) => {
         flash(`${name} · ${expr} 입화를 업로드했습니다.`);
       } catch (e) {
         flash((e as Error).message);
+      }
+    },
+
+    generateCg: async (desc) => {
+      const key = desc.trim();
+      if (!key) return flash('CG 설명이 비어 있습니다.');
+      const { apiKey, project } = get();
+      const using = project.scenes.filter((s) => s.cg.some((d) => d.trim() === key));
+      if (using.length === 0) return;
+      const busyKey = `cg:${key}`;
+      set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      try {
+        const prompt = buildCgPrompt(key, using[0].direction);
+        const { blob, source } = await generateImage({
+          prompt,
+          label: key,
+          width: project.width,
+          height: project.height,
+          apiKey,
+          quality: aiConfig.image.quality.cg,
+        });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'cg',
+          prompt,
+          mime: 'image/png',
+          source,
+          filename: `cg_${Date.now().toString(36)}.png`,
+          createdAt: Date.now(),
+        };
+        // 비용 들인 AI CG 도 보관 폴더에 사본 저장(재생성해도 원본 보존).
+        if (source === 'openai') void archiveImage(blob, `cg/${safeFileName(key)}_${timestamp()}.png`);
+        // 같은 설명(컷)을 쓰는 모든 장면의 해당 인덱스에 적용.
+        const prevs = new Set<string>();
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) => {
+              if (!sc.cg.some((d) => d.trim() === key)) return sc;
+              const arr = [...(sc.cgAssetIds ?? [])];
+              sc.cg.forEach((d, i) => {
+                if (d.trim() !== key) return;
+                while (arr.length <= i) arr.push('');
+                if (arr[i] && arr[i] !== id) prevs.add(arr[i]);
+                arr[i] = id;
+              });
+              return { ...sc, cgAssetIds: arr };
+            }),
+          },
+        }));
+        autoSave();
+        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        flash(source === 'openai' ? 'CG 컷을 생성했습니다.' : '임시 CG(Canvas)를 생성했습니다.');
+      } catch (e) {
+        flash(`CG 생성 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
       }
     },
 

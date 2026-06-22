@@ -70,7 +70,8 @@ npm run typecheck  # tsc --noEmit
 - 음악은 BGM 행의 무드·템포·볼륨을 바꿔 재생성하면 된다.
 
 ### 생성물 자동 보관
-배경·캐릭터 입화에 더해 **BGM(.wav)** 도 보관 폴더에 자동 저장된다(`backgrounds/`·`characters/`·`music/`).
+AI 로 생성하는 모든 결과가 보관 폴더에 자동 저장된다 — 배경·캐릭터 입화·**CG**·**BGM(.wav)**
+(`backgrounds/`·`characters/`·`cg/`·`music/`, 타임스탬프 파일명).
 
 ---
 

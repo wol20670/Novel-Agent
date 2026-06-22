@@ -135,7 +135,7 @@ export default function AssetsTab() {
       <section>
         <h3 className="section-title mb-1">🎬 CG 컷 <span className="text-gray-500 font-normal text-xs">· {cgs.length}종</span></h3>
         <p className="text-xs text-gray-500 mb-3">
-          대본의 <code className="text-accent">#CG 설명</code> 단위. 같은 설명이면 한 컷으로 공유됩니다. 외부 제작 이미지를 업로드하면 그대로 사용됩니다(없으면 Canvas 임시).
+          대본의 <code className="text-accent">#CG 설명</code> 단위. 같은 설명이면 한 컷으로 공유됩니다. <b>생성</b>(AI, 키 있으면 gpt-image-1)하거나 외부 제작 이미지를 업로드해 사용합니다(둘 다 없으면 Canvas 임시). 생성한 CG 도 보관 폴더에 자동 저장됩니다.
         </p>
         {cgs.length === 0 ? (
           <p className="text-gray-600 text-sm">CG 컷 없음</p>
@@ -384,8 +384,10 @@ function BgGroupRow({ group }: { group: Group }) {
 }
 
 function CgGroupRow({ group }: { group: CgGroup }) {
+  const genCg = useStore((s) => s.generateCg);
   const importCg = useStore((s) => s.importCgGroup);
   const clearCg = useStore((s) => s.clearCgGroup);
+  const busy = useStore((s) => s.busy[`cg:${group.desc.trim()}`]);
   const url = useAssetUrl(group.repAssetId);
   return (
     <div className="card border-edge p-3 flex gap-3 items-center">
@@ -400,6 +402,14 @@ function CgGroupRow({ group }: { group: CgGroup }) {
         <p className="text-xs text-gray-300 truncate">{group.desc || '(설명 없음)'}</p>
       </div>
       <div className="flex flex-col gap-1 shrink-0">
+        <button
+          className="btn-ghost text-[11px]"
+          disabled={busy}
+          onClick={() => genCg(group.desc)}
+          title={`${group.count}개 장면에 적용`}
+        >
+          {busy ? <Spinner /> : url ? '재생성' : '생성'}
+        </button>
         <UploadButton
           onFile={(f) => importCg(group.desc, f)}
           label={url ? '↥ 교체' : '↥ 업로드'}
