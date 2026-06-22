@@ -2,6 +2,7 @@
 // 핵심 원칙: LLM 은 .rpy 코드가 아니라 스키마로 제약된 JSON 만 출력 → buildTheme 이 안전 변환.
 
 import type { ThemeCore } from './buildTheme';
+import { aiConfig } from '../../config/aiConfig';
 
 export interface OpenAIThemeOpts {
   apiKey: string;
@@ -35,15 +36,15 @@ const COLOR_KEYS = ['accent', 'bgTop', 'bgBottom', 'interfaceText', 'dialogueBox
 
 /** context(장르/제목/시놉시스/분위기) → ThemeCore 부분값. 실패 시 throw. */
 export async function openaiTheme(context: string, opts: OpenAIThemeOpts): Promise<Partial<ThemeCore>> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch(aiConfig.chat.endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${opts.apiKey}`,
     },
     body: JSON.stringify({
-      model: opts.model ?? 'gpt-4o-mini',
-      temperature: 0.8,
+      model: opts.model ?? aiConfig.chat.themeModel,
+      temperature: aiConfig.chat.temperature,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: SYSTEM },

@@ -232,6 +232,13 @@ function CharacterCard({ name }: { name: string }) {
           {busy ? <Spinner /> : hasAny ? '전체 재생성' : '스프라이트 생성'}
         </button>
       </div>
+      <input
+        className="field text-xs mb-2"
+        placeholder="외형 설명 (예: 갈색 단발, 교복, 푸른 눈) — GPT 표정 일관성용"
+        value={c.appearance ?? ''}
+        onChange={(e) => updateChar(name, { appearance: e.target.value })}
+        title="GPT 이미지 생성 시 6종 표정에 공통 적용해 같은 인물로 보이게 합니다."
+      />
       <div className="grid grid-cols-3 gap-1.5">
         {EXPRESSIONS.map((ex) => (
           <ExpressionThumb

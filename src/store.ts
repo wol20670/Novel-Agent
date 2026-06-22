@@ -5,6 +5,7 @@ import { parseText, parseWorkbook } from './parser';
 import { generateImage, generateSprite, buildBackgroundPrompt } from './generators/image';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
+import { aiConfig } from './config/aiConfig';
 import {
   saveProject,
   loadProject,
@@ -69,7 +70,8 @@ interface State {
 
   // 캐릭터 스프라이트 (표정별 입화)
   generateCharacterSprites: (name: string) => Promise<void>;
-  generateCharacterSprite: (name: string, expr: Expression) => Promise<void>;
+  /** 한 표정 입화 생성. reference(기준 입화)를 주면 그 인물의 표정만 바꿔 일관성을 유지. 생성 blob 반환. */
+  generateCharacterSprite: (name: string, expr: Expression, reference?: Blob) => Promise<Blob | undefined>;
   clearCharacterSprites: (name: string) => Promise<void>;
 
   // 에셋 생성
@@ -277,9 +279,9 @@ export const useStore = create<State>((set, get) => {
       flash('프리셋 테마로 복귀했습니다.');
     },
 
-    generateCharacterSprite: async (name, expr) => {
+    generateCharacterSprite: async (name, expr, reference) => {
       const char = get().project.characters.find((c) => c.name === name);
-      if (!char) return;
+      if (!char) return undefined;
       const key = `sprite:${name}`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
@@ -288,6 +290,8 @@ export const useStore = create<State>((set, get) => {
           expression: expr,
           color: char.color,
           apiKey: get().apiKey,
+          appearance: char.appearance,
+          reference,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -312,16 +316,30 @@ export const useStore = create<State>((set, get) => {
         }));
         if (prev) await deleteAsset(prev).catch(() => {});
         autoSave();
+        return blob;
       } catch (e) {
         flash(`스프라이트 생성 실패: ${(e as Error).message}`);
+        return undefined;
       } finally {
         set((s) => ({ busy: { ...s.busy, [key]: false } }));
       }
     },
 
     generateCharacterSprites: async (name) => {
-      for (const expr of EXPRESSIONS) {
-        await get().generateCharacterSprite(name, expr);
+      // 일관성(reference) 모드 + 키 있음: '기본'을 먼저 만들고, 그 입화를 기준으로
+      // 나머지 표정은 "표정만" 편집해 같은 인물로 유지한다. 그 외엔 각자 생성.
+      const useRef = !!get().apiKey && aiConfig.image.sprite.consistency === 'reference';
+      const ordered: Expression[] = useRef
+        ? ['기본', ...EXPRESSIONS.filter((e) => e !== '기본')]
+        : [...EXPRESSIONS];
+      let reference: Blob | undefined;
+      for (const expr of ordered) {
+        const blob = await get().generateCharacterSprite(
+          name,
+          expr,
+          expr === '기본' ? undefined : reference,
+        );
+        if (useRef && expr === '기본' && blob) reference = blob;
       }
       flash(`${name} 스프라이트 ${EXPRESSIONS.length}종 생성 완료.`);
     },

@@ -3,7 +3,8 @@
 
 import { canvasImage } from './canvasProvider';
 import { canvasSprite } from './canvasSprite';
-import { openaiImage } from './openaiProvider';
+import { openaiImage, openaiImageEdit } from './openaiProvider';
+import { aiConfig } from '../../config/aiConfig';
 import type { Expression } from '../../types';
 
 export interface ImageRequest {
@@ -57,29 +58,50 @@ export interface SpriteRequest {
   expression: Expression;
   color: string;
   apiKey?: string;
-  /** 일관성을 위한 외형 설명(선택). */
+  /** 일관성을 위한 외형 설명(선택) — 6종 표정 프롬프트에 공통 주입된다. */
   appearance?: string;
+  /**
+   * 같은 인물의 기준 입화(보통 '기본' 표정 PNG). 주어지고 consistency='reference' 면
+   * 새로 그리지 않고 이 이미지에서 "표정만" 바꿔(편집) 정체성을 유지한다.
+   */
+  reference?: Blob;
+}
+
+/** 스프라이트 생성 프롬프트(외형 설명 공유로 일관성↑). */
+function spritePrompt(req: SpriteRequest): string {
+  return [
+    `비주얼노벨 캐릭터 입화(서 있는 전신), 이름 ${req.name}`,
+    req.appearance,
+    `표정: ${req.expression}`,
+    '투명 배경, 단일 인물, 깔끔한 셀 채색, 정면',
+  ]
+    .filter(Boolean)
+    .join(', ');
 }
 
 /**
  * 캐릭터 스프라이트 생성. 키 없으면 Canvas 임시 입화(투명 PNG).
- * 키 있으면 gpt-image-1 투명 배경(주의: 표정 간 동일 인물 일관성은 미보장 — 추후 개선).
+ * 키 있으면 gpt-image-1:
+ *   - reference 가 있고 consistency='reference' → 기준 입화에서 표정만 편집(동일 인물 유지).
+ *   - 아니면 텍스트 프롬프트로 새로 생성(appearance 설명으로 일관성 보강).
  */
 export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
-  if (req.apiKey && req.apiKey.trim()) {
-    const prompt = [
-      `비주얼노벨 캐릭터 입화(서 있는 전신), 이름 ${req.name}`,
-      req.appearance,
-      `표정: ${req.expression}`,
-      '투명 배경, 단일 인물, 깔끔한 셀 채색, 정면',
-    ]
-      .filter(Boolean)
-      .join(', ');
-    const blob = await openaiImage(prompt, {
-      apiKey: req.apiKey.trim(),
-      width: 832,
-      height: 1216,
-      transparent: true,
+  const apiKey = req.apiKey?.trim();
+  if (apiKey) {
+    const { consistency, transparent, size } = aiConfig.image.sprite;
+    if (req.reference && consistency === 'reference') {
+      const blob = await openaiImageEdit(
+        `이 캐릭터의 표정만 '${req.expression}'(으)로 바꾸고, 인물의 외형·의상·머리·색감은 그대로 유지`,
+        req.reference,
+        { apiKey, transparent, size },
+      );
+      return { blob, source: 'openai' };
+    }
+    const blob = await openaiImage(spritePrompt(req), {
+      apiKey,
+      width: 1024,
+      height: 1536,
+      transparent,
     });
     return { blob, source: 'openai' };
   }

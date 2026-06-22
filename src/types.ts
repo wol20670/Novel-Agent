@@ -14,6 +14,11 @@ export const SCENE_STATUS_LABEL: Record<SceneStatus, string> = {
 export const EXPRESSIONS = ['기본', '기쁨', '슬픔', '화남', '놀람', '수줍음'] as const;
 export type Expression = (typeof EXPRESSIONS)[number];
 
+/** 표정 표시용 이모지 (UI 공통). */
+export const EXPR_EMOJI: Record<Expression, string> = {
+  기본: '😐', 기쁨: '😊', 슬픔: '😢', 화남: '😠', 놀람: '😲', 수줍음: '😳',
+};
+
 export type Line =
   | {
       kind: 'dialogue';
@@ -54,6 +59,11 @@ export interface Character {
   color: string;
   /** 표정 → assetId (스프라이트). v1에서는 선택만 보관. */
   expressions: Partial<Record<Expression, string>>;
+  /**
+   * 외형 설명(선택) — GPT 스프라이트 생성 시 6종 표정 프롬프트에 공통 주입해
+   * 같은 인물로 보이게 한다. 예: "갈색 단발, 교복, 푸른 눈".
+   */
+  appearance?: string;
   /**
    * 내레이션·대사 전용 화자(주인공 등). true 면 화면에 스프라이트를 세우지 않고
    * 에셋 창의 스프라이트 관리에서도 제외한다. 대사 이름표·분기에는 정상 참여.

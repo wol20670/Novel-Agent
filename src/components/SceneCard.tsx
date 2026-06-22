@@ -1,13 +1,8 @@
 import { useStore } from '../store';
-import { SCENE_STATUS_LABEL, EXPRESSIONS, type SceneStatus, type Expression, type Line } from '../types';
+import { SCENE_STATUS_LABEL, EXPRESSIONS, EXPR_EMOJI, type SceneStatus, type Expression, type Line } from '../types';
 import { inferEmotion } from '../generators/emotion';
 import { useAssetUrl } from './useAssetUrl';
 import Spinner from './Spinner';
-
-/** 표정 표시용 이모지. */
-const EXPR_EMOJI: Record<Expression, string> = {
-  기본: '😐', 기쁨: '😊', 슬픔: '😢', 화남: '😠', 놀람: '😲', 수줍음: '😳',
-};
 
 const STATUS_BTN: Record<SceneStatus, { on: string; dot: string }> = {
   review: { on: 'bg-gray-500/15 text-gray-300 border-gray-400', dot: 'bg-gray-400' },

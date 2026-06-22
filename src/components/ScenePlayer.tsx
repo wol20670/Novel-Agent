@@ -8,11 +8,7 @@ import { inferEmotion } from '../generators/emotion';
 import { canvasSprite } from '../generators/image/canvasSprite';
 import { getAsset } from '../storage/assetStore';
 import { spreadPositions } from '../renpy/generate';
-import type { Scene, Character, Expression, Line } from '../types';
-
-const EXPR_EMOJI: Record<Expression, string> = {
-  기본: '😐', 기쁨: '😊', 슬픔: '😢', 화남: '😠', 놀람: '😲', 수줍음: '😳',
-};
+import { EXPR_EMOJI, type Scene, type Character, type Expression, type Line } from '../types';
 
 const speakersOf = (l: Line): string[] =>
   l.kind === 'dialogue' ? (l.members?.length ? l.members : [l.speaker]) : [];
