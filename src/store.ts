@@ -93,6 +93,9 @@ interface State {
    */
   refineCharacterDesign: (name: string, instruction: string) => Promise<void>;
   clearCharacterSprites: (name: string) => Promise<void>;
+  /** 캐릭터 그림체 참조 이미지 설정/해제(기본 입화 생성 시 화풍만 참고). */
+  setStyleRef: (file: File) => Promise<void>;
+  clearStyleRef: () => Promise<void>;
 
   // 에셋 생성
   generateBackground: (sceneId: string) => Promise<void>;
@@ -353,6 +356,12 @@ export const useStore = create<State>((set, get) => {
           const baseId = char.expressions['기본'];
           if (baseId) ref = (await getAsset(baseId)) ?? undefined;
         }
+        // 기준 입화가 없을 때(=기본 텍스트 생성)만 그림체 참조를 적용한다.
+        let styleRef: Blob | undefined;
+        if (!ref) {
+          const sid = get().project.styleRefAssetId;
+          if (sid) styleRef = (await getAsset(sid)) ?? undefined;
+        }
         const { blob, source } = await generateSprite({
           name,
           expression: expr,
@@ -362,6 +371,7 @@ export const useStore = create<State>((set, get) => {
           personality: char.personality,
           quality: get().imageQuality,
           reference: ref,
+          styleReference: styleRef,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -541,6 +551,31 @@ export const useStore = create<State>((set, get) => {
       }));
       autoSave();
       flash(`${name} 스프라이트를 비웠습니다.`);
+    },
+
+    setStyleRef: async (file) => {
+      try {
+        const id = await uploadAsset(file, 'sprite', 'style_ref.png');
+        const prev = get().project.styleRefAssetId;
+        set((s) => ({ project: { ...s.project, styleRefAssetId: id } }));
+        if (prev) await deleteAsset(prev).catch(() => {});
+        autoSave();
+        flash('그림체 참조를 설정했습니다. 기본 입화 생성 시 이 화풍을 참고합니다(인물은 외형 설명대로).');
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    clearStyleRef: async () => {
+      const prev = get().project.styleRefAssetId;
+      if (prev) await deleteAsset(prev).catch(() => {});
+      set((s) => {
+        const project = { ...s.project };
+        delete project.styleRefAssetId;
+        return { project };
+      });
+      autoSave();
+      flash('그림체 참조를 해제했습니다.');
     },
 
     updateCharacter: (name, patch) => {

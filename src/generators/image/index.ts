@@ -174,6 +174,11 @@ export interface SpriteRequest {
    * 새로 그리지 않고 이 이미지에서 "표정만" 바꿔(편집) 정체성을 유지한다.
    */
   reference?: Blob;
+  /**
+   * 그림체 참조(선택) — 기본 입화를 텍스트로 그릴 때 이 이미지의 "화풍·채색"만 빌리고
+   * 인물은 설명대로 새로 그린다. reference(기준 입화)가 있으면 무시(그땐 정체성 유지가 우선).
+   */
+  styleReference?: Blob;
   /** 생성 품질(비용 제어). 미지정 시 sprite 기본값. */
   quality?: ImageQuality;
 }
@@ -210,6 +215,15 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
         req.reference,
         { apiKey, transparent, size, quality },
       );
+      return { blob, source: 'openai' };
+    }
+    if (req.styleReference) {
+      // 참조 이미지의 "그림체/채색"만 빌리고 인물은 설명대로 새로 그린다(정체성 복제 금지).
+      const instruction =
+        `${spritePrompt(req)}. ` +
+        '첨부한 참조 이미지는 그림체·채색·렌더링 스타일만 참고하고, ' +
+        '인물의 얼굴·헤어·의상·포즈는 위 설명대로 완전히 새로 그린다(참조 인물을 복제하지 말 것).';
+      const blob = await openaiImageEdit(instruction, req.styleReference, { apiKey, transparent, size, quality });
       return { blob, source: 'openai' };
     }
     const blob = await openaiImage(spritePrompt(req), {
