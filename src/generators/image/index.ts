@@ -64,6 +64,8 @@ export interface SpriteRequest {
   apiKey?: string;
   /** 일관성을 위한 외형 설명(선택) — 6종 표정 프롬프트에 공통 주입된다. */
   appearance?: string;
+  /** 성격·역할(선택) — 그림의 분위기·표정 참고용으로 가볍게 주입된다. */
+  personality?: string;
   /**
    * 같은 인물의 기준 입화(보통 '기본' 표정 PNG). 주어지고 consistency='reference' 면
    * 새로 그리지 않고 이 이미지에서 "표정만" 바꿔(편집) 정체성을 유지한다.
@@ -76,6 +78,7 @@ function spritePrompt(req: SpriteRequest): string {
   return [
     `비주얼노벨 캐릭터 입화(서 있는 전신), 이름 ${req.name}`,
     req.appearance,
+    req.personality && `성격·분위기 참고: ${req.personality}`,
     `표정: ${req.expression}`,
     '투명 배경, 단일 인물, 정면',
     aiConfig.image.artStyle,

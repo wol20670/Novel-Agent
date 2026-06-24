@@ -84,6 +84,11 @@ interface State {
   generateCharacterSprite: (name: string, expr: Expression, reference?: Blob) => Promise<Blob | undefined>;
   /** 이미 생성된 입화를 지시문대로 미세 수정(예: "머리를 더 길게"). 키 필요. */
   refineSprite: (name: string, expr: Expression, instruction: string) => Promise<void>;
+  /**
+   * 캐릭터 디자인(기본 입화)을 지시문대로 수정하고, 이미 만들어둔 다른 표정도
+   * 새 기본을 기준으로 다시 그려 디자인을 일관되게 맞춘다(예: "머리를 단발로"). 키 필요.
+   */
+  refineCharacterDesign: (name: string, instruction: string) => Promise<void>;
   clearCharacterSprites: (name: string) => Promise<void>;
 
   // 에셋 생성
@@ -323,6 +328,7 @@ export const useStore = create<State>((set, get) => {
           color: char.color,
           apiKey: get().apiKey,
           appearance: char.appearance,
+          personality: char.personality,
           reference: ref,
         });
         const id = assetId();
@@ -427,6 +433,61 @@ export const useStore = create<State>((set, get) => {
         flash(`${name} · ${expr} 입화를 수정했습니다.`);
       } catch (e) {
         flash(`수정 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [key]: false } }));
+      }
+    },
+
+    refineCharacterDesign: async (name, instruction) => {
+      const char = get().project.characters.find((c) => c.name === name);
+      if (!char) return;
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('이미지 수정은 OpenAI 키가 필요합니다.');
+      if (!instruction.trim()) return;
+      const baseId = char.expressions['기본'];
+      if (!baseId) return flash('먼저 ① 기본 입화를 생성하세요.');
+      const src = await getAsset(baseId);
+      if (!src) return flash('기본 입화 원본을 찾지 못했습니다.');
+      const key = `sprite:${name}`;
+      set((s) => ({ busy: { ...s.busy, [key]: true } }));
+      try {
+        // 1) 기본 입화를 지시문대로 수정 → 새 디자인의 기준이 된다.
+        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite' });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'sprite',
+          prompt: `${name} 기본 디자인 수정: ${instruction}`,
+          mime: 'image/png',
+          source,
+          filename: `sprite_${name}_기본.png`,
+          createdAt: Date.now(),
+        };
+        void archiveImage(blob, `characters/${safeFileName(name)}/기본_디자인수정_${timestamp()}.png`);
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            characters: s.project.characters.map((c) =>
+              c.name === name ? { ...c, expressions: { ...c.expressions, ['기본']: id } } : c,
+            ),
+          },
+        }));
+        await deleteAsset(baseId).catch(() => {});
+        autoSave();
+        // 2) 이미 만들어둔 다른 표정도 새 기본을 기준으로 다시 그려 디자인을 맞춘다.
+        const others = EXPRESSIONS.filter((e) => e !== '기본' && char.expressions[e as Expression]);
+        for (const expr of others) {
+          await get().generateCharacterSprite(name, expr as Expression, blob);
+        }
+        flash(
+          others.length
+            ? `${name} 디자인을 수정하고 표정 ${others.length}종을 새 기준으로 다시 그렸습니다.`
+            : `${name} 기본 디자인을 수정했습니다.`,
+        );
+      } catch (e) {
+        flash(`디자인 수정 실패: ${(e as Error).message}`);
       } finally {
         set((s) => ({ busy: { ...s.busy, [key]: false } }));
       }
@@ -1127,6 +1188,17 @@ function mergeChars(prev: Character[], next: Character[]): Character[] {
   const byName = new Map(prev.map((c) => [c.name, c]));
   return next.map((c) => {
     const old = byName.get(c.name);
-    return old ? { ...c, color: old.color, expressions: old.expressions } : c;
+    // 색·스프라이트뿐 아니라 사용자가 입력한 외형·성격·내레이션 설정도 보존
+    // (재분석/대본 수정 시 캐릭터 설정이 날아가지 않도록).
+    return old
+      ? {
+          ...c,
+          color: old.color,
+          expressions: old.expressions,
+          appearance: old.appearance ?? c.appearance,
+          personality: old.personality ?? c.personality,
+          isProtagonist: old.isProtagonist ?? c.isProtagonist,
+        }
+      : c;
   });
 }

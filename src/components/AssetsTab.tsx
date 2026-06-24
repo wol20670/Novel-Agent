@@ -213,6 +213,7 @@ function CharacterCard({ name }: { name: string }) {
   const genBase = useStore((s) => s.generateCharacterBase);
   const genOne = useStore((s) => s.generateCharacterSprite);
   const refineSprite = useStore((s) => s.refineSprite);
+  const refineDesign = useStore((s) => s.refineCharacterDesign);
   const importSprite = useStore((s) => s.importSprite);
   const clearAll = useStore((s) => s.clearCharacterSprites);
   const busy = useStore((s) => s.busy[`sprite:${name}`]);
@@ -245,16 +246,40 @@ function CharacterCard({ name }: { name: string }) {
       </div>
       <input
         className="field text-xs mb-1.5"
-        placeholder="외형 설명 (예: 갈색 단발, 교복, 푸른 눈) — GPT 표정 일관성용"
+        placeholder="외형 (예: 갈색 단발, 교복, 푸른 눈) — 같은 인물 유지용"
         value={c.appearance ?? ''}
         onChange={(e) => updateChar(name, { appearance: e.target.value })}
         title="GPT 이미지 생성 시 표정에 공통 적용해 같은 인물로 보이게 합니다."
       />
-      <p className="text-[10px] text-gray-500 leading-snug mb-2">
-        {hasBase
-          ? '표정 썸네일을 누르면 기본 입화를 기준으로 그 표정만 생성됩니다(토큰 절약). 썸네일의 ✏️ 로 미세 수정.'
-          : '① 기본 입화를 먼저 만들고 → 표정 썸네일을 하나씩 눌러 생성하세요(기본을 기준으로 그려져 일관적 + 토큰 절약).'}
-      </p>
+      <input
+        className="field text-xs mb-1.5"
+        placeholder="성격·역할 (예: 밝고 장난기 많은 카페 알바, 17세) — 분위기 참고"
+        value={c.personality ?? ''}
+        onChange={(e) => updateChar(name, { personality: e.target.value })}
+        title="그림의 분위기·표정·포즈에 참고로 반영합니다. (생성 전에 적으면 더 디테일해집니다.)"
+      />
+      <div className="flex items-center gap-2 mb-2">
+        <p className="text-[10px] text-gray-500 leading-snug flex-1">
+          {hasBase
+            ? '표정 썸네일 = 기본 기준으로 그 표정만 생성(토큰 절약). 썸네일 ✏️ = 그 표정만 수정.'
+            : '① 기본 입화를 먼저 만들고 → 표정 썸네일을 하나씩 눌러 생성하세요(기본 기준 + 토큰 절약).'}
+        </p>
+        {hasBase && (
+          <button
+            className="btn-ghost !px-2 !py-1 text-[10px] shrink-0"
+            disabled={!!busy}
+            title="기본 입화의 디자인(머리·의상 등)을 수정하고, 이미 만든 표정도 새 기준으로 다시 그려 맞춥니다."
+            onClick={() => {
+              const ins = window.prompt(
+                `${name}의 디자인을 어떻게 바꿀까요? (예: 머리를 단발로, 안경을 씌워, 의상을 후드티로)\n※ 기본 입화를 수정하고 이미 만든 표정도 새 디자인으로 다시 그립니다.`,
+              );
+              if (ins && ins.trim()) refineDesign(name, ins.trim());
+            }}
+          >
+            🎨 디자인 수정
+          </button>
+        )}
+      </div>
       <div className="grid grid-cols-3 gap-1.5">
         {EXPRESSIONS.map((ex) => (
           <ExpressionThumb
