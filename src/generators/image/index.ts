@@ -218,11 +218,13 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
       return { blob, source: 'openai' };
     }
     if (req.styleReference) {
-      // 참조 이미지의 "그림체/채색"만 빌리고 인물은 설명대로 새로 그린다(정체성 복제 금지).
+      // 참조의 작화 퀄리티·마감(광택·음영·라인)을 동일하게 가져오되, 인물은 설명대로.
+      // 강한 "복제 금지" 부정문은 스타일까지 버리게 만들어 피한다.
       const instruction =
+        '참조 이미지와 동일한 그림체·채색·렌더링 퀄리티(윤기나는 머리카락, 정교한 셀 셰이딩, ' +
+        '입체적인 음영과 하이라이트, 깨끗하고 또렷한 라인아트, 화사한 색감)로 그린 ' +
         `${spritePrompt(req)}. ` +
-        '첨부한 참조 이미지는 그림체·채색·렌더링 스타일만 참고하고, ' +
-        '인물의 얼굴·헤어·의상·포즈는 위 설명대로 완전히 새로 그린다(참조 인물을 복제하지 말 것).';
+        '인물의 얼굴·헤어·의상·포즈는 위 설명을 따르고, 작화 수준과 마감은 참조 이미지와 같게 한다.';
       const blob = await openaiImageEdit(instruction, req.styleReference, { apiKey, transparent, size, quality });
       return { blob, source: 'openai' };
     }
