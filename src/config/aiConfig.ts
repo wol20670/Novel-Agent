@@ -83,10 +83,12 @@ export const aiConfig: AiConfig = {
     landscapeRatio: 1.2,
     portraitRatio: 0.83,
     artStyle:
-      '일본풍 애니메이션 비주얼노벨 그림체, 2D 셀 셰이딩, 손그림 감성의 디테일한 일러스트, ' +
-      '부드러운 자연광, 선명한 라인아트, 채도 높은 색감. ' +
-      '(Japanese anime / visual-novel art style, 2D cel-shaded anime illustration, hand-drawn look, ' +
-      'soft lighting, clean line art — NOT photorealistic, NOT a 3D render, NOT a photo)',
+      '고퀄리티 서브컬쳐/가챠 게임 캐릭터 일러스트 그림체, 미려하고 매력적인 캐릭터 디자인, ' +
+      '정교한 셀 셰이딩과 부드러운 그라데이션, 깨끗하고 또렷한 라인아트, 윤기나는 머리카락과 ' +
+      '디테일한 눈동자, 입체감 있는 음영과 하이라이트, 화사하고 채도 높은 색감, 프로페셔널 일러스트 퀄리티. ' +
+      '(high-quality Japanese gacha / subculture game character illustration, beautiful appealing character ' +
+      'design, refined cel shading with soft gradients, crisp clean lineart, glossy detailed hair and eyes, ' +
+      'volumetric shading — NOT photorealistic, NOT 3D, NOT a photo, NOT sketchy, NOT flat, NOT washed out)',
     backgroundStyle:
       '디테일이 풍부한 비주얼노벨/애니메이션 배경 일러스트, 깊이감 있는 원근과 정교한 묘사, ' +
       '사실적인 빛과 그림자, 분위기 있는 조명, 높은 디테일과 선명한 질감. ' +
