@@ -5,7 +5,7 @@ import { parseText, parseWorkbook } from './parser';
 import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateCgFromReference } from './generators/image';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
-import { aiConfig, normalizeImageSize } from './config/aiConfig';
+import { aiConfig, normalizeImageSize, type ImageQuality } from './config/aiConfig';
 import {
   saveProject,
   loadProject,
@@ -141,6 +141,9 @@ interface State {
 
   // 설정/저장
   setApiKey: (key: string) => void;
+  /** 전역 이미지 생성 품질(초안 low / 표준 medium / 고품질 high). 모든 생성에 적용. */
+  imageQuality: ImageQuality;
+  setImageQuality: (q: ImageQuality) => void;
   save: () => void;
   hydrate: () => void;
   resetAll: () => void;
@@ -229,6 +232,7 @@ export const useStore = create<State>((set, get) => {
     folderName: null,
     archiveFolderName: null,
     archiveReady: false,
+    imageQuality: 'medium',
 
     setRawInput: (text) => {
       set((s) => ({ project: { ...s.project, rawInput: text } }));
@@ -353,6 +357,7 @@ export const useStore = create<State>((set, get) => {
           apiKey: get().apiKey,
           appearance: char.appearance,
           personality: char.personality,
+          quality: get().imageQuality,
           reference: ref,
         });
         const id = assetId();
@@ -430,7 +435,7 @@ export const useStore = create<State>((set, get) => {
       const key = `sprite:${name}`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
-        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite' });
+        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -476,7 +481,7 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
         // 1) 기본 입화를 지시문대로 수정 → 새 디자인의 기준이 된다.
-        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite' });
+        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -561,6 +566,7 @@ export const useStore = create<State>((set, get) => {
           width: project.width,
           height: project.height,
           apiKey,
+          quality: get().imageQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -627,6 +633,7 @@ export const useStore = create<State>((set, get) => {
           apiKey,
           kind: 'background',
           size: normalizeImageSize(project.width, project.height),
+          quality: get().imageQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -833,7 +840,7 @@ export const useStore = create<State>((set, get) => {
           width: project.width,
           height: project.height,
           apiKey,
-          quality: aiConfig.image.quality.cg,
+          quality: get().imageQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -903,6 +910,7 @@ export const useStore = create<State>((set, get) => {
           background: bgBlob,
           apiKey,
           size: normalizeImageSize(project.width, project.height),
+          quality: get().imageQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -974,6 +982,7 @@ export const useStore = create<State>((set, get) => {
           apiKey,
           kind: 'background',
           size: normalizeImageSize(project.width, project.height),
+          quality: get().imageQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -1099,6 +1108,7 @@ export const useStore = create<State>((set, get) => {
           apiKey,
           kind: 'background',
           size: normalizeImageSize(project.width, project.height),
+          quality: get().imageQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -1236,7 +1246,7 @@ export const useStore = create<State>((set, get) => {
           width: 1536,
           height: 1024,
           apiKey,
-          quality: aiConfig.image.quality.cg,
+          quality: get().imageQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -1288,6 +1298,15 @@ export const useStore = create<State>((set, get) => {
       saveApiKey(key);
     },
 
+    setImageQuality: (q) => {
+      set({ imageQuality: q });
+      try {
+        localStorage.setItem('na_image_quality', q);
+      } catch {
+        /* ignore */
+      }
+    },
+
     save: () => {
       const { project, assets } = get();
       saveProject(project, assets);
@@ -1297,11 +1316,19 @@ export const useStore = create<State>((set, get) => {
     hydrate: () => {
       const loaded = loadProject();
       const apiKey = loadApiKey();
+      const savedQuality = (() => {
+        try {
+          return localStorage.getItem('na_image_quality') as ImageQuality | null;
+        } catch {
+          return null;
+        }
+      })();
       if (loaded) {
         set({ project: loaded.project, assets: loaded.assets, apiKey, selectedSceneId: loaded.project.scenes[0]?.id ?? null });
       } else {
         set({ apiKey });
       }
+      if (savedQuality) set({ imageQuality: savedQuality });
       // 이전에 연결한 Ren'Py 폴더 / 이미지 보관 폴더 이름 복원(권한 프롬프트 없이 표시만).
       getConnectedFolderName().then((name) => {
         if (name) set({ folderName: name });

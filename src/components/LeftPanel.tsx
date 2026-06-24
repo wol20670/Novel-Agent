@@ -165,6 +165,7 @@ export default function LeftPanel() {
           <span className={`w-1.5 h-1.5 rounded-full ${apiKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
           {apiKey ? '키 저장됨 · OpenAI 모드' : '키 없음 · 오프라인(Canvas) 모드'}
         </div>
+        <QualitySelector />
       </section>
 
       {/* 이미지 보관 폴더 */}
@@ -214,6 +215,43 @@ export default function LeftPanel() {
 
 function Divider() {
   return <div className="h-px bg-edge/60" />;
+}
+
+const QUALITY_OPTS: { key: 'low' | 'medium' | 'high'; label: string; hint: string }[] = [
+  { key: 'low', label: '초안', hint: '저비용 · 구도/일관성 확인용 (장당 ~$0.016)' },
+  { key: 'medium', label: '표준', hint: '균형 (장당 ~$0.06)' },
+  { key: 'high', label: '고품질', hint: '최고 디테일 · 최종본 (장당 ~$0.25)' },
+];
+
+/** 전역 이미지 생성 품질 선택 — 모든 생성(배경·캐릭터·CG·메뉴)에 적용. */
+function QualitySelector() {
+  const quality = useStore((s) => s.imageQuality);
+  const setQuality = useStore((s) => s.setImageQuality);
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="label">이미지 품질 (비용 직접 영향)</span>
+      <div className="flex gap-1">
+        {QUALITY_OPTS.map((o) => (
+          <button
+            key={o.key}
+            onClick={() => setQuality(o.key)}
+            title={o.hint}
+            className={`flex-1 text-[11px] py-1 rounded border transition-colors ${
+              quality === o.key
+                ? 'border-accent text-accent bg-accent/10'
+                : 'border-edge text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-gray-500 leading-snug">
+        {QUALITY_OPTS.find((o) => o.key === quality)?.hint} · 통합 테스트는 <b className="text-gray-400">초안</b>으로
+        구성 확인 후 마음에 드는 것만 <b className="text-gray-400">고품질</b>로 재생성하면 비용을 아낄 수 있어요.
+      </p>
+    </div>
+  );
 }
 
 function ProjectMeta() {

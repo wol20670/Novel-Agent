@@ -50,7 +50,8 @@ export function buildBackgroundPrompt(
   const parts = [
     core || title,
     ...directions,
-    '비주얼노벨 배경(인물 없음), 와이드 구도',
+    '비주얼노벨 배경(인물 없음), 와이드 구도, 눈높이 카메라, 균형 잡힌 구도',
+    '중앙은 캐릭터가 설 여백을 남기고 하단은 대사 UI 를 위해 단순하게, 16:9',
     aiConfig.image.backgroundStyle,
   ].filter(Boolean);
   return parts.join(', ');
@@ -93,6 +94,7 @@ export async function generateCgFromReference(opts: {
   background?: Blob;
   apiKey: string;
   size?: GptImageSize;
+  quality?: ImageQuality;
 }): Promise<ImageResult> {
   const refs = opts.background ? [opts.character, opts.background] : [opts.character];
   const guide = opts.background
@@ -110,7 +112,7 @@ export async function generateCgFromReference(opts: {
     apiKey: opts.apiKey.trim(),
     transparent: false,
     size: opts.size ?? '1536x1024',
-    quality: aiConfig.image.quality.cg,
+    quality: opts.quality ?? aiConfig.image.quality.cg,
   });
   return { blob, source: 'openai' };
 }
@@ -129,16 +131,19 @@ export interface SpriteRequest {
    * 새로 그리지 않고 이 이미지에서 "표정만" 바꿔(편집) 정체성을 유지한다.
    */
   reference?: Blob;
+  /** 생성 품질(비용 제어). 미지정 시 sprite 기본값. */
+  quality?: ImageQuality;
 }
 
 /** 스프라이트 생성 프롬프트(외형 설명 공유로 일관성↑). */
 function spritePrompt(req: SpriteRequest): string {
   return [
-    `비주얼노벨 캐릭터 입화(서 있는 전신), 이름 ${req.name}`,
+    `비주얼노벨 캐릭터 입화(서 있는 전신 풀샷, 머리끝~발끝 모두 보임), 이름 ${req.name}`,
     req.appearance,
     req.personality && `성격·분위기 참고: ${req.personality}`,
     `표정: ${req.expression}`,
     '투명 배경, 단일 인물, 정면',
+    '정교한 음영과 하이라이트, 깔끔한 라인아트, 고품질 서브컬쳐 게임 일러스트',
     aiConfig.image.artStyle,
   ]
     .filter(Boolean)
@@ -155,7 +160,7 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
   const apiKey = req.apiKey?.trim();
   if (apiKey) {
     const { consistency, transparent, size } = aiConfig.image.sprite;
-    const quality = aiConfig.image.quality.sprite;
+    const quality = req.quality ?? aiConfig.image.quality.sprite;
     if (req.reference && consistency === 'reference') {
       const blob = await openaiImageEdit(
         `이 캐릭터의 표정만 '${req.expression}'(으)로 바꾸고, 인물의 외형·의상·머리·색감은 그대로 유지`,
@@ -188,13 +193,15 @@ export async function editImage(opts: {
   kind: 'background' | 'sprite';
   /** 출력 사이즈(미지정 시 배경=가로형, 스프라이트=세로형). */
   size?: GptImageSize;
+  /** 생성 품질(비용 제어). 미지정 시 종류별 기본값. */
+  quality?: ImageQuality;
 }): Promise<ImageResult> {
   const isSprite = opts.kind === 'sprite';
   const blob = await openaiImageEdit(opts.instruction, opts.blob, {
     apiKey: opts.apiKey.trim(),
     transparent: isSprite ? aiConfig.image.sprite.transparent : false,
     size: opts.size ?? (isSprite ? aiConfig.image.sprite.size : '1536x1024'),
-    quality: isSprite ? aiConfig.image.quality.sprite : aiConfig.image.quality.background,
+    quality: opts.quality ?? (isSprite ? aiConfig.image.quality.sprite : aiConfig.image.quality.background),
   });
   return { blob, source: 'openai' };
 }
