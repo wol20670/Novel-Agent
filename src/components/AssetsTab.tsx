@@ -412,6 +412,7 @@ function CgGroupRow({ group }: { group: CgGroup }) {
   const genCg = useStore((s) => s.generateCg);
   const genCgWithChar = useStore((s) => s.generateCgWithCharacter);
   const refineCg = useStore((s) => s.refineCg);
+  const renameCg = useStore((s) => s.renameCgGroup);
   const importCg = useStore((s) => s.importCgGroup);
   const clearCg = useStore((s) => s.clearCgGroup);
   const busy = useStore((s) => s.busy[`cg:${group.desc.trim()}`]);
@@ -419,17 +420,26 @@ function CgGroupRow({ group }: { group: CgGroup }) {
   // 기본 입화가 있는 캐릭터만 참조 소스로 쓸 수 있다.
   const refChars = useStore((s) => s.project.characters.filter((c) => c.expressions['기본']));
   const [refChar, setRefChar] = useState('');
+  const [draft, setDraft] = useState(group.desc);
   return (
     <div className="card border-edge p-3 flex gap-3 items-center">
       <div className="w-24 aspect-video rounded-lg border border-edge overflow-hidden bg-ink shrink-0 flex items-center justify-center text-[10px] text-gray-600">
         {url ? <img src={url} className="w-full h-full object-cover" /> : '임시'}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 mb-0.5">
+        <div className="flex items-center gap-1.5 mb-1">
           <CountBadge n={group.count} />
           <span className="text-[11px] text-gray-500 truncate">예: {group.repTitle}</span>
         </div>
-        <p className="text-xs text-gray-300 truncate">{group.desc || '(설명 없음)'}</p>
+        <input
+          className="field text-xs"
+          value={draft}
+          placeholder="장면 설명/프롬프트 (예: 노을 아래 마주보며 손잡는 장면) — 생성에 그대로 쓰임"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => draft.trim() !== group.desc.trim() && renameCg(group.desc, draft)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+          title="대본엔 #CG n1 처럼 짧게 적고, 여기서 그 컷의 자세한 장면을 적으면 생성 프롬프트로 쓰입니다."
+        />
       </div>
       <div className="flex flex-col gap-1 shrink-0 w-32">
         <button

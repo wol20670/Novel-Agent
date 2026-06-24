@@ -120,6 +120,8 @@ interface State {
 
   // 에셋 라이브러리 (이름 그룹 단위 — 같은 이름 장면 전체에 한 번에 적용)
   renameBackgroundGroup: (key: string, name: string) => void;
+  /** CG 컷 설명(=생성 프롬프트) 편집. 대본엔 짧은 라벨(#CG n1)만 두고 여기서 디테일하게 적을 때. */
+  renameCgGroup: (oldDesc: string, newDesc: string) => void;
   importCgGroup: (desc: string, file: File) => Promise<void>;
   clearCgGroup: (desc: string) => Promise<void>;
   importMenuArt: (which: 'main' | 'game', file: File) => Promise<void>;
@@ -1029,6 +1031,24 @@ export const useStore = create<State>((set, get) => {
           ...s.project,
           scenes: s.project.scenes.map((sc) =>
             backgroundKey(sc) === key ? { ...sc, background: name } : sc,
+          ),
+        },
+      }));
+      autoSave();
+    },
+
+    renameCgGroup: (oldDesc, newDesc) => {
+      const oldKey = oldDesc.trim();
+      const next = newDesc.trim();
+      if (!oldKey || oldKey === next) return;
+      // 설명만 바꾸고 cgAssetIds(인덱스 기준)는 그대로 두어 이미 만든 이미지를 유지한다.
+      set((s) => ({
+        project: {
+          ...s.project,
+          scenes: s.project.scenes.map((sc) =>
+            sc.cg.some((d) => d.trim() === oldKey)
+              ? { ...sc, cg: sc.cg.map((d) => (d.trim() === oldKey ? next : d)) }
+              : sc,
           ),
         },
       }));
