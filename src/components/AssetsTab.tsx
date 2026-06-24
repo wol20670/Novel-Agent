@@ -410,11 +410,15 @@ function BgGroupRow({ group }: { group: Group }) {
 
 function CgGroupRow({ group }: { group: CgGroup }) {
   const genCg = useStore((s) => s.generateCg);
+  const genCgWithChar = useStore((s) => s.generateCgWithCharacter);
   const refineCg = useStore((s) => s.refineCg);
   const importCg = useStore((s) => s.importCgGroup);
   const clearCg = useStore((s) => s.clearCgGroup);
   const busy = useStore((s) => s.busy[`cg:${group.desc.trim()}`]);
   const url = useAssetUrl(group.repAssetId);
+  // 기본 입화가 있는 캐릭터만 참조 소스로 쓸 수 있다.
+  const refChars = useStore((s) => s.project.characters.filter((c) => c.expressions['기본']));
+  const [refChar, setRefChar] = useState('');
   return (
     <div className="card border-edge p-3 flex gap-3 items-center">
       <div className="w-24 aspect-video rounded-lg border border-edge overflow-hidden bg-ink shrink-0 flex items-center justify-center text-[10px] text-gray-600">
@@ -427,15 +431,40 @@ function CgGroupRow({ group }: { group: CgGroup }) {
         </div>
         <p className="text-xs text-gray-300 truncate">{group.desc || '(설명 없음)'}</p>
       </div>
-      <div className="flex flex-col gap-1 shrink-0">
+      <div className="flex flex-col gap-1 shrink-0 w-32">
         <button
           className="btn-ghost text-[11px]"
           disabled={busy}
           onClick={() => genCg(group.desc)}
-          title={`${group.count}개 장면에 적용`}
+          title={`텍스트만으로 생성 — ${group.count}개 장면에 적용`}
         >
           {busy ? <Spinner /> : url ? '재생성' : '생성'}
         </button>
+        {refChars.length > 0 && (
+          <div className="flex gap-1">
+            <select
+              className="field text-[10px] !py-0.5 flex-1 min-w-0"
+              value={refChar}
+              onChange={(e) => setRefChar(e.target.value)}
+              title="이 캐릭터의 기본 입화(+장면 배경)를 소스로 닮은 CG 생성"
+            >
+              <option value="">참조 인물…</option>
+              {refChars.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <button
+              className="btn-ghost text-[11px] shrink-0"
+              disabled={busy || !refChar}
+              onClick={() => refChar && genCgWithChar(group.desc, refChar)}
+              title="선택한 캐릭터의 기본 입화 + 장면 배경을 소스로 CG 생성(가장 닮게)"
+            >
+              🎭
+            </button>
+          </div>
+        )}
         {url && (
           <button
             className="btn-ghost text-[11px]"

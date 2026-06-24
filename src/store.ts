@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, EXPRESSIONS } from './types';
 import { parseText, parseWorkbook } from './parser';
-import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt } from './generators/image';
+import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, generateCgFromReference } from './generators/image';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
 import { aiConfig, normalizeImageSize } from './config/aiConfig';
@@ -104,6 +104,11 @@ interface State {
 
   // CG 컷 AI 생성 (같은 설명을 쓰는 모든 장면에 적용 + 보관)
   generateCg: (desc: string) => Promise<void>;
+  /**
+   * 캐릭터의 기본 입화(+해당 컷 장면의 배경)를 소스로 CG 를 생성한다.
+   * 캐릭터·배경과 가장 닮은 CG 가 나오게 한다. 키 필요.
+   */
+  generateCgWithCharacter: (desc: string, characterName: string) => Promise<void>;
   /** 이미 생성된 CG 컷을 지시문대로 미세 수정. 키 필요. */
   refineCg: (desc: string, instruction: string) => Promise<void>;
 
@@ -846,6 +851,74 @@ export const useStore = create<State>((set, get) => {
         flash(source === 'openai' ? 'CG 컷을 생성했습니다.' : '임시 CG(Canvas)를 생성했습니다.');
       } catch (e) {
         flash(`CG 생성 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
+      }
+    },
+
+    generateCgWithCharacter: async (desc, characterName) => {
+      const key = desc.trim();
+      if (!key) return flash('CG 설명이 비어 있습니다.');
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('캐릭터 참조 CG 는 OpenAI 키가 필요합니다.');
+      const { project } = get();
+      const using = project.scenes.filter((s) => s.cg.some((d) => d.trim() === key));
+      if (using.length === 0) return;
+      const char = project.characters.find((c) => c.name === characterName);
+      const baseId = char?.expressions['기본'];
+      if (!baseId) return flash(`${characterName}의 ① 기본 입화를 먼저 생성하세요.`);
+      const charBlob = await getAsset(baseId);
+      if (!charBlob) return flash('캐릭터 기본 입화 원본을 찾지 못했습니다.');
+      // 같은 컷을 쓰는 장면 중 배경이 있으면 그 배경도 소스로 함께 준다.
+      const bgId = using.find((s) => s.backgroundAssetId)?.backgroundAssetId;
+      const bgBlob = bgId ? (await getAsset(bgId)) ?? undefined : undefined;
+      const busyKey = `cg:${key}`;
+      set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      try {
+        const { blob, source } = await generateCgFromReference({
+          description: key,
+          directions: using[0].direction,
+          character: charBlob,
+          background: bgBlob,
+          apiKey,
+          size: normalizeImageSize(project.width, project.height),
+        });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'cg',
+          prompt: `${key} (참조: ${characterName}${bgBlob ? '+배경' : ''})`,
+          mime: 'image/png',
+          source,
+          filename: `cg_${Date.now().toString(36)}.png`,
+          createdAt: Date.now(),
+        };
+        if (source === 'openai')
+          void archiveImage(blob, `cg/${safeFileName(key)}_${safeFileName(characterName)}_${timestamp()}.png`);
+        const prevs = new Set<string>();
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) => {
+              if (!sc.cg.some((d) => d.trim() === key)) return sc;
+              const arr = [...(sc.cgAssetIds ?? [])];
+              sc.cg.forEach((d, i) => {
+                if (d.trim() !== key) return;
+                while (arr.length <= i) arr.push('');
+                if (arr[i] && arr[i] !== id) prevs.add(arr[i]);
+                arr[i] = id;
+              });
+              return { ...sc, cgAssetIds: arr };
+            }),
+          },
+        }));
+        autoSave();
+        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        flash(`${characterName}${bgBlob ? '·배경' : ''} 참조 CG 를 생성했습니다.`);
+      } catch (e) {
+        flash(`참조 CG 생성 실패: ${(e as Error).message}`);
       } finally {
         set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
       }

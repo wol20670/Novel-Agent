@@ -69,10 +69,11 @@ export interface OpenAIEditOpts {
 /**
  * 기준 이미지(reference)에서 프롬프트대로 부분만 바꿔 새 이미지를 생성한다(images/edits).
  * 스프라이트 표정 일관성에 사용: '기본' 입화를 기준으로 같은 인물의 다른 표정을 그린다.
+ * reference 를 여러 장 주면(예: [캐릭터, 배경]) gpt-image-1 이 모두 참고해 합성한다.
  */
 export async function openaiImageEdit(
   prompt: string,
-  reference: Blob,
+  reference: Blob | Blob[],
   opts: OpenAIEditOpts,
 ): Promise<Blob> {
   const form = new FormData();
@@ -82,7 +83,13 @@ export async function openaiImageEdit(
   form.append('size', opts.size ?? aiConfig.image.sprite.size);
   form.append('quality', opts.quality ?? 'medium');
   if (opts.transparent) form.append('background', 'transparent');
-  form.append('image', reference, 'reference.png');
+  const refs = Array.isArray(reference) ? reference : [reference];
+  if (refs.length === 1) {
+    form.append('image', refs[0], 'reference.png');
+  } else {
+    // 여러 참조: gpt-image-1 의 image[] 다중 입력.
+    refs.forEach((r, i) => form.append('image[]', r, `reference_${i}.png`));
+  }
 
   const res = await fetch(aiConfig.image.editEndpoint, {
     method: 'POST',

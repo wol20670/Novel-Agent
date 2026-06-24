@@ -57,6 +57,40 @@ export function buildCgPrompt(desc: string, directions: string[]): string {
   return [desc, ...directions, '비주얼노벨 CG 한 장면(감정적 연출)', aiConfig.image.artStyle].join(', ');
 }
 
+/**
+ * 캐릭터 입화(+선택적으로 장면 배경)를 소스로 CG 한 컷을 합성한다(images/edits 다중 참조).
+ * 캐릭터의 얼굴·머리·의상 정체성과 배경의 장소·분위기를 최대한 유지해
+ * "그 캐릭터가 그 배경에 있는" CG 를 만든다. 키 필수.
+ */
+export async function generateCgFromReference(opts: {
+  description: string;
+  directions: string[];
+  character: Blob;
+  background?: Blob;
+  apiKey: string;
+  size?: GptImageSize;
+}): Promise<ImageResult> {
+  const refs = opts.background ? [opts.character, opts.background] : [opts.character];
+  const guide = opts.background
+    ? '첫 번째 참조 이미지의 인물(얼굴·머리·의상·색감)을 동일 인물로 유지하고, 두 번째 참조 이미지의 장소·분위기를 배경으로 사용해 자연스럽게 배치한'
+    : '참조 이미지의 인물(얼굴·머리·의상·색감)을 동일 인물로 유지한';
+  const prompt = [
+    opts.description,
+    ...opts.directions,
+    `${guide} 비주얼노벨 CG 한 장면(감정적 연출, 인물 포함)`,
+    aiConfig.image.artStyle,
+  ]
+    .filter(Boolean)
+    .join(', ');
+  const blob = await openaiImageEdit(prompt, refs, {
+    apiKey: opts.apiKey.trim(),
+    transparent: false,
+    size: opts.size ?? '1536x1024',
+    quality: aiConfig.image.quality.cg,
+  });
+  return { blob, source: 'openai' };
+}
+
 export interface SpriteRequest {
   name: string;
   expression: Expression;
