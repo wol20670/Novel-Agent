@@ -31,6 +31,8 @@ import {
   getArchiveFolderName,
   disconnectImageArchive,
   archiveImage,
+  getArchivePermission,
+  ensureArchivePermission,
   safeFileName,
   timestamp,
 } from './project/imageArchive';
@@ -121,6 +123,13 @@ interface State {
 
   // 에셋 라이브러리 (이름 그룹 단위 — 같은 이름 장면 전체에 한 번에 적용)
   renameBackgroundGroup: (key: string, name: string) => void;
+  /** 배경의 상세 생성 프롬프트 설정(이름은 라벨로 유지, 이 텍스트로 생성). */
+  setBackgroundPrompt: (key: string, prompt: string) => void;
+  /**
+   * 다른 배경(refKey)을 소스로 이 배경을 생성한다 — 같은 장소·화풍을 유지하며
+   * 시간대/조명만 바꿔 일관성을 확보(예: '이른 아침 카페' → '밤 카페'). 키 필요.
+   */
+  generateBackgroundFromRef: (sceneId: string, refKey: string) => Promise<void>;
   /** CG 컷 설명(=생성 프롬프트) 편집. 대본엔 짧은 라벨(#CG n1)만 두고 여기서 디테일하게 적을 때. */
   renameCgGroup: (oldDesc: string, newDesc: string) => void;
   importCgGroup: (desc: string, file: File) => Promise<void>;
@@ -150,7 +159,11 @@ interface State {
 
   // 생성 이미지 자동 보관 폴더 (재생성해도 원본 보존)
   archiveFolderName: string | null;
+  /** 보관 폴더에 실제로 쓸 수 있는 권한이 있는지(리로드 후엔 재허용 필요할 수 있음). */
+  archiveReady: boolean;
   connectArchive: () => Promise<void>;
+  /** 사용자 제스처에서 보관 폴더 쓰기 권한을 재요청(리로드 후 저장 활성화). */
+  verifyArchive: () => Promise<void>;
   disconnectArchive: () => Promise<void>;
 }
 
@@ -215,6 +228,7 @@ export const useStore = create<State>((set, get) => {
     folderSupported: isFolderSyncSupported(),
     folderName: null,
     archiveFolderName: null,
+    archiveReady: false,
 
     setRawInput: (text) => {
       set((s) => ({ project: { ...s.project, rawInput: text } }));
@@ -537,7 +551,9 @@ export const useStore = create<State>((set, get) => {
       const key = `${sceneId}:bg`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
-        const prompt = buildBackgroundPrompt(scene.background, scene.title, scene.direction);
+        // 상세 프롬프트가 있으면 그것으로, 없으면 배경 이름으로 생성(이름은 항상 라벨로 유지).
+        const detail = get().project.backgroundPrompts?.[backgroundKey(scene)]?.trim();
+        const prompt = buildBackgroundPrompt(detail || scene.background, scene.title, scene.direction);
         const { project, apiKey } = get();
         const { blob, source } = await generateImage({
           prompt,
@@ -1029,15 +1045,96 @@ export const useStore = create<State>((set, get) => {
 
     // 같은 배경 이름을 쓰는 모든 장면의 배경 이름을 한 번에 변경(라이브러리 편집).
     renameBackgroundGroup: (key, name) => {
-      set((s) => ({
-        project: {
-          ...s.project,
-          scenes: s.project.scenes.map((sc) =>
-            backgroundKey(sc) === key ? { ...sc, background: name } : sc,
-          ),
-        },
-      }));
+      const next = name.trim();
+      set((s) => {
+        // 상세 프롬프트는 이름(키)에 묶여 있으므로 새 이름으로 이전한다(유실 방지).
+        const bp = { ...(s.project.backgroundPrompts ?? {}) };
+        if (key in bp && next && next !== key) {
+          bp[next] = bp[key];
+          delete bp[key];
+        }
+        return {
+          project: {
+            ...s.project,
+            backgroundPrompts: bp,
+            scenes: s.project.scenes.map((sc) =>
+              backgroundKey(sc) === key ? { ...sc, background: name } : sc,
+            ),
+          },
+        };
+      });
       autoSave();
+    },
+
+    setBackgroundPrompt: (key, prompt) => {
+      set((s) => {
+        const bp = { ...(s.project.backgroundPrompts ?? {}) };
+        if (prompt.trim()) bp[key] = prompt;
+        else delete bp[key];
+        return { project: { ...s.project, backgroundPrompts: bp } };
+      });
+      autoSave();
+    },
+
+    generateBackgroundFromRef: async (sceneId, refKey) => {
+      const scene = get().project.scenes.find((s) => s.id === sceneId);
+      if (!scene) return;
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('기준 배경 참조 생성은 OpenAI 키가 필요합니다.');
+      // 참조 배경의 현재 에셋을 찾는다.
+      const refScene = get().project.scenes.find((s) => backgroundKey(s) === refKey && s.backgroundAssetId);
+      if (!refScene?.backgroundAssetId) return flash('참조할 배경을 먼저 생성하세요.');
+      const refBlob = await getAsset(refScene.backgroundAssetId);
+      if (!refBlob) return flash('참조 배경 원본을 찾지 못했습니다.');
+      const key = `${sceneId}:bg`;
+      set((s) => ({ busy: { ...s.busy, [key]: true } }));
+      try {
+        const { project } = get();
+        const detail = project.backgroundPrompts?.[backgroundKey(scene)]?.trim();
+        const want = detail || scene.background || scene.title;
+        const instruction = `이 배경과 같은 장소·구도·화풍을 유지하면서 다음으로 바꿔줘: ${want}. ${scene.direction.join(', ')}`;
+        const { blob, source } = await editImage({
+          blob: refBlob,
+          instruction,
+          apiKey,
+          kind: 'background',
+          size: normalizeImageSize(project.width, project.height),
+        });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'background',
+          prompt: `${want} (참조: ${refKey})`,
+          mime: 'image/png',
+          source,
+          filename: `bg_${sceneId}.png`,
+          createdAt: Date.now(),
+        };
+        if (source === 'openai')
+          void archiveImage(blob, `backgrounds/${safeFileName(scene.background || scene.title)}_참조_${timestamp()}.png`);
+        const bkey = backgroundKey(scene);
+        const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === bkey);
+        const prevs = new Set(
+          targets.map((t) => t.backgroundAssetId).filter((x): x is string => !!x && x !== id),
+        );
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) =>
+              backgroundKey(sc) === bkey ? { ...sc, backgroundAssetId: id } : sc,
+            ),
+          },
+        }));
+        autoSave();
+        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        flash(`'${refKey}' 기준으로 일관된 배경을 생성했습니다.`);
+      } catch (e) {
+        flash(`참조 배경 생성 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [key]: false } }));
+      }
     },
 
     renameCgGroup: (oldDesc, newDesc) => {
@@ -1210,7 +1307,11 @@ export const useStore = create<State>((set, get) => {
         if (name) set({ folderName: name });
       });
       getArchiveFolderName().then((name) => {
-        if (name) set({ archiveFolderName: name });
+        if (name) {
+          set({ archiveFolderName: name });
+          // 리로드 후 권한이 'prompt' 로 떨어졌으면 저장이 조용히 실패한다 → 상태 표시.
+          getArchivePermission().then((p) => set({ archiveReady: p === 'granted' }));
+        }
       });
     },
 
@@ -1309,7 +1410,7 @@ export const useStore = create<State>((set, get) => {
       }
       try {
         const name = await connectImageArchive();
-        set({ archiveFolderName: name });
+        set({ archiveFolderName: name, archiveReady: true });
         flash(`이미지 보관 폴더 연결: "${name}". 이제 생성하는 AI 이미지가 이 폴더에 자동 저장됩니다.`);
       } catch (e) {
         const msg = (e as Error).message;
@@ -1318,9 +1419,19 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    verifyArchive: async () => {
+      const ok = await ensureArchivePermission();
+      set({ archiveReady: ok });
+      flash(
+        ok
+          ? '보관 폴더 쓰기 권한을 허용했습니다. 이제 생성 이미지가 저장됩니다.'
+          : '권한이 허용되지 않았습니다. 폴더를 다시 연결해 보세요.',
+      );
+    },
+
     disconnectArchive: async () => {
       await disconnectImageArchive();
-      set({ archiveFolderName: null });
+      set({ archiveFolderName: null, archiveReady: false });
       flash('이미지 보관 폴더 연결을 해제했습니다.');
     },
   };

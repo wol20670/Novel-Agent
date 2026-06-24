@@ -41,6 +41,11 @@ export interface AiConfig {
      * gpt-image-1 은 별도 네거티브 프롬프트가 없어, 피하고 싶은 것도 문장으로 적는다.
      */
     artStyle: string;
+    /**
+     * 배경 전용 그림체. 배경은 캐릭터(artStyle)보다 디테일·깊이감·사실적 조명을 강조하고
+     * 평면적인 셀 셰이딩 느낌을 줄인다(너무 2D 틱하지 않게). 인물·글자 없음.
+     */
+    backgroundStyle: string;
     /** 캐릭터 스프라이트(입화) 설정. */
     sprite: {
       /** 스프라이트는 세로로 길다 → 세로형 사이즈로 고정. */
@@ -73,7 +78,8 @@ export const aiConfig: AiConfig = {
     endpoint: 'https://api.openai.com/v1/images/generations',
     editEndpoint: 'https://api.openai.com/v1/images/edits',
     model: 'gpt-image-1',
-    quality: { background: 'low', cg: 'medium', sprite: 'medium' },
+    // 배경은 medium(텍스트·캐릭터에 가려지지 않는 메인 비주얼이라 품질↑). 더 높이려면 'high'.
+    quality: { background: 'medium', cg: 'medium', sprite: 'medium' },
     landscapeRatio: 1.2,
     portraitRatio: 0.83,
     artStyle:
@@ -81,6 +87,11 @@ export const aiConfig: AiConfig = {
       '부드러운 자연광, 선명한 라인아트, 채도 높은 색감. ' +
       '(Japanese anime / visual-novel art style, 2D cel-shaded anime illustration, hand-drawn look, ' +
       'soft lighting, clean line art — NOT photorealistic, NOT a 3D render, NOT a photo)',
+    backgroundStyle:
+      '디테일이 풍부한 비주얼노벨/애니메이션 배경 일러스트, 깊이감 있는 원근과 정교한 묘사, ' +
+      '사실적인 빛과 그림자, 분위기 있는 조명, 높은 디테일과 선명한 질감. ' +
+      '(lush, highly detailed anime-style background art, painterly and atmospheric, ' +
+      'realistic lighting and depth, rich textures, semi-realistic — no people, no characters, no text or watermark)',
     sprite: {
       size: '1024x1536',
       transparent: true,

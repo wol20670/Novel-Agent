@@ -81,6 +81,26 @@ export async function disconnectImageArchive(): Promise<void> {
   await persist(null);
 }
 
+/**
+ * 보관 폴더 쓰기 권한 상태(프롬프트 없음). 페이지 리로드 후엔 'prompt' 로 떨어질 수 있어,
+ * 이 경우 사용자 제스처로 ensureArchivePermission 을 호출해 다시 허용받아야 저장된다.
+ */
+export async function getArchivePermission(): Promise<'granted' | 'prompt' | 'denied' | 'none'> {
+  const handle = cached ?? (await loadPersisted());
+  if (!handle) return 'none';
+  cached = handle;
+  if (!handle.queryPermission) return 'granted';
+  return (await handle.queryPermission({ mode: 'readwrite' })) as 'granted' | 'prompt' | 'denied';
+}
+
+/** 사용자 제스처에서 호출: 보관 폴더 쓰기 권한을 (재)요청. granted 여부 반환. */
+export async function ensureArchivePermission(): Promise<boolean> {
+  const handle = cached ?? (await loadPersisted());
+  if (!handle) return false;
+  cached = handle;
+  return ensurePermission(handle);
+}
+
 async function writeFile(root: DirHandle, path: string, data: Blob): Promise<void> {
   const parts = path.split('/');
   let dir: FileSystemDirectoryHandle = root;

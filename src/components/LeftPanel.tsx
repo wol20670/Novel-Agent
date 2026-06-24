@@ -21,7 +21,9 @@ export default function LeftPanel() {
   const importProject = useStore((s) => s.importProject);
   const folderSupported = useStore((s) => s.folderSupported);
   const archiveFolderName = useStore((s) => s.archiveFolderName);
+  const archiveReady = useStore((s) => s.archiveReady);
   const connectArchive = useStore((s) => s.connectArchive);
+  const verifyArchive = useStore((s) => s.verifyArchive);
   const disconnectArchive = useStore((s) => s.disconnectArchive);
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -176,17 +178,28 @@ export default function LeftPanel() {
             이미지가 폴더에 그대로 남아 나중에 다시 고를 수 있습니다.
           </p>
           {archiveFolderName ? (
-            <div className="flex items-center gap-2">
-              <div className="text-[11px] flex items-center gap-1.5 text-emerald-600 flex-1 min-w-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                <span className="truncate">보관 중: {archiveFolderName}</span>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <div className={`text-[11px] flex items-center gap-1.5 flex-1 min-w-0 ${archiveReady ? 'text-emerald-600' : 'text-amber-500'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${archiveReady ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                  <span className="truncate">보관 중: {archiveFolderName}</span>
+                </div>
+                <button className="btn-ghost text-[11px]" onClick={connectArchive} title="다른 폴더로 변경">
+                  변경
+                </button>
+                <button className="btn-ghost text-[11px] text-gray-500" onClick={disconnectArchive}>
+                  해제
+                </button>
               </div>
-              <button className="btn-ghost text-[11px]" onClick={connectArchive} title="다른 폴더로 변경">
-                변경
-              </button>
-              <button className="btn-ghost text-[11px] text-gray-500" onClick={disconnectArchive}>
-                해제
-              </button>
+              {!archiveReady && (
+                <button
+                  className="btn-primary text-[11px]"
+                  onClick={verifyArchive}
+                  title="리로드 후 폴더 쓰기 권한이 해제됨 — 클릭해 다시 허용해야 저장됩니다"
+                >
+                  ⚠️ 폴더 권한 허용 (저장 활성화)
+                </button>
+              )}
             </div>
           ) : (
             <button className="btn-ghost" onClick={connectArchive}>

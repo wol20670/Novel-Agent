@@ -127,7 +127,7 @@ export default function AssetsTab() {
         </p>
         <div className="flex flex-col gap-2">
           {bgs.map((g) => (
-            <BgGroupRow key={g.key} group={g} />
+            <BgGroupRow key={g.key} group={g} siblings={bgs} />
           ))}
         </div>
       </section>
@@ -370,40 +370,83 @@ function ExpressionThumb({
   );
 }
 
-function BgGroupRow({ group }: { group: Group }) {
+function BgGroupRow({ group, siblings }: { group: Group; siblings: Group[] }) {
   const rename = useStore((s) => s.renameBackgroundGroup);
   const genBg = useStore((s) => s.generateBackground);
+  const genFromRef = useStore((s) => s.generateBackgroundFromRef);
+  const setBgPrompt = useStore((s) => s.setBackgroundPrompt);
   const importBg = useStore((s) => s.importBackground);
   const busy = useStore((s) => group.sceneIds.some((id) => s.busy[`${id}:bg`]));
+  const savedPrompt = useStore((s) => s.project.backgroundPrompts?.[group.key] ?? '');
   const url = useAssetUrl(group.repAssetId);
   const [draft, setDraft] = useState(group.name);
+  const [promptDraft, setPromptDraft] = useState(savedPrompt);
+  const [refKey, setRefKey] = useState('');
   const rep = group.sceneIds[0];
+  // 이미 생성된 다른 배경만 기준(참조)으로 쓸 수 있다.
+  const refOptions = siblings.filter((s) => s.key !== group.key && s.repAssetId);
 
   return (
-    <div className="card border-edge p-3 flex gap-3 items-center">
-      <div className="w-24 aspect-video rounded-lg border border-edge overflow-hidden bg-ink shrink-0 flex items-center justify-center text-[10px] text-gray-600">
-        {url ? <img src={url} className="w-full h-full object-cover" /> : '미생성'}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 mb-1">
-          <CountBadge n={group.count} />
-          <span className="text-[11px] text-gray-500 truncate">예: {group.repTitle}</span>
+    <div className="card border-edge p-3 flex flex-col gap-2">
+      <div className="flex gap-3 items-center">
+        <div className="w-24 aspect-video rounded-lg border border-edge overflow-hidden bg-ink shrink-0 flex items-center justify-center text-[10px] text-gray-600">
+          {url ? <img src={url} className="w-full h-full object-cover" /> : '미생성'}
         </div>
-        <input
-          className="field"
-          value={draft}
-          placeholder="배경 이름/프롬프트 (예: 교실) — 같은 이름끼리 공유"
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => draft !== group.name && rename(group.key, draft)}
-          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-1">
+            <CountBadge n={group.count} />
+            <span className="text-[11px] text-gray-500 truncate">예: {group.repTitle}</span>
+          </div>
+          <input
+            className="field"
+            value={draft}
+            placeholder="배경 이름(라벨) — 같은 이름끼리 공유 (예: 이른 아침의 카페)"
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => draft !== group.name && rename(group.key, draft)}
+            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+          />
+        </div>
+        <div className="flex flex-col gap-1 shrink-0">
+          <button className="btn-ghost" disabled={busy} onClick={() => genBg(rep)} title={`상세 프롬프트(없으면 이름)로 생성 — ${group.count}개 장면에 적용`}>
+            {busy ? <Spinner /> : url ? '재생성' : '생성'}
+          </button>
+          <UploadButton onFile={(f) => importBg(rep, f)} label="↥ 업로드" className="btn-ghost text-[11px]" />
+        </div>
       </div>
-      <div className="flex flex-col gap-1 shrink-0">
-        <button className="btn-ghost" disabled={busy} onClick={() => genBg(rep)} title={`${group.count}개 장면에 적용`}>
-          {busy ? <Spinner /> : url ? '재생성' : '생성'}
-        </button>
-        <UploadButton onFile={(f) => importBg(rep, f)} label="↥ 업로드" className="btn-ghost text-[11px]" />
-      </div>
+      <textarea
+        className="field text-xs h-12 resize-y"
+        value={promptDraft}
+        placeholder="상세 프롬프트 (예: 통유리로 아침 햇살이 드는 아늑한 카페 내부, 원목 가구, 식물, 김 나는 커피) — 적으면 이름 대신 이걸로 생성"
+        onChange={(e) => setPromptDraft(e.target.value)}
+        onBlur={() => promptDraft !== savedPrompt && setBgPrompt(group.key, promptDraft)}
+        title="배경 이름은 라벨로 두고, 여기에 자세히 적으면 그 텍스트로 생성됩니다."
+      />
+      {refOptions.length > 0 && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-gray-500 shrink-0">기준 배경:</span>
+          <select
+            className="field text-[11px] !py-1 flex-1 min-w-0"
+            value={refKey}
+            onChange={(e) => setRefKey(e.target.value)}
+            title="이미 만든 다른 배경을 소스로, 같은 장소·화풍을 유지하며 이 배경을 생성(시간대·조명만 변경)"
+          >
+            <option value="">참조 안 함 (새로 생성)</option>
+            {refOptions.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.name || o.repTitle}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn-ghost text-[11px] shrink-0"
+            disabled={busy || !refKey}
+            onClick={() => refKey && genFromRef(rep, refKey)}
+            title="선택한 기준 배경을 소스로 일관된 배경 생성"
+          >
+            🪄 기준으로 생성
+          </button>
+        </div>
+      )}
     </div>
   );
 }

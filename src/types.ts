@@ -111,6 +111,12 @@ export interface Project {
   credits?: string;
   /** 외부에서 업로드한 메뉴 배경(자체 GUI 위에 덮어씀). 없으면 Canvas 생성. */
   menuArt?: { main?: string; game?: string };
+  /**
+   * 배경 이름(라벨, backgroundKey)별 "상세 생성 프롬프트".
+   * 비어 있으면 배경 이름을 그대로 프롬프트로 쓴다. 있으면 이름은 라벨로만 쓰고
+   * 이 텍스트로 생성한다(이름은 그대로 두고 디테일하게 지시).
+   */
+  backgroundPrompts?: Record<string, string>;
 }
 
 export function emptyProject(): Project {

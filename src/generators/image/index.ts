@@ -38,17 +38,20 @@ export async function generateImage(req: ImageRequest): Promise<ImageResult> {
   return { blob, source: 'canvas' };
 }
 
-/** 장면 정보 → 이미지 프롬프트 문자열. 그림체(artStyle)는 aiConfig 한 곳에서 관리. */
+/**
+ * 장면 정보 → 배경 프롬프트. `core` 에 디테일 프롬프트(없으면 배경 이름)를 넣는다.
+ * 배경 그림체(backgroundStyle)는 캐릭터와 분리해 더 디테일·사실적 조명을 쓴다.
+ */
 export function buildBackgroundPrompt(
-  background: string | undefined,
+  core: string | undefined,
   title: string,
   directions: string[],
 ): string {
   const parts = [
-    background || title,
+    core || title,
     ...directions,
     '비주얼노벨 배경(인물 없음), 와이드 구도',
-    aiConfig.image.artStyle,
+    aiConfig.image.backgroundStyle,
   ].filter(Boolean);
   return parts.join(', ');
 }
