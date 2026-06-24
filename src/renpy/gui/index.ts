@@ -16,13 +16,18 @@ init -100 python in gui:
 `;
 
 /** GuiTheme + 해상도 → game/gui.rpy · screens.rpy · guisupport.rpy */
-export function generateGuiFiles(theme: GuiTheme, width: number, height: number): RenpyFile[] {
+export function generateGuiFiles(
+  theme: GuiTheme,
+  width: number,
+  height: number,
+  outline?: { enabled: boolean; color: string },
+): RenpyFile[] {
   return [
     { path: 'game/guisupport.rpy', content: GUISUPPORT_RPY },
-    { path: 'game/gui.rpy', content: guiRpy(theme, width, height) },
+    { path: 'game/gui.rpy', content: guiRpy(theme, width, height, outline) },
     { path: 'game/screens.rpy', content: screensRpy() },
   ];
 }
 
-export { resolveTheme, PRESETS, GENRE_OPTIONS, DEFAULT_GENRE } from './theme';
-export type { GuiTheme, GenreId, MenuArtStyle } from './theme';
+export { resolveTheme, PRESETS, GENRE_OPTIONS, DEFAULT_GENRE, withGuiOverrides, hexWithAlpha } from './theme';
+export type { GuiTheme, GenreId, MenuArtStyle, GuiOverrides } from './theme';

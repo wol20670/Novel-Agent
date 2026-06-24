@@ -199,3 +199,38 @@ export function resolveTheme(genre: GenreId | undefined, custom?: GuiTheme): Gui
   if (custom) return custom;
   return PRESETS[genre ?? DEFAULT_GENRE] ?? PRESETS[DEFAULT_GENRE];
 }
+
+/** #rrggbb(또는 #rrggbbaa) + 불투명도(0~1) → #rrggbbaa. */
+export function hexWithAlpha(hex: string, alpha: number): string {
+  const rgb = hex.replace('#', '').slice(0, 6).padEnd(6, '0');
+  const aa = Math.round(Math.max(0, Math.min(1, alpha)) * 255)
+    .toString(16)
+    .padStart(2, '0');
+  return `#${rgb}${aa}`;
+}
+
+export interface GuiOverrides {
+  /** 대사창·선택지 배경색(기본 검정). 불투명도와 함께 적용. */
+  dialogueBoxColor?: string;
+  dialogueOpacity?: number;
+  textColor?: string;
+  nameColor?: string;
+  outline?: boolean;
+  outlineColor?: string;
+}
+
+/** 테마 위에 사용자 GUI 조정(대사창 색·불투명도·글자색·이름색)을 덮어쓴 새 테마. */
+export function withGuiOverrides(theme: GuiTheme, ov?: GuiOverrides): GuiTheme {
+  if (!ov) return theme;
+  const boxOn = ov.dialogueOpacity != null || !!ov.dialogueBoxColor;
+  const boxColor = ov.dialogueBoxColor ?? '#000000';
+  const boxAlpha = ov.dialogueOpacity ?? 0.15;
+  return {
+    ...theme,
+    dialogueBox: boxOn ? hexWithAlpha(boxColor, boxAlpha) : theme.dialogueBox,
+    // 선택지 버튼도 같은 색으로, 버튼 가시성을 위해 약간 더 진하게.
+    choiceIdleBg: boxOn ? hexWithAlpha(boxColor, Math.min(boxAlpha + 0.1, 0.9)) : theme.choiceIdleBg,
+    dialogueText: ov.textColor || theme.dialogueText,
+    nameText: ov.nameColor || theme.nameText,
+  };
+}

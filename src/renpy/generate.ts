@@ -3,7 +3,7 @@
 
 import type { Project, Scene, Line, Character, Expression } from '../types';
 import { SlugMap } from './slug';
-import { generateGuiFiles, resolveTheme } from './gui';
+import { generateGuiFiles, resolveTheme, withGuiOverrides } from './gui';
 import { inferEmotion } from '../generators/emotion';
 import { enforceContrast } from '../generators/theme/color';
 
@@ -530,7 +530,7 @@ export function generateRenpyFiles(project: Project): {
   const plan = expressionPlan(project, ids);
   const sprites = resolveSprites(project, ids, plan);
   const joints = resolveJointSpeakers(project);
-  const theme = resolveTheme(project.genre, project.guiTheme);
+  const theme = withGuiOverrides(resolveTheme(project.genre, project.guiTheme), project.guiOverrides);
 
   const files: RenpyFile[] = [
     { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height) },
@@ -538,7 +538,10 @@ export function generateRenpyFiles(project: Project): {
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
     { path: 'game/credits.rpy', content: creditsRpy(project) },
-    ...generateGuiFiles(theme, project.width, project.height),
+    ...generateGuiFiles(theme, project.width, project.height, {
+      enabled: project.guiOverrides?.outline ?? false,
+      color: project.guiOverrides?.outlineColor || '#000000',
+    }),
     { path: 'README.md', content: readme(theme) },
   ];
   return { files, refs, sprites, characters: project.characters };

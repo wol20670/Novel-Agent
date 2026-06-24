@@ -5,7 +5,16 @@
 
 import type { GuiTheme } from './theme';
 
-export function guiRpy(theme: GuiTheme, width: number, height: number): string {
+export function guiRpy(
+  theme: GuiTheme,
+  width: number,
+  height: number,
+  outline?: { enabled: boolean; color: string },
+): string {
+  // 글자 외곽선(가독성) — 켜면 본문·이름에 동일 외곽선, 끄면 빈 리스트.
+  const outlineList = outline?.enabled
+    ? `[ (absolute(2), "${outline.color}", absolute(0), absolute(0)) ]`
+    : '[]';
   return `# 자동 생성: GUI 변수 (테마: ${theme.label})
 # 색/폰트/전환만 테마로 주입되고 레이아웃은 Ren'Py 8.5.3 기본값을 따른다.
 
@@ -44,6 +53,10 @@ define gui.choice_idle_bg = "${theme.choiceIdleBg}"
 define gui.text_font = "${theme.textFont}"
 define gui.name_text_font = "${theme.nameFont}"
 define gui.interface_text_font = "${theme.interfaceFont}"
+
+## 글자 외곽선 (가독성 — 대사창 위 흰 글자 등). screens.rpy 의 say 스타일이 참조.
+define gui.dialogue_outlines = ${outlineList}
+define gui.name_outlines = ${outlineList}
 
 define gui.text_size = gui.scale(22)
 define gui.name_text_size = gui.scale(30)

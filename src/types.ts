@@ -117,14 +117,30 @@ export interface Project {
    * 이 텍스트로 생성한다(이름은 그대로 두고 디테일하게 지시).
    */
   backgroundPrompts?: Record<string, string>;
+  /**
+   * GUI 대사창·폰트 사용자 조정(테마 위에 덮어씀). 비면 테마 기본값 사용.
+   * - dialogueOpacity: 대사창 검정 배경 불투명도(0~1, 권장 0.1~0.2)
+   * - textColor: 본문 글자색 / nameColor: 화자 이름색
+   * - outline: 글자 외곽선 사용 / outlineColor: 외곽선색
+   */
+  guiOverrides?: {
+    dialogueBoxColor?: string;
+    dialogueOpacity?: number;
+    textColor?: string;
+    nameColor?: string;
+    outline?: boolean;
+    outlineColor?: string;
+  };
 }
+
+export type GuiOverrides = NonNullable<Project['guiOverrides']>;
 
 export function emptyProject(): Project {
   return {
     title: '나의 비주얼노벨',
     author: '작가',
-    width: 1280,
-    height: 720,
+    width: 1920,
+    height: 1080,
     scenes: [],
     characters: [],
     rawInput: '',

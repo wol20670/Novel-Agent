@@ -422,11 +422,80 @@ function ThemeStudio() {
         </p>
       </div>
 
+      <DialogueGuiControls />
+
       {!apiKey && (
         <p className="text-[10px] text-gray-500 leading-snug">
           키 없이도 스토리·분위기 기반 변형이 적용됩니다. 위 OpenAI 키를 넣으면 더 정교한 AI 생성으로 업그레이드됩니다.
         </p>
       )}
+    </div>
+  );
+}
+
+/** 대사창 불투명도 · 글자색 · 외곽선 · 이름색 조정(테마 위에 덮어씀). */
+function DialogueGuiControls() {
+  const project = useStore((s) => s.project);
+  const update = useStore((s) => s.updateProjectMeta);
+  const theme = resolveTheme(project.genre, project.guiTheme);
+  const ov = project.guiOverrides ?? {};
+  const setOv = (patch: Partial<NonNullable<typeof project.guiOverrides>>) =>
+    update({ guiOverrides: { ...(project.guiOverrides ?? {}), ...patch } });
+
+  const boxColor = ov.dialogueBoxColor ?? '#000000';
+  const opacity = ov.dialogueOpacity ?? 0.15;
+  const textColor = ov.textColor ?? theme.dialogueText;
+  const nameColor = ov.nameColor ?? theme.nameText;
+  const outline = ov.outline ?? false;
+  const outlineColor = ov.outlineColor ?? '#000000';
+
+  return (
+    <div className="flex flex-col gap-2 pt-1 border-t border-edge/50">
+      <span className="label">대사창 · 폰트 (인게임)</span>
+      <label className="flex items-center gap-2 text-[11px] text-gray-400">
+        <span className="w-20 shrink-0">창 색·불투명</span>
+        <input type="color" value={boxColor} onChange={(e) => setOv({ dialogueBoxColor: e.target.value })} className="w-6 h-6 rounded border border-edge bg-transparent shrink-0" title="대사창·선택지 배경색(기본 검정)" />
+        <input
+          type="range"
+          min={0}
+          max={0.6}
+          step={0.05}
+          value={opacity}
+          onChange={(e) => setOv({ dialogueOpacity: Number(e.target.value) })}
+          className="flex-1"
+        />
+        <span className="w-9 text-right">{Math.round(opacity * 100)}%</span>
+      </label>
+      <div className="flex items-center gap-3 text-[11px] text-gray-400">
+        <label className="flex items-center gap-1.5">
+          본문색
+          <input type="color" value={textColor} onChange={(e) => setOv({ textColor: e.target.value })} className="w-6 h-6 rounded border border-edge bg-transparent" />
+        </label>
+        <label className="flex items-center gap-1.5">
+          이름색
+          <input type="color" value={nameColor} onChange={(e) => setOv({ nameColor: e.target.value })} className="w-6 h-6 rounded border border-edge bg-transparent" />
+        </label>
+      </div>
+      <div className="flex items-center gap-3 text-[11px] text-gray-400">
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={outline} onChange={(e) => setOv({ outline: e.target.checked })} />
+          글자 외곽선
+        </label>
+        {outline && (
+          <label className="flex items-center gap-1.5">
+            외곽선색
+            <input type="color" value={outlineColor} onChange={(e) => setOv({ outlineColor: e.target.value })} className="w-6 h-6 rounded border border-edge bg-transparent" />
+          </label>
+        )}
+        {(ov.dialogueBoxColor || ov.dialogueOpacity != null || ov.textColor || ov.nameColor || ov.outline || ov.outlineColor) && (
+          <button className="text-[10px] text-gray-500 hover:text-rose-600 ml-auto" onClick={() => update({ guiOverrides: undefined })}>
+            기본값
+          </button>
+        )}
+      </div>
+      <p className="text-[10px] text-gray-500 leading-snug">
+        흰 글자 + 검정 외곽선 + 낮은 불투명도(10~20%)면 배경 위에서 잘 읽혀요. 빌드/내보내기에 반영됩니다.
+      </p>
     </div>
   );
 }
