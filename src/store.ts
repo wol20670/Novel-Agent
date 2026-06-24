@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, EXPRESSIONS } from './types';
 import { parseText, parseWorkbook } from './parser';
-import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateCgFromReference } from './generators/image';
+import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference } from './generators/image';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
 import { aiConfig, normalizeImageSize, type ImageQuality } from './config/aiConfig';
@@ -135,8 +135,11 @@ interface State {
   importCgGroup: (desc: string, file: File) => Promise<void>;
   clearCgGroup: (desc: string) => Promise<void>;
   importMenuArt: (which: 'main' | 'game', file: File) => Promise<void>;
-  /** 타이틀/게임 메뉴 배경을 gpt-image-1 로 생성해 해당 슬롯에 적용(+보관). 키 필요. */
-  generateMenuArt: (which: 'main' | 'game') => Promise<void>;
+  /**
+   * 타이틀/게임 메뉴 배경을 gpt-image-1 로 생성해 슬롯에 적용(+보관). 키 필요.
+   * opts 로 메인 캐릭터·배경을 참조하면 게임과 어울리게 합성한다.
+   */
+  generateMenuArt: (which: 'main' | 'game', opts?: { charName?: string; bgKey?: string }) => Promise<void>;
   clearMenuArt: (which: 'main' | 'game') => Promise<void>;
 
   // 설정/저장
@@ -1232,19 +1235,33 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
-    generateMenuArt: async (which) => {
+    generateMenuArt: async (which, opts) => {
       const { apiKey, project } = get();
       if (!apiKey?.trim()) return flash('타이틀 AI 생성은 OpenAI 키가 필요합니다.');
       const busyKey = `menu:${which}`;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
       try {
         const theme = resolveTheme(project.genre, project.guiTheme);
+        // 참조: 메인 캐릭터의 기본 입화 + 선택한 배경(있으면)을 소스로 어울리게 합성.
+        let charBlob: Blob | undefined;
+        if (opts?.charName) {
+          const c = project.characters.find((x) => x.name === opts.charName);
+          const baseId = c?.expressions['기본'];
+          if (baseId) charBlob = (await getAsset(baseId)) ?? undefined;
+        }
+        let bgBlob: Blob | undefined;
+        if (opts?.bgKey) {
+          const sc = project.scenes.find((s) => backgroundKey(s) === opts.bgKey && s.backgroundAssetId);
+          if (sc?.backgroundAssetId) bgBlob = (await getAsset(sc.backgroundAssetId)) ?? undefined;
+        }
         const prompt = buildMenuArtPrompt(project.title, theme.label, project.mood, which);
-        const { blob, source } = await generateImage({
-          prompt,
-          label: which === 'main' ? '타이틀' : '메뉴',
-          width: 1536,
-          height: 1024,
+        const { blob, source } = await generateMenuArtImage({
+          which,
+          title: project.title,
+          genreLabel: theme.label,
+          mood: project.mood,
+          character: charBlob,
+          background: bgBlob,
           apiKey,
           quality: get().imageQuality,
         });

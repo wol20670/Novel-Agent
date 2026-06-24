@@ -83,6 +83,49 @@ export function buildMenuArtPrompt(
 }
 
 /**
+ * 타이틀/메뉴 배경 생성. 참조(메인 캐릭터·배경)를 주면 그 외형·분위기를 살려
+ * "게임과 어울리는" 타이틀을 합성하고(images/edits 다중 참조), 없으면 텍스트로 생성. 키 필수.
+ */
+export async function generateMenuArtImage(opts: {
+  which: 'main' | 'game';
+  title: string;
+  genreLabel: string;
+  mood?: string;
+  character?: Blob;
+  background?: Blob;
+  apiKey: string;
+  quality?: ImageQuality;
+}): Promise<ImageResult> {
+  const apiKey = opts.apiKey.trim();
+  const quality = opts.quality ?? aiConfig.image.quality.cg;
+  const base = buildMenuArtPrompt(opts.title, opts.genreLabel, opts.mood, opts.which);
+  const refs = [opts.character, opts.background].filter(Boolean) as Blob[];
+  if (refs.length) {
+    // 캐릭터는 타이틀에 인물로 등장 가능 → "인물 없음" 지시 대신 참조 활용 문구로.
+    const withChar = !!opts.character;
+    const guide = [
+      `비주얼노벨 ${opts.which === 'main' ? '타이틀(메인 메뉴)' : '게임 메뉴'} 화면 키 아트`,
+      opts.title && `작품: ${opts.title}`,
+      `장르 분위기: ${opts.genreLabel}`,
+      opts.mood,
+      withChar
+        ? '첫 참조 이미지의 캐릭터(외형·의상·색감)를 주인공으로 멋지게 배치'
+        : '',
+      opts.background ? '참조 배경의 장소·분위기·색감을 배경으로 활용' : '',
+      opts.which === 'main' ? '제목 로고를 얹을 여백 확보' : '약간 어두운 톤(메뉴 가독성)',
+      '시네마틱 구도, 그림 안에 글자·로고·UI·워터마크 없음',
+      aiConfig.image.artStyle,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    const blob = await openaiImageEdit(guide, refs, { apiKey, transparent: false, size: '1536x1024', quality });
+    return { blob, source: 'openai' };
+  }
+  const blob = await openaiImage(base, { apiKey, width: 1536, height: 1024, quality });
+  return { blob, source: 'openai' };
+}
+
+/**
  * 캐릭터 입화(+선택적으로 장면 배경)를 소스로 CG 한 컷을 합성한다(images/edits 다중 참조).
  * 캐릭터의 얼굴·머리·의상 정체성과 배경의 장소·분위기를 최대한 유지해
  * "그 캐릭터가 그 배경에 있는" CG 를 만든다. 키 필수.

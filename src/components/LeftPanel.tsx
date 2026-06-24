@@ -336,6 +336,18 @@ function ThemeStudio() {
 
   const theme = resolveTheme(project.genre, project.guiTheme);
   const custom = !!project.guiTheme;
+  // 타이틀 합성에 참조할 수 있는 후보: 기본 입화 있는 캐릭터 / 생성된 배경.
+  const refChars = project.characters.filter((c) => c.expressions['기본']);
+  const refBgKeys = [
+    ...new Set(
+      project.scenes
+        .filter((s) => s.backgroundAssetId)
+        .map((s) => (s.background || s.title).trim()),
+    ),
+  ];
+  const [menuCharRef, setMenuCharRef] = useState('');
+  const [menuBgRef, setMenuBgRef] = useState('');
+  const menuRefOpts = { charName: menuCharRef || undefined, bgKey: menuBgRef || undefined };
 
   return (
     <div className="rounded-lg border border-accent/30 bg-accent2/5 p-2.5 flex flex-col gap-2">
@@ -374,11 +386,40 @@ function ThemeStudio() {
 
       <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
         <span className="label">타이틀·메뉴 배경 (gpt-image-1 생성 / 직접 업로드)</span>
+        {(refChars.length > 0 || refBgKeys.length > 0) && (
+          <div className="flex gap-1.5">
+            <select
+              className="field text-[11px] !py-1 flex-1 min-w-0"
+              value={menuCharRef}
+              onChange={(e) => setMenuCharRef(e.target.value)}
+              title="타이틀에 등장시킬 메인 캐릭터(기본 입화 기준) — 게임과 어울리게 합성"
+            >
+              <option value="">참조 캐릭터 없음</option>
+              {refChars.map((c) => (
+                <option key={c.name} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+            <select
+              className="field text-[11px] !py-1 flex-1 min-w-0"
+              value={menuBgRef}
+              onChange={(e) => setMenuBgRef(e.target.value)}
+              title="타이틀 배경으로 참고할 장면 배경 — 장소·분위기 일치"
+            >
+              <option value="">참조 배경 없음</option>
+              {refBgKeys.map((k) => (
+                <option key={k} value={k}>{k}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <p className="text-[10px] text-gray-500 leading-snug">
+          참조를 고르면 그 캐릭터·배경을 소스로 <b className="text-gray-400">게임과 어울리는</b> 타이틀을 합성합니다(없으면 제목·장르·분위기 텍스트로 생성). <b className="text-gray-400">장르·분위기</b>를 먼저 정한 뒤 생성하세요.
+        </p>
         <div className="flex gap-2">
           <button
             className="btn-ghost flex-1 text-[11px]"
             disabled={!apiKey || busyMenuMain}
-            onClick={() => generateMenuArt('main')}
+            onClick={() => generateMenuArt('main', menuRefOpts)}
             title={apiKey ? 'gpt-image-1 로 타이틀(메인 메뉴) 배경 생성 — CG 1장 정도 비용' : 'OpenAI 키가 필요합니다'}
           >
             {busyMenuMain ? <Spinner /> : project.menuArt?.main ? '✨ 메인 재생성' : '✨ 메인 AI 생성'}
@@ -386,7 +427,7 @@ function ThemeStudio() {
           <button
             className="btn-ghost flex-1 text-[11px]"
             disabled={!apiKey || busyMenuGame}
-            onClick={() => generateMenuArt('game')}
+            onClick={() => generateMenuArt('game', menuRefOpts)}
             title={apiKey ? 'gpt-image-1 로 게임 메뉴 배경 생성' : 'OpenAI 키가 필요합니다'}
           >
             {busyMenuGame ? <Spinner /> : project.menuArt?.game ? '✨ 게임 재생성' : '✨ 게임 AI 생성'}
