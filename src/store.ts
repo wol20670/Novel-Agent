@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, EXPRESSIONS } from './types';
 import { parseText, parseWorkbook } from './parser';
-import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, generateCgFromReference } from './generators/image';
+import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateCgFromReference } from './generators/image';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
 import { aiConfig, normalizeImageSize } from './config/aiConfig';
@@ -18,6 +18,7 @@ import { exportProjectFile, importProjectFile } from './project/transfer';
 import { downloadBlob } from './zip/buildZip';
 import { generateTheme } from './generators/theme';
 import { backgroundKey, bgmKey } from './renpy/generate';
+import { resolveTheme } from './renpy/gui';
 import {
   isFolderSyncSupported,
   connectProjectFolder,
@@ -125,6 +126,8 @@ interface State {
   importCgGroup: (desc: string, file: File) => Promise<void>;
   clearCgGroup: (desc: string) => Promise<void>;
   importMenuArt: (which: 'main' | 'game', file: File) => Promise<void>;
+  /** 타이틀/게임 메뉴 배경을 gpt-image-1 로 생성해 해당 슬롯에 적용(+보관). 키 필요. */
+  generateMenuArt: (which: 'main' | 'game') => Promise<void>;
   clearMenuArt: (which: 'main' | 'game') => Promise<void>;
 
   // 설정/저장
@@ -1119,6 +1122,53 @@ export const useStore = create<State>((set, get) => {
         flash(`${which === 'main' ? '메인' : '게임'} 메뉴 배경을 업로드했습니다.`);
       } catch (e) {
         flash((e as Error).message);
+      }
+    },
+
+    generateMenuArt: async (which) => {
+      const { apiKey, project } = get();
+      if (!apiKey?.trim()) return flash('타이틀 AI 생성은 OpenAI 키가 필요합니다.');
+      const busyKey = `menu:${which}`;
+      set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      try {
+        const theme = resolveTheme(project.genre, project.guiTheme);
+        const prompt = buildMenuArtPrompt(project.title, theme.label, project.mood, which);
+        const { blob, source } = await generateImage({
+          prompt,
+          label: which === 'main' ? '타이틀' : '메뉴',
+          width: 1536,
+          height: 1024,
+          apiKey,
+          quality: aiConfig.image.quality.cg,
+        });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'background',
+          prompt,
+          mime: 'image/png',
+          source,
+          filename: `${which === 'main' ? 'main_menu' : 'game_menu'}.png`,
+          createdAt: Date.now(),
+        };
+        if (source === 'openai') void archiveImage(blob, `menu/${which}_${timestamp()}.png`);
+        const prev = project.menuArt?.[which];
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: { ...s.project, menuArt: { ...s.project.menuArt, [which]: id } },
+        }));
+        if (prev) await deleteAsset(prev).catch(() => {});
+        autoSave();
+        flash(
+          source === 'openai'
+            ? `${which === 'main' ? '타이틀' : '게임 메뉴'} 배경을 AI 로 생성했습니다.`
+            : '임시(Canvas) 배경을 생성했습니다.',
+        );
+      } catch (e) {
+        flash(`타이틀 생성 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
       }
     },
 

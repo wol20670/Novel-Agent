@@ -276,8 +276,11 @@ function ThemeStudio() {
   const generateAiTheme = useStore((s) => s.generateAiTheme);
   const clearAiTheme = useStore((s) => s.clearAiTheme);
   const importMenuArt = useStore((s) => s.importMenuArt);
+  const generateMenuArt = useStore((s) => s.generateMenuArt);
   const clearMenuArt = useStore((s) => s.clearMenuArt);
   const busy = useStore((s) => s.aiThemeBusy);
+  const busyMenuMain = useStore((s) => s.busy['menu:main']);
+  const busyMenuGame = useStore((s) => s.busy['menu:game']);
   const apiKey = useStore((s) => s.apiKey);
 
   const theme = resolveTheme(project.genre, project.guiTheme);
@@ -319,19 +322,37 @@ function ThemeStudio() {
       <ThemePreview theme={theme} />
 
       <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
-        <span className="label">메뉴 배경 직접 업로드 (외부 AI 제작)</span>
+        <span className="label">타이틀·메뉴 배경 (gpt-image-1 생성 / 직접 업로드)</span>
+        <div className="flex gap-2">
+          <button
+            className="btn-ghost flex-1 text-[11px]"
+            disabled={!apiKey || busyMenuMain}
+            onClick={() => generateMenuArt('main')}
+            title={apiKey ? 'gpt-image-1 로 타이틀(메인 메뉴) 배경 생성 — CG 1장 정도 비용' : 'OpenAI 키가 필요합니다'}
+          >
+            {busyMenuMain ? <Spinner /> : project.menuArt?.main ? '✨ 메인 재생성' : '✨ 메인 AI 생성'}
+          </button>
+          <button
+            className="btn-ghost flex-1 text-[11px]"
+            disabled={!apiKey || busyMenuGame}
+            onClick={() => generateMenuArt('game')}
+            title={apiKey ? 'gpt-image-1 로 게임 메뉴 배경 생성' : 'OpenAI 키가 필요합니다'}
+          >
+            {busyMenuGame ? <Spinner /> : project.menuArt?.game ? '✨ 게임 재생성' : '✨ 게임 AI 생성'}
+          </button>
+        </div>
         <div className="flex gap-2">
           <UploadButton
             onFile={(f) => importMenuArt('main', f)}
-            label={project.menuArt?.main ? '메인 ✓ 교체' : '메인 배경'}
+            label={project.menuArt?.main ? '메인 ✓ 교체' : '↥ 메인 업로드'}
             className="btn-ghost flex-1 text-[11px]"
-            title="메인 메뉴 배경 이미지 업로드"
+            title="외부 제작 메인 메뉴 배경 이미지 업로드"
           />
           <UploadButton
             onFile={(f) => importMenuArt('game', f)}
-            label={project.menuArt?.game ? '게임 ✓ 교체' : '게임 배경'}
+            label={project.menuArt?.game ? '게임 ✓ 교체' : '↥ 게임 업로드'}
             className="btn-ghost flex-1 text-[11px]"
-            title="게임 메뉴(인게임 메뉴) 배경 이미지 업로드"
+            title="외부 제작 게임 메뉴(인게임 메뉴) 배경 이미지 업로드"
           />
         </div>
         {(project.menuArt?.main || project.menuArt?.game) && (

@@ -57,6 +57,27 @@ export function buildCgPrompt(desc: string, directions: string[]): string {
   return [desc, ...directions, '비주얼노벨 CG 한 장면(감정적 연출)', aiConfig.image.artStyle].join(', ');
 }
 
+/** 타이틀(메인 메뉴)/게임 메뉴 배경 키 아트 프롬프트. 인물·글자 없는 분위기 배경. */
+export function buildMenuArtPrompt(
+  title: string,
+  genreLabel: string,
+  mood: string | undefined,
+  which: 'main' | 'game',
+): string {
+  return [
+    `비주얼노벨 ${which === 'main' ? '타이틀(메인 메뉴)' : '게임 내 메뉴'} 화면 배경 키 아트`,
+    title && `작품: ${title}`,
+    `장르 분위기: ${genreLabel}`,
+    mood,
+    '인물 없는 분위기 있는 와이드 배경, 시네마틱 구도',
+    which === 'main' ? '제목 로고를 얹을 여백 확보' : '차분하고 약간 어두운 톤(메뉴 글자 가독성)',
+    '그림 안에 글자·텍스트·로고·UI·워터마크 없음',
+    aiConfig.image.artStyle,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
 /**
  * 캐릭터 입화(+선택적으로 장면 배경)를 소스로 CG 한 컷을 합성한다(images/edits 다중 참조).
  * 캐릭터의 얼굴·머리·의상 정체성과 배경의 장소·분위기를 최대한 유지해
