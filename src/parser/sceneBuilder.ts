@@ -84,8 +84,11 @@ export class SceneBuilder {
    */
   private splitBeat(label: string, carryBackground?: string) {
     const root = this.current ? this.rootTitle(this.current.title) : '장면';
+    const carryOutfits = this.current?.outfits;
     this.startScene(`${root} · ${label}`);
     if (carryBackground) this.current!.background = carryBackground;
+    // 의상은 명시 변경 전까지 유지(분할 비트에 이어받음).
+    if (carryOutfits) this.current!.outfits = { ...carryOutfits };
   }
 
   addDialogue(speaker: string, text: string, emotion?: string) {
@@ -146,6 +149,19 @@ export class SceneBuilder {
       sc.bgm = v;
     }
   }
+  /** #복장 "캐릭터:의상[, 캐릭터2:의상2]" — 이 장면에서 캐릭터별 의상을 지정. */
+  setOutfit(spec: string) {
+    const sc = this.ensureScene();
+    const map = { ...(sc.outfits ?? {}) };
+    for (const part of spec.split(',')) {
+      const idx = part.search(/[:：]/);
+      if (idx < 0) continue;
+      const ch = part.slice(0, idx).trim();
+      const outfit = part.slice(idx + 1).trim();
+      if (ch && outfit) map[ch] = outfit;
+    }
+    sc.outfits = map;
+  }
   addDirection(note: string) {
     this.ensureScene().direction.push(note.trim());
   }
@@ -188,6 +204,10 @@ export function applyTag(b: SceneBuilder, body: string): boolean {
   }
   if (/^#BGM/i.test(t)) {
     b.setBgm(t.replace(/^#BGM\s*/i, ''));
+    return true;
+  }
+  if (t.startsWith('#복장')) {
+    b.setOutfit(t.replace(/^#복장\s*/, ''));
     return true;
   }
   if (t.startsWith('#연출')) {

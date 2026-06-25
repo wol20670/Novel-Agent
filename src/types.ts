@@ -62,13 +62,27 @@ export interface Scene {
   status: SceneStatus;
   backgroundAssetId?: string;
   bgmAssetId?: string;
+  /** #복장 — 이 장면에서 캐릭터별로 입을 의상(캐릭터명 → 의상명). 없으면 '기본'. */
+  outfits?: Record<string, string>;
+}
+
+/** 캐릭터 의상(복장) — 의상마다 표정 세트를 따로 가진다. '기본' 의상은 Character.expressions 자체. */
+export interface Outfit {
+  /** 의상 이름(예: '수영복', '교복'). '기본'은 예약어. */
+  name: string;
+  /** 이 의상의 복장/외형 묘사. 기본 외형(appearance)에 덧붙여 생성에 반영된다. */
+  appearance?: string;
+  /** 표정 → assetId (이 의상의 스프라이트 세트). */
+  expressions: Partial<Record<Expression, string>>;
 }
 
 export interface Character {
   name: string;
   color: string;
-  /** 표정 → assetId (스프라이트). v1에서는 선택만 보관. */
+  /** 표정 → assetId (기본 의상 스프라이트). */
   expressions: Partial<Record<Expression, string>>;
+  /** 추가 의상(선택). #복장 태그로 장면별 의상을 지정할 수 있다. */
+  outfits?: Outfit[];
   /**
    * 외형 설명(선택) — GPT 스프라이트 생성 시 6종 표정 프롬프트에 공통 주입해
    * 같은 인물로 보이게 한다. 예: "갈색 단발, 교복, 푸른 눈".
@@ -165,6 +179,21 @@ export function effectiveExpressions(list?: string[]): string[] {
 /** 프로젝트 객체에서 유효 표정 목록을 구한다. */
 export function projectExpressions(p: Project): string[] {
   return effectiveExpressions(p.expressions);
+}
+
+/** 캐릭터의 의상 이름 목록('기본'을 항상 맨 앞에 포함). */
+export function characterOutfits(c: Character): string[] {
+  return ['기본', ...(c.outfits?.map((o) => o.name) ?? [])];
+}
+
+/** (캐릭터, 의상, 표정) → 스프라이트 assetId. 해당 의상에 그 표정이 없으면 기본 의상으로 폴백. */
+export function spriteAssetId(c: Character, outfit: string | undefined, expr: Expression): string | undefined {
+  if (outfit && outfit !== '기본') {
+    const o = c.outfits?.find((x) => x.name === outfit);
+    const id = o?.expressions[expr];
+    if (id) return id;
+  }
+  return c.expressions[expr];
 }
 
 export function emptyProject(): Project {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { effectiveExpressions, emojiFor, type Expression, type Scene } from '../types';
+import { effectiveExpressions, emojiFor, characterOutfits, type Expression, type Scene } from '../types';
 import { backgroundKey, bgmKey, hasBgm } from '../renpy/generate';
 import { ALL_MOODS } from '../generators/audio/moods';
 import { useAssetUrl } from './useAssetUrl';
@@ -399,10 +399,21 @@ function CharacterCard({ name }: { name: string }) {
   const refineDesign = useStore((s) => s.refineCharacterDesign);
   const importSprite = useStore((s) => s.importSprite);
   const clearAll = useStore((s) => s.clearCharacterSprites);
+  const addOutfit = useStore((s) => s.addOutfit);
+  const setOutfitAppearance = useStore((s) => s.setOutfitAppearance);
+  const removeOutfit = useStore((s) => s.removeOutfit);
   const busy = useStore((s) => s.busy[`sprite:${name}`]);
   const exprList = effectiveExpressions(useStore((s) => s.project.expressions));
-  const hasAny = exprList.some((ex) => c.expressions[ex]);
-  const hasBase = !!c.expressions['기본'];
+
+  // 현재 편집 중인 의상(기본/추가 의상). 생성·수정·썸네일이 모두 이 의상을 대상으로 한다.
+  const [outfit, setOutfit] = useState('기본');
+  const outfits = characterOutfits(c);
+  const activeOutfit = outfit === '기본' ? undefined : c.outfits?.find((o) => o.name === outfit);
+  const exprStore: Partial<Record<string, string>> = outfit === '기본' ? c.expressions : activeOutfit?.expressions ?? {};
+  const hasAny = exprList.some((ex) => exprStore[ex]);
+  const hasBase = !!exprStore['기본'];
+  // 이름이 바뀐 뒤 사라진 의상을 가리키면 기본으로 복귀.
+  if (outfit !== '기본' && !activeOutfit) setOutfit('기본');
 
   return (
     <div className="card border-edge p-3">
@@ -419,11 +430,11 @@ function CharacterCard({ name }: { name: string }) {
         {busy ? (
           <span className="!px-2 !py-1"><Spinner /></span>
         ) : hasBase ? (
-          <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => genAll(name)} title="6종 표정을 한 번에(기본 기준)">
+          <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => genAll(name, outfit)} title="표정 전체를 한 번에(기본 기준)">
             전체 생성
           </button>
         ) : (
-          <button className="btn-primary !px-2 !py-1 text-xs" onClick={() => genBase(name)} title="기본(메인) 입화 1장만 먼저 생성">
+          <button className="btn-primary !px-2 !py-1 text-xs" onClick={() => genBase(name, outfit)} title="기본(메인) 입화 1장만 먼저 생성">
             ① 기본 입화 생성
           </button>
         )}
@@ -442,13 +453,67 @@ function CharacterCard({ name }: { name: string }) {
         onChange={(e) => updateChar(name, { personality: e.target.value })}
         title="그림의 분위기·표정·포즈에 참고로 반영합니다. (생성 전에 적으면 더 디테일해집니다.)"
       />
+
+      {/* 의상(복장) 탭 — 대본 #복장 캐릭터:의상 으로 장면별 지정. 의상마다 표정 세트가 따로 생성된다. */}
+      <div className="flex flex-wrap items-center gap-1 mb-1.5">
+        <span className="text-[10px] text-gray-500 mr-0.5">👗 의상</span>
+        {outfits.map((o) => (
+          <button
+            key={o}
+            onClick={() => setOutfit(o)}
+            className={`text-[10px] rounded px-1.5 py-0.5 border ${
+              o === outfit ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-400'
+            }`}
+            title={o === '기본' ? '기본 의상' : `의상: ${o}`}
+          >
+            {o}
+          </button>
+        ))}
+        <button
+          className="text-[10px] rounded px-1.5 py-0.5 border border-edge text-gray-500 hover:text-accent"
+          title="새 의상 추가(예: 수영복, 교복, 정장)"
+          onClick={() => {
+            const n = window.prompt('새 의상 이름은? (예: 수영복, 교복, 정장)');
+            if (n && n.trim()) {
+              addOutfit(name, n.trim());
+              setOutfit(n.trim());
+            }
+          }}
+        >
+          ＋ 의상
+        </button>
+      </div>
+      {outfit !== '기본' && (
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <input
+            className="field text-xs flex-1"
+            placeholder={`'${outfit}' 복장 묘사 (예: 흰 비키니 수영복, 맨발) — 생성에 반영`}
+            value={activeOutfit?.appearance ?? ''}
+            onChange={(e) => setOutfitAppearance(name, outfit, e.target.value)}
+            title="기본 외형에 이 의상 묘사를 덧붙여 생성합니다(같은 인물, 다른 옷)."
+          />
+          <button
+            className="text-[10px] text-gray-500 hover:text-rose-600 shrink-0"
+            title="이 의상과 그 입화를 삭제"
+            onClick={() => {
+              if (window.confirm(`'${name}'의 '${outfit}' 의상을 삭제할까요? 이 의상의 입화도 함께 삭제됩니다.`)) {
+                removeOutfit(name, outfit);
+                setOutfit('기본');
+              }
+            }}
+          >
+            의상 삭제
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 mb-2">
         <p className="text-[10px] text-gray-500 leading-snug flex-1">
           {hasBase
-            ? '표정 썸네일 = 기본 기준으로 그 표정만 생성(토큰 절약). 썸네일 ✏️ = 그 표정만 수정.'
-            : '① 기본 입화를 먼저 만들고 → 표정 썸네일을 하나씩 눌러 생성하세요(기본 기준 + 토큰 절약).'}
+            ? `'${outfit}' 의상 · 표정 썸네일 = 기본 기준으로 그 표정만 생성. 썸네일 ✏️ = 그 표정만 수정.`
+            : `'${outfit}' 의상의 ① 기본 입화를 먼저 만들고 → 표정 썸네일을 하나씩 눌러 생성하세요.`}
         </p>
-        {hasBase && (
+        {hasBase && outfit === '기본' && (
           <button
             className="btn-ghost !px-2 !py-1 text-[10px] shrink-0"
             disabled={!!busy}
@@ -467,21 +532,22 @@ function CharacterCard({ name }: { name: string }) {
       <div className="grid grid-cols-3 gap-1.5">
         {exprList.map((ex) => (
           <ExpressionThumb
-            key={ex}
+            key={`${outfit}:${ex}`}
             name={name}
             expr={ex as Expression}
+            outfit={outfit}
             busy={!!busy}
-            onGen={() => genOne(name, ex as Expression)}
-            onUpload={(f) => importSprite(name, ex as Expression, f)}
+            onGen={() => genOne(name, ex as Expression, undefined, outfit)}
+            onUpload={(f) => importSprite(name, ex as Expression, f, outfit)}
             onRefine={() => {
               const ins = window.prompt(`이 '${ex}' 입화를 어떻게 수정할까요? (예: 머리를 더 짧게, 표정을 더 환하게)`);
-              if (ins && ins.trim()) refineSprite(name, ex as Expression, ins.trim());
+              if (ins && ins.trim()) refineSprite(name, ex as Expression, ins.trim(), outfit);
             }}
           />
         ))}
       </div>
       <div className="flex items-center gap-3 mt-2">
-        {hasAny && (
+        {hasAny && outfit === '기본' && (
           <button className="text-[11px] text-gray-500 hover:text-rose-600" onClick={() => clearAll(name)}>
             스프라이트 비우기
           </button>
@@ -501,6 +567,7 @@ function CharacterCard({ name }: { name: string }) {
 function ExpressionThumb({
   name,
   expr,
+  outfit,
   busy,
   onGen,
   onUpload,
@@ -508,12 +575,18 @@ function ExpressionThumb({
 }: {
   name: string;
   expr: Expression;
+  outfit: string;
   busy: boolean;
   onGen: () => void;
   onUpload: (file: File) => void;
   onRefine: () => void;
 }) {
-  const assetId = useStore((s) => s.project.characters.find((x) => x.name === name)?.expressions[expr]);
+  const assetId = useStore((s) => {
+    const ch = s.project.characters.find((x) => x.name === name);
+    if (!ch) return undefined;
+    if (outfit === '기본') return ch.expressions[expr];
+    return ch.outfits?.find((o) => o.name === outfit)?.expressions[expr];
+  });
   const url = useAssetUrl(assetId);
   return (
     <div className="relative aspect-[3/4] rounded-lg border border-edge bg-ink overflow-hidden group">

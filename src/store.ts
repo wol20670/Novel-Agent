@@ -79,14 +79,19 @@ interface State {
   generateAiTheme: () => Promise<void>;
   clearAiTheme: () => void;
 
-  // 캐릭터 스프라이트 (표정별 입화)
-  generateCharacterSprites: (name: string) => Promise<void>;
+  // 캐릭터 스프라이트 (표정별 입화) — outfit 미지정 시 '기본' 의상.
+  generateCharacterSprites: (name: string, outfit?: string) => Promise<void>;
   /** 기본(메인) 입화만 1장 생성 — 이후 표정은 이 기본을 기준으로 하나씩 생성(토큰 절약). */
-  generateCharacterBase: (name: string) => Promise<void>;
+  generateCharacterBase: (name: string, outfit?: string) => Promise<void>;
   /** 한 표정 입화 생성. reference(기준 입화)를 주거나, 없으면 저장된 '기본'을 자동 기준으로 일관성 유지. */
-  generateCharacterSprite: (name: string, expr: Expression, reference?: Blob) => Promise<Blob | undefined>;
+  generateCharacterSprite: (name: string, expr: Expression, reference?: Blob, outfit?: string) => Promise<Blob | undefined>;
   /** 이미 생성된 입화를 지시문대로 미세 수정(예: "머리를 더 길게"). 키 필요. */
-  refineSprite: (name: string, expr: Expression, instruction: string) => Promise<void>;
+  refineSprite: (name: string, expr: Expression, instruction: string, outfit?: string) => Promise<void>;
+
+  // 캐릭터 의상(복장) — 의상마다 표정 세트를 따로 가진다. #복장 태그로 장면별 지정.
+  addOutfit: (charName: string, name: string, appearance?: string) => void;
+  setOutfitAppearance: (charName: string, name: string, appearance: string) => void;
+  removeOutfit: (charName: string, name: string) => Promise<void>;
   /**
    * 캐릭터 디자인(기본 입화)을 지시문대로 수정하고, 이미 만들어둔 다른 표정도
    * 새 기본을 기준으로 다시 그려 디자인을 일관되게 맞춘다(예: "머리를 단발로"). 키 필요.
@@ -128,7 +133,7 @@ interface State {
 
   // 외부 제작 이미지 업로드 (직접 적용)
   importBackground: (sceneId: string, file: File) => Promise<void>;
-  importSprite: (name: string, expr: Expression, file: File) => Promise<void>;
+  importSprite: (name: string, expr: Expression, file: File, outfit?: string) => Promise<void>;
   importCg: (sceneId: string, index: number, file: File) => Promise<void>;
   clearCg: (sceneId: string, index: number) => Promise<void>;
 
@@ -354,17 +359,23 @@ export const useStore = create<State>((set, get) => {
       flash('프리셋 테마로 복귀했습니다.');
     },
 
-    generateCharacterSprite: async (name, expr, reference) => {
+    generateCharacterSprite: async (name, expr, reference, outfit = '기본') => {
       const char = get().project.characters.find((c) => c.name === name);
       if (!char) return undefined;
+      const outfitObj = outfit !== '기본' ? char.outfits?.find((o) => o.name === outfit) : undefined;
+      if (outfit !== '기본' && !outfitObj) {
+        flash(`'${outfit}' 의상을 찾지 못했습니다.`);
+        return undefined;
+      }
+      const exprStore = outfit === '기본' ? char.expressions : outfitObj!.expressions;
       const key = `sprite:${name}`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
-        // 표정(비-기본)을 개별 생성할 때, 명시 reference 가 없으면 저장된 '기본'을 자동 기준으로
-        // 삼아 같은 인물로 그린다(일관성 + 기본 1장만 마음에 들면 표정은 그걸 기반으로 생성).
+        // 표정(비-기본)을 개별 생성할 때, 명시 reference 가 없으면 같은 의상의 '기본'(없으면 기본 의상의
+        // '기본')을 자동 기준으로 삼아 같은 인물로 그린다(일관성 + 기본 1장만 마음에 들면 표정은 그걸 기반).
         let ref = reference;
         if (!ref && expr !== '기본' && aiConfig.image.sprite.consistency === 'reference') {
-          const baseId = char.expressions['기본'];
+          const baseId = exprStore['기본'] ?? char.expressions['기본'];
           if (baseId) ref = (await getAsset(baseId)) ?? undefined;
         }
         // 기준 입화가 없을 때(=기본 텍스트 생성)만 그림체 참조를 적용한다(여러 장 vibe).
@@ -376,12 +387,17 @@ export const useStore = create<State>((set, get) => {
             styleRefs = blobs.filter((b): b is Blob => !!b);
           }
         }
+        // 의상이면 기본 외형에 의상 묘사를 덧붙여 생성한다(같은 인물, 다른 옷).
+        const appearance = outfitObj?.appearance
+          ? [char.appearance, `복장/의상: ${outfitObj.appearance}`].filter(Boolean).join(', ')
+          : char.appearance;
+        const tag = outfit === '기본' ? '' : `${outfit} `;
         const { blob, source } = await generateSprite({
           name,
           expression: expr,
           color: char.color,
           apiKey: get().apiKey,
-          appearance: char.appearance,
+          appearance,
           personality: char.personality,
           quality: get().imageQuality,
           reference: ref,
@@ -393,24 +409,32 @@ export const useStore = create<State>((set, get) => {
         const meta: AssetMeta = {
           id,
           kind: 'sprite',
-          prompt: `${name} ${expr}`,
+          prompt: `${name} ${tag}${expr}`,
           mime: 'image/png',
           source,
-          filename: `sprite_${name}_${expr}.png`,
+          filename: `sprite_${name}_${outfit === '기본' ? '' : safeFileName(outfit) + '_'}${expr}.png`,
           createdAt: Date.now(),
         };
         // 비용 들인 AI 입화는 보관 폴더에 사본을 쌓아둔다(재생성해도 원본 보존).
         if (source !== 'canvas') {
-          void archiveImage(blob, `characters/${safeFileName(name)}/${safeFileName(expr)}_${timestamp()}.png`);
+          const sub = outfit === '기본' ? '' : `${safeFileName(outfit)}/`;
+          void archiveImage(blob, `characters/${safeFileName(name)}/${sub}${safeFileName(expr)}_${timestamp()}.png`);
         }
-        const prev = char.expressions[expr];
+        const prev = exprStore[expr];
         set((s) => ({
           assets: { ...s.assets, [id]: meta },
           project: {
             ...s.project,
-            characters: s.project.characters.map((c) =>
-              c.name === name ? { ...c, expressions: { ...c.expressions, [expr]: id } } : c,
-            ),
+            characters: s.project.characters.map((c) => {
+              if (c.name !== name) return c;
+              if (outfit === '기본') return { ...c, expressions: { ...c.expressions, [expr]: id } };
+              return {
+                ...c,
+                outfits: (c.outfits ?? []).map((o) =>
+                  o.name === outfit ? { ...o, expressions: { ...o.expressions, [expr]: id } } : o,
+                ),
+              };
+            }),
           },
         }));
         if (prev) await deleteAsset(prev).catch(() => {});
@@ -424,7 +448,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
-    generateCharacterSprites: async (name) => {
+    generateCharacterSprites: async (name, outfit = '기본') => {
       // 일관성(reference) 모드 + 키 있음: '기본'을 먼저 만들고, 그 입화를 기준으로
       // 나머지 표정은 "표정만" 편집해 같은 인물로 유지한다. 그 외엔 각자 생성.
       const useRef = !!get().apiKey && aiConfig.image.sprite.consistency === 'reference';
@@ -438,26 +462,32 @@ export const useStore = create<State>((set, get) => {
           name,
           expr,
           expr === '기본' ? undefined : reference,
+          outfit,
         );
         if (useRef && expr === '기본' && blob) reference = blob;
       }
-      flash(`${name} 스프라이트 ${exprs.length}종 생성 완료.`);
+      flash(`${name}${outfit === '기본' ? '' : ` · ${outfit}`} 스프라이트 ${exprs.length}종 생성 완료.`);
     },
 
-    generateCharacterBase: async (name) => {
-      const blob = await get().generateCharacterSprite(name, '기본');
+    generateCharacterBase: async (name, outfit = '기본') => {
+      const blob = await get().generateCharacterSprite(name, '기본', undefined, outfit);
       if (blob) {
-        flash(`${name} 기본 입화를 만들었어요. 표정 썸네일을 눌러 하나씩 생성하면 이 기본을 기준으로 그려집니다(토큰 절약).`);
+        flash(
+          `${name}${outfit === '기본' ? '' : ` · ${outfit}`} 기본 입화를 만들었어요. 표정 썸네일을 눌러 하나씩 생성하면 이 기본을 기준으로 그려집니다(토큰 절약).`,
+        );
       }
     },
 
-    refineSprite: async (name, expr, instruction) => {
+    refineSprite: async (name, expr, instruction, outfit = '기본') => {
       const char = get().project.characters.find((c) => c.name === name);
       if (!char) return;
       const apiKey = get().apiKey?.trim();
       if (!apiKey) return flash('이미지 수정은 이미지 API 키가 필요합니다.');
       if (!instruction.trim()) return;
-      const curId = char.expressions[expr];
+      const outfitObj = outfit !== '기본' ? char.outfits?.find((o) => o.name === outfit) : undefined;
+      if (outfit !== '기본' && !outfitObj) return flash(`'${outfit}' 의상을 찾지 못했습니다.`);
+      const exprStore = outfit === '기본' ? char.expressions : outfitObj!.expressions;
+      const curId = exprStore[expr];
       if (!curId) return flash('먼저 이 표정 입화를 생성하세요.');
       const src = await getAsset(curId);
       if (!src) return flash('원본 입화를 찾지 못했습니다.');
@@ -467,28 +497,37 @@ export const useStore = create<State>((set, get) => {
         const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality });
         const id = assetId();
         await putAsset(id, blob);
+        const tag = outfit === '기본' ? '' : `${outfit} `;
         const meta: AssetMeta = {
           id,
           kind: 'sprite',
-          prompt: `${name} ${expr} 수정: ${instruction}`,
+          prompt: `${name} ${tag}${expr} 수정: ${instruction}`,
           mime: 'image/png',
           source,
-          filename: `sprite_${name}_${expr}.png`,
+          filename: `sprite_${name}_${outfit === '기본' ? '' : safeFileName(outfit) + '_'}${expr}.png`,
           createdAt: Date.now(),
         };
-        void archiveImage(blob, `characters/${safeFileName(name)}/${safeFileName(expr)}_수정_${timestamp()}.png`);
+        const sub = outfit === '기본' ? '' : `${safeFileName(outfit)}/`;
+        void archiveImage(blob, `characters/${safeFileName(name)}/${sub}${safeFileName(expr)}_수정_${timestamp()}.png`);
         set((s) => ({
           assets: { ...s.assets, [id]: meta },
           project: {
             ...s.project,
-            characters: s.project.characters.map((c) =>
-              c.name === name ? { ...c, expressions: { ...c.expressions, [expr]: id } } : c,
-            ),
+            characters: s.project.characters.map((c) => {
+              if (c.name !== name) return c;
+              if (outfit === '기본') return { ...c, expressions: { ...c.expressions, [expr]: id } };
+              return {
+                ...c,
+                outfits: (c.outfits ?? []).map((o) =>
+                  o.name === outfit ? { ...o, expressions: { ...o.expressions, [expr]: id } } : o,
+                ),
+              };
+            }),
           },
         }));
         await deleteAsset(curId).catch(() => {});
         autoSave();
-        flash(`${name} · ${expr} 입화를 수정했습니다.`);
+        flash(`${name} · ${tag}${expr} 입화를 수정했습니다.`);
       } catch (e) {
         flash(`수정 실패: ${(e as Error).message}`);
       } finally {
@@ -683,6 +722,77 @@ export const useStore = create<State>((set, get) => {
       for (const id of toDelete) await deleteAsset(id).catch(() => {});
       autoSave();
       flash(`'${name}' 표정을 삭제했습니다.`);
+    },
+
+    addOutfit: (charName, name, appearance) => {
+      const n = name.trim();
+      if (!n) return;
+      if (n === '기본') return flash("'기본'은 예약된 의상 이름입니다.");
+      const char = get().project.characters.find((c) => c.name === charName);
+      if (!char) return;
+      if (char.outfits?.some((o) => o.name === n)) return flash('이미 있는 의상입니다.');
+      set((s) => ({
+        project: {
+          ...s.project,
+          characters: s.project.characters.map((c) =>
+            c.name === charName
+              ? {
+                  ...c,
+                  outfits: [
+                    ...(c.outfits ?? []),
+                    { name: n, appearance: appearance?.trim() || undefined, expressions: {} },
+                  ],
+                }
+              : c,
+          ),
+        },
+      }));
+      autoSave();
+      flash(`'${charName}'에 '${n}' 의상을 추가했습니다. 복장 묘사를 적고 입화를 생성하세요.`);
+    },
+
+    setOutfitAppearance: (charName, name, appearance) => {
+      set((s) => ({
+        project: {
+          ...s.project,
+          characters: s.project.characters.map((c) =>
+            c.name === charName
+              ? {
+                  ...c,
+                  outfits: (c.outfits ?? []).map((o) =>
+                    o.name === name ? { ...o, appearance: appearance.trim() || undefined } : o,
+                  ),
+                }
+              : c,
+          ),
+        },
+      }));
+      autoSave();
+    },
+
+    removeOutfit: async (charName, name) => {
+      const char = get().project.characters.find((c) => c.name === charName);
+      const o = char?.outfits?.find((x) => x.name === name);
+      if (!o) return;
+      const toDelete = Object.values(o.expressions).filter((x): x is string => !!x);
+      set((s) => ({
+        project: {
+          ...s.project,
+          characters: s.project.characters.map((c) =>
+            c.name === charName ? { ...c, outfits: (c.outfits ?? []).filter((x) => x.name !== name) } : c,
+          ),
+          // 이 의상을 가리키던 장면 #복장 참조도 제거(기본 의상으로 복귀).
+          scenes: s.project.scenes.map((sc) => {
+            if (!sc.outfits || sc.outfits[charName] !== name) return sc;
+            const m = { ...sc.outfits };
+            delete m[charName];
+            return { ...sc, outfits: m };
+          }),
+        },
+      }));
+      for (const id of toDelete) await deleteAsset(id).catch(() => {});
+      autoSave();
+      flash(`'${charName}'의 '${name}' 의상을 삭제했습니다.`);
     },
 
     generateBackground: async (sceneId) => {
@@ -937,23 +1047,34 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
-    importSprite: async (name, expr, file) => {
+    importSprite: async (name, expr, file, outfit = '기본') => {
       const char = get().project.characters.find((c) => c.name === name);
       if (!char) return;
+      const outfitObj = outfit !== '기본' ? char.outfits?.find((o) => o.name === outfit) : undefined;
+      if (outfit !== '기본' && !outfitObj) return flash(`'${outfit}' 의상을 찾지 못했습니다.`);
+      const exprStore = outfit === '기본' ? char.expressions : outfitObj!.expressions;
       try {
-        const id = await uploadAsset(file, 'sprite', `sprite_${name}_${expr}.png`);
-        const prev = char.expressions[expr];
+        const sub = outfit === '기본' ? '' : safeFileName(outfit) + '_';
+        const id = await uploadAsset(file, 'sprite', `sprite_${name}_${sub}${expr}.png`);
+        const prev = exprStore[expr];
         set((s) => ({
           project: {
             ...s.project,
-            characters: s.project.characters.map((c) =>
-              c.name === name ? { ...c, expressions: { ...c.expressions, [expr]: id } } : c,
-            ),
+            characters: s.project.characters.map((c) => {
+              if (c.name !== name) return c;
+              if (outfit === '기본') return { ...c, expressions: { ...c.expressions, [expr]: id } };
+              return {
+                ...c,
+                outfits: (c.outfits ?? []).map((o) =>
+                  o.name === outfit ? { ...o, expressions: { ...o.expressions, [expr]: id } } : o,
+                ),
+              };
+            }),
           },
         }));
         if (prev) await deleteAsset(prev).catch(() => {});
         autoSave();
-        flash(`${name} · ${expr} 입화를 업로드했습니다.`);
+        flash(`${name} · ${outfit === '기본' ? '' : outfit + ' '}${expr} 입화를 업로드했습니다.`);
       } catch (e) {
         flash((e as Error).message);
       }
@@ -1625,6 +1746,7 @@ function mergeChars(prev: Character[], next: Character[]): Character[] {
           ...c,
           color: old.color,
           expressions: old.expressions,
+          outfits: old.outfits ?? c.outfits,
           appearance: old.appearance ?? c.appearance,
           personality: old.personality ?? c.personality,
           isProtagonist: old.isProtagonist ?? c.isProtagonist,

@@ -8,14 +8,24 @@ import { inferEmotion } from '../generators/emotion';
 import { canvasSprite } from '../generators/image/canvasSprite';
 import { getAsset } from '../storage/assetStore';
 import { spreadPositions } from '../renpy/generate';
-import { emojiFor, type Scene, type Character, type Expression, type Line } from '../types';
+import { emojiFor, spriteAssetId, type Scene, type Character, type Expression, type Line } from '../types';
 
 const speakersOf = (l: Line): string[] =>
   l.kind === 'dialogue' ? (l.members?.length ? l.members : [l.speaker]) : [];
 
-/** 한 캐릭터의 (표정) 스프라이트 — 에셋이 있으면 그것, 없으면 Canvas 임시 이미지. */
-function PreviewSprite({ char, expr, xpct }: { char: Character; expr: Expression; xpct: number }) {
-  const assetId = char.expressions[expr];
+/** 한 캐릭터의 (의상·표정) 스프라이트 — 에셋이 있으면 그것, 없으면 Canvas 임시 이미지. */
+function PreviewSprite({
+  char,
+  expr,
+  outfit,
+  xpct,
+}: {
+  char: Character;
+  expr: Expression;
+  outfit?: string;
+  xpct: number;
+}) {
+  const assetId = spriteAssetId(char, outfit, expr);
   const [url, setUrl] = useState<string>();
   useEffect(() => {
     let alive = true;
@@ -100,7 +110,9 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
         )}
         {[...visible].map(([nm, ex]) => {
           const c = charByName.get(nm);
-          return c ? <PreviewSprite key={nm} char={c} expr={ex} xpct={xpos.get(nm) ?? 50} /> : null;
+          return c ? (
+            <PreviewSprite key={nm} char={c} expr={ex} outfit={scene.outfits?.[nm]} xpct={xpos.get(nm) ?? 50} />
+          ) : null;
         })}
         {cur && (
           <div className="absolute inset-x-0 bottom-0 bg-black/55 backdrop-blur-[1px] px-3 py-2 min-h-[26%]">

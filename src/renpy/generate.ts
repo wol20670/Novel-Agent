@@ -22,12 +22,36 @@ export const EXPR_ATTR: Record<Expression, string> = {
   수줍음: 'shy',
 };
 
+/** 임의 문자열 → 짧은 ASCII 슬러그(커스텀 표정/의상 이름의 Ren'Py 속성 충돌 방지). */
+function asciiSlug(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/** 표정 → Ren'Py 속성. 알려진 표정은 고정 매핑, 커스텀은 충돌 없는 슬러그. */
+export function attrFor(expr: Expression): string {
+  return EXPR_ATTR[expr] ?? `x${asciiSlug(expr)}`;
+}
+
+/** 의상 → Ren'Py 속성. '기본'은 base, 나머지는 슬러그. */
+export function outfitAttrFor(outfit: string): string {
+  return outfit === '기본' ? 'base' : `o${asciiSlug(outfit)}`;
+}
+
 export interface SpriteRef {
   charId: string; // c_1 …
   charName: string;
   expr: Expression;
   attr: string; // neutral/happy/…
-  file: string; // sprite_c_1_happy.png
+  /** 의상 이름('기본' 포함). */
+  outfit: string;
+  /** 의상 Ren'Py 속성(base/o…). */
+  outfitAttr: string;
+  file: string; // sprite_c_1_base_happy.png
   /** 사용자가 생성/업로드한 스프라이트. 없으면(자동 표정 슬롯) 빌더가 Canvas/AI 로 채운다. */
   assetId?: string;
 }
@@ -129,23 +153,43 @@ export function resolveSprites(
     const optedIn = Object.values(stored).some(Boolean);
     if (!optedIn) continue; // 스프라이트 미사용 캐릭터
 
-    // 저장된 표정 + 대본에서 쓰인 표정(자동) + 기본(베이스라인)
-    const exprs = new Set<Expression>([
+    // 기본 의상: 저장된 표정 + 대본에서 쓰인 표정(자동) + 기본(베이스라인).
+    const baseExprs = new Set<Expression>([
       ...(Object.keys(stored) as Expression[]).filter((e) => stored[e]),
       ...(plan.get(charId) ?? []),
       '기본',
     ]);
-
-    for (const expr of exprs) {
-      const attr = EXPR_ATTR[expr] ?? 'neutral';
+    for (const expr of baseExprs) {
+      const attr = attrFor(expr);
       out.push({
         charId,
         charName: c.name,
         expr,
         attr,
-        file: `sprite_${charId}_${attr}.png`,
+        outfit: '기본',
+        outfitAttr: 'base',
+        file: `sprite_${charId}_base_${attr}.png`,
         assetId: stored[expr],
       });
+    }
+
+    // 추가 의상: 실제 생성된 스프라이트가 있는 표정만 정의(없는 표정은 show 시 기본 의상으로 폴백).
+    for (const o of c.outfits ?? []) {
+      const oAttr = outfitAttrFor(o.name);
+      const oExprs = (Object.keys(o.expressions) as Expression[]).filter((e) => o.expressions[e]);
+      for (const expr of oExprs) {
+        const attr = attrFor(expr);
+        out.push({
+          charId,
+          charName: c.name,
+          expr,
+          attr,
+          outfit: o.name,
+          outfitAttr: oAttr,
+          file: `sprite_${charId}_${oAttr}_${attr}.png`,
+          assetId: o.expressions[expr],
+        });
+      }
     }
   }
   return out;
@@ -260,9 +304,9 @@ function assetDefs(refs: SceneAssetRef[], sprites: SpriteRef[]): string {
     });
   }
   if (sprites.length) {
-    lines.push('', '# 캐릭터 스프라이트');
+    lines.push('', '# 캐릭터 스프라이트 (속성: <의상> <표정>)');
     for (const sp of sprites) {
-      lines.push(`image ${sp.charId} ${sp.attr} = "images/${sp.file}"`);
+      lines.push(`image ${sp.charId} ${sp.outfitAttr} ${sp.attr} = "images/${sp.file}"`);
     }
   }
   return lines.join('\n') + '\n';
@@ -345,16 +389,21 @@ function scriptBody(
     for (const line of s.lines) {
       if (line.kind === 'dialogue') {
         const speakerIds = lineSpeakerIds(line, ids);
-        const want = EXPR_ATTR[effectiveEmotion(line, s)];
+        const want = attrFor(effectiveEmotion(line, s));
         // 스프라이트가 있는 화자(들) 등장 — 합동 대사면 멤버 전원이 함께 선다.
         for (const sid of speakerIds) {
           const owned = spritesByChar.get(sid);
-          if (owned && owned.length) {
-            const attr =
-              (owned.some((o) => o.attr === want) && want) ||
-              (owned.some((o) => o.attr === 'neutral') ? 'neutral' : owned[0].attr);
-            out.push(`${indent(1)}show ${sid} ${attr} at vn_char(${pos.get(sid) ?? 50})`);
-          }
+          if (!owned || !owned.length) continue;
+          // 이 장면에서 입을 의상(없으면 기본). 해당 의상 스프라이트가 없으면 기본 의상으로 폴백.
+          const wantedOutfit = s.outfits?.[owned[0].charName] ?? '기본';
+          let pool = owned.filter((o) => o.outfit === wantedOutfit);
+          if (!pool.length) pool = owned.filter((o) => o.outfit === '기본');
+          if (!pool.length) pool = owned;
+          const outfitAttr = pool[0].outfitAttr;
+          const attr =
+            (pool.some((o) => o.attr === want) && want) ||
+            (pool.some((o) => o.attr === 'neutral') ? 'neutral' : pool[0].attr);
+          out.push(`${indent(1)}show ${sid} ${outfitAttr} ${attr} at vn_char(${pos.get(sid) ?? 50})`);
         }
         // 말하는 주체: 합동이면 묶음 Character, 아니면 단일 화자.
         const voiceId =

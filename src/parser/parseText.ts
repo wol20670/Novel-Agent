@@ -13,7 +13,7 @@
 
 import { SceneBuilder, applyTag, type BuildResult } from './sceneBuilder';
 
-const FIELD = /^(장면|배경|BGM|연출|CG|점프)\s*[:：]\s*(.*)$/i;
+const FIELD = /^(장면|배경|BGM|복장|연출|CG|점프)\s*[:：]\s*(.*)$/i;
 
 export function parseText(input: string): BuildResult {
   const b = new SceneBuilder();
@@ -47,6 +47,7 @@ export function parseText(input: string): BuildResult {
         '장면': '#S ',
         '배경': '#배경 ',
         bgm: '#BGM ',
+        '복장': '#복장 ',
         '연출': '#연출 ',
         cg: '#CG ',
         '점프': '#점프 ',
