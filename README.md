@@ -80,9 +80,9 @@ npm run typecheck  # tsc --noEmit
 ### 프롬프트 태그 컴파일러 (선택 · OpenAI 키)
 NovelAI(특히 curated)는 **단부루(Danbooru) 영문 태그** 프롬프트에서 가장 잘 나온다. 좌측에 **OpenAI 키**를 함께 넣으면,
 한국어로 적은 외형/배경/CG 설명을 `gpt-4o-mini` 가 규칙대로 영문 태그로 자동 변환한다(`src/generators/image/promptCompiler.ts`):
-- 모든 긍정 프롬프트 앞에 품질 프리픽스 `masterpiece, best quality, amazing quality, light novel illustration` 자동 탑재.
-- 자연어 → 단부루 태그(예: `은발에 교복을 입은 소녀` → `1girl, solo, silver hair, school uniform`). 구형 만화풍 유도어(anime/manga 등) 제거.
-- 감정 → 가중치 태그(`기쁨` → `(smiling:1.3), (happy:1.2)` …). 기본 표정은 LLM 없이 매핑, 커스텀 표정만 번역.
+- 품질 태그는 V4.5 권장대로 프롬프트 **맨 끝**에 부착(Curated: `location, masterpiece, no text, -0.8::feet::, rating:general`). `qualityToggle` 대신 직접 부착해 결정적으로 동작.
+- 자연어 → 단부루 태그(예: `은발에 교복을 입은 소녀` → `1girl, solo, silver hair, school uniform`). 태그 순서 `1girl/1boy → 캐릭터 → 나머지`. 구형 만화풍 유도어(anime/manga 등) 제거.
+- 감정 → 강조 태그. NovelAI V4.5 가중치 문법은 **`weight::tag::`** (예: `기쁨` → `1.3::smiling::, 1.2::happy::`). ※ SD WebUI 의 `(tag:1.3)` 는 NovelAI 에서 동작 안 함. 기본 표정은 LLM 없이 매핑, 커스텀만 번역.
 - 스프라이트엔 `transparent background, white background, simple background`, 배경엔 `scenery, no humans` 자동 부착.
 - **외형 태그는 캐릭터당 1회만 번역·캐시**해 6표정이 같은 태그를 공유(일관성). 비용 ≈ 장당 $0.0002 (사실상 무시 가능).
 - **입력 언어 토글**(좌측 `🇰🇷 한국어 → 영문 변환` / `🔤 영어 태그 그대로`)로 변환 여부를 직접 고른다.

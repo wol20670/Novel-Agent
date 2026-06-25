@@ -14,32 +14,33 @@ const SYS: Record<CompileMode, string> = {
     'explanation, no quotes, no markdown. If it is a single character, start with "1girl, solo" or "1boy, solo" ' +
     'as appropriate. Use concise tags (hair color/length, eye color, clothing, accessories, body type). ' +
     'NEVER output generic medium words (anime style, manga, manga style, 2d illustration, digital painting) ' +
-    'and NEVER output quality words (masterpiece, best quality) or background tags. Stay faithful; do not invent.',
+    'and NEVER output quality words (masterpiece, best quality) or background tags. Stay faithful; do not invent. Output plain tags only — never use parentheses or :: weighting syntax.',
   scene:
     'You convert a short Korean background/scene description into comma-separated English Danbooru tags for an ' +
     'anime background illustration (NovelAI Diffusion). Output ONLY lowercase comma-separated tags — no sentences, ' +
     'no explanation, no quotes, no markdown. Focus on place, time of day, lighting, weather, objects. ' +
     'Do NOT include people/characters. NEVER output generic medium words (anime style, manga, 2d illustration, ' +
-    'digital painting) or quality words. Stay faithful; do not invent.',
+    'digital painting) or quality words. Stay faithful; do not invent. Output plain tags only — never use parentheses or :: weighting syntax.',
   cg:
     'You convert a short Korean scene description (a story CG with characters) into comma-separated English ' +
     'Danbooru tags for an anime illustration (NovelAI Diffusion). Output ONLY lowercase comma-separated tags — ' +
     'no sentences, no explanation, no quotes, no markdown. Include subject count (1girl/1boy/2girls…), pose, ' +
     'action, setting. NEVER output generic medium words (anime style, manga, 2d illustration, digital painting) ' +
-    'or quality words. Stay faithful; do not invent.',
+    'or quality words. Stay faithful; do not invent. Output plain tags only — never use parentheses or :: weighting syntax.',
   emotion:
     'You convert a Korean facial expression/emotion word into 1-2 English Danbooru expression tags. ' +
     'Output ONLY lowercase comma-separated tags — no sentences, no quotes, no "1girl", no markdown.',
 };
 
-/** 알려진 표정 → 가중치 강조 태그(규칙 2b). 커스텀 표정은 LLM 번역으로 폴백. */
+// 알려진 표정 → 강조 태그. NovelAI V4.5 가중치 문법은 `weight::tag::` (예: 1.3::smiling::).
+// (Stable Diffusion 의 (tag:1.3) 문법은 NovelAI 에서 동작하지 않음.)
 const EMOTION_TAGS: Record<string, string> = {
   기본: 'neutral expression',
-  기쁨: '(smiling:1.3), (happy:1.2)',
-  슬픔: '(crying:1.3), (sad expression:1.2)',
-  화남: '(angry:1.3), (frown:1.2)',
-  놀람: '(surprised:1.3), (wide-eyed:1.2)',
-  수줍음: '(blush:1.3), (shy:1.2)',
+  기쁨: '1.3::smiling::, 1.2::happy::',
+  슬픔: '1.3::crying::, 1.2::sad expression::',
+  화남: '1.3::angry::, 1.2::frown::',
+  놀람: '1.3::surprised::, 1.2::wide-eyed::',
+  수줍음: '1.3::blush::, 1.2::shy::',
 };
 
 /** 캐릭터 단독 입화 구조 태그(배경 제거) · 배경 단독 구조 태그(인물 제외). */

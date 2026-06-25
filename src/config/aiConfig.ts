@@ -121,7 +121,7 @@ export interface AiConfig {
       ucPreset: number;
       /** 공통 네거티브(uc) 프롬프트. NAI 의 핵심 디폴트(인체 오류 차단). */
       negativePrompt: string;
-      /** 긍정 프롬프트 앞에 붙는 NAI 품질 태그. */
+      /** 긍정 프롬프트 "끝"에 붙는 V4.5 품질 태그(모델별 권장값). */
       qualityTags: string;
       /** img2img 기본 변형 강도(0~1). 낮을수록 원본 유지. */
       img2imgStrength: number;
@@ -199,8 +199,10 @@ export const aiConfig: AiConfig = {
       negativePrompt:
         'lowres, bad anatomy, bad hands, text, error, missing fingers, ' +
         'extra digit, fewer digits, cropped, worst quality, low quality',
-      // 긍정 프롬프트 맨 앞에 자동 탑재되는 마스터클래스 품질 필터(라이트노벨 일러스트 화풍).
-      qualityTags: 'masterpiece, best quality, amazing quality, light novel illustration',
+      // V4.5 품질 태그는 프롬프트 "맨 끝"에 붙인다(모델별 권장값). 기본=Curated 권장.
+      // V4.5 Full 이면 'location, very aesthetic, masterpiece, no text' 로 바꾼다.
+      // qualityToggle(서버 자동부착)에 의존하지 않고 직접 부착해 결정적으로 동작시킨다.
+      qualityTags: 'location, masterpiece, no text, -0.8::feet::, rating:general',
       img2imgStrength: 0.6,
       // 그림체 참조(vibe transfer) 기본 강도/정보추출량(여러 장 업로드 시 각 이미지에 공통 적용).
       vibeStrength: 0.6,

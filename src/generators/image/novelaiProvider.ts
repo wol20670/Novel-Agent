@@ -125,7 +125,8 @@ function buildParameters(o: BuildParamsOpts): Record<string, unknown> {
     steps: o.steps,
     n_samples: 1,
     ucPreset: cfg.ucPreset,
-    qualityToggle: true,
+    // 품질 태그는 withQualityTags 로 직접 끝에 부착하므로 서버 자동부착은 끈다(이중 방지·결정적).
+    qualityToggle: false,
     autoSmea: false,
     dynamic_thresholding: false,
     controlnet_strength: 1,
@@ -177,10 +178,10 @@ export interface NaiGenerateOpts {
   styleReferences?: Blob[];
 }
 
-/** 긍정 프롬프트 앞에 NAI 품질 태그를 붙인다. */
+/** 긍정 프롬프트 "끝"에 V4.5 품질 태그를 붙인다(권장 위치). */
 function withQualityTags(prompt: string): string {
   const tags = aiConfig.image.novelai.qualityTags;
-  return tags ? `${tags}, ${prompt}` : prompt;
+  return tags ? `${prompt}, ${tags}` : prompt;
 }
 
 /** 그림체 참조 Blob[] → buildParameters 의 vibe 옵션(base64 변환). */
