@@ -176,6 +176,9 @@ interface State {
   /** NovelAI 생성 모드 — free=Opus 무료(≤1MP) / high=고품질(큰 해상도, Anlas 소모). */
   naiMode: NaiMode;
   setNaiMode: (m: NaiMode) => void;
+  /** 스프라이트 배경 누끼(Director Tool) 수행 여부 — false 면 흰 배경 유지(Anlas 절약). 기본 true. */
+  spriteBgRemoval: boolean;
+  setSpriteBgRemoval: (v: boolean) => void;
   save: () => void;
   hydrate: () => void;
   resetAll: () => void;
@@ -286,6 +289,7 @@ export const useStore = create<State>((set, get) => {
     archiveReady: false,
     imageQuality: 'medium',
     naiMode: 'free',
+    spriteBgRemoval: true,
 
     setRawInput: (text) => {
       set((s) => ({ project: { ...s.project, rawInput: text } }));
@@ -440,6 +444,7 @@ export const useStore = create<State>((set, get) => {
           styleReference: styleRefs?.[0],
           styleReferences: styleRefs,
           promptOverride,
+          removeBg: get().spriteBgRemoval,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -531,7 +536,7 @@ export const useStore = create<State>((set, get) => {
       const key = `sprite:${name}`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
-        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality });
+        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality, removeBg: get().spriteBgRemoval });
         const id = assetId();
         await putAsset(id, blob);
         const tag = outfit === '기본' ? '' : `${outfit} `;
@@ -586,7 +591,7 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
         // 1) 기본 입화를 지시문대로 수정 → 새 디자인의 기준이 된다.
-        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality });
+        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality, removeBg: get().spriteBgRemoval });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -1654,6 +1659,15 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    setSpriteBgRemoval: (v) => {
+      set({ spriteBgRemoval: v });
+      try {
+        localStorage.setItem('na_sprite_bg', v ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+    },
+
     save: () => {
       const { project, assets } = get();
       saveProject(project, assets);
@@ -1693,6 +1707,12 @@ export const useStore = create<State>((set, get) => {
         }
       })();
       if (savedLang === 'ko' || savedLang === 'en') set({ promptLang: savedLang });
+      try {
+        const bg = localStorage.getItem('na_sprite_bg');
+        if (bg === '0') set({ spriteBgRemoval: false });
+      } catch {
+        /* ignore */
+      }
       if (loaded) {
         set({ project: loaded.project, assets: loaded.assets, apiKey, selectedSceneId: loaded.project.scenes[0]?.id ?? null });
       } else {

@@ -316,6 +316,8 @@ const NAI_MODE_OPTS: { key: 'free' | 'high'; label: string; hint: string }[] = [
 function NaiModeSelector() {
   const mode = useStore((s) => s.naiMode);
   const setMode = useStore((s) => s.setNaiMode);
+  const bgRemoval = useStore((s) => s.spriteBgRemoval);
+  const setBgRemoval = useStore((s) => s.setSpriteBgRemoval);
   return (
     <div className="flex flex-col gap-1">
       <span className="label">생성 모드</span>
@@ -338,7 +340,20 @@ function NaiModeSelector() {
       <p className="text-[10px] text-gray-500 leading-snug">
         {NAI_MODE_OPTS.find((o) => o.key === mode)?.hint}. <b className="text-gray-400">무료</b>로 구성·일관성을
         확인하고, 최종본만 <b className="text-gray-400">고품질</b>로 재생성하면 Anlas 를 아낄 수 있어요.
-        (스프라이트 누끼는 Director 도구라 소량 Anlas 가 들 수 있습니다.)
+      </p>
+      <label className="flex items-center gap-1.5 text-[11px] text-gray-400 cursor-pointer mt-0.5">
+        <input
+          type="checkbox"
+          checked={bgRemoval}
+          onChange={(e) => setBgRemoval(e.target.checked)}
+          className="accent-accent"
+        />
+        스프라이트 배경 누끼(투명 PNG)
+        <span className="text-[10px] text-gray-600">· Director 도구라 장당 소량 Anlas</span>
+      </label>
+      <p className="text-[10px] text-gray-600 leading-snug">
+        끄면 흰 배경으로 받아 <b className="text-gray-500">Anlas 0</b>(생성은 무료) — 단 투명배경이 아니라 실제 스프라이트론
+        부적합. 비용 추적·테스트용. (생성=무료, 누끼만 유료라 끄면 Anlas 가 안 줄어드는지로 확인 가능.)
       </p>
     </div>
   );

@@ -210,6 +210,11 @@ export async function novelaiGenerate(prompt: string, opts: NaiGenerateOpts): Pr
       vibe,
     }),
   };
+  console.info(
+    `%c[NovelAI] generate (텍스트·베이스없음 → Opus 무료)`,
+    'color:#4ade80',
+    { size: opts.size, steps: opts.steps, model: cfg.model, vibe: !!vibe },
+  );
   return postAndUnzip(apiBase() + cfg.generatePath, body, opts.apiKey, '이미지 생성');
 }
 
@@ -237,6 +242,11 @@ export async function novelaiImg2img(prompt: string, source: Blob, opts: NaiImg2
       img2img: { image, strength: opts.strength ?? cfg.img2imgStrength, noise: opts.noise ?? 0 },
     }),
   };
+  console.info(
+    `%c[NovelAI] img2img (베이스 이미지 사용 → Anlas 소모!)`,
+    'color:#fbbf24',
+    { size: opts.size, steps: opts.steps, strength: opts.strength ?? cfg.img2imgStrength },
+  );
   return postAndUnzip(apiBase() + cfg.generatePath, body, opts.apiKey, 'img2img');
 }
 
@@ -249,5 +259,10 @@ export async function novelaiRemoveBackground(source: Blob, opts: { apiKey: stri
   const { width, height } = await imageSize(source);
   const image = await blobToBase64(source);
   const body = { req_type: 'bg-removal', width, height, image };
+  console.info(
+    `%c[NovelAI] bg-removal 누끼 (Director Tool → Anlas 소모!)`,
+    'color:#fbbf24',
+    { width, height },
+  );
   return postAndUnzip(apiBase() + cfg.augmentPath, body, opts.apiKey, '배경 제거');
 }
