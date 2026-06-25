@@ -169,6 +169,8 @@ interface State {
   save: () => void;
   hydrate: () => void;
   resetAll: () => void;
+  /** 생성된 이미지·BGM(배경·입화·CG·메뉴·음악)만 삭제. 대본·캐릭터 설정·그림체 참조는 유지. */
+  clearGeneratedAssets: () => Promise<void>;
   setToast: (msg: string | null) => void;
 
   // 프로젝트 파일 (기기 간 이동)
@@ -1643,6 +1645,51 @@ export const useStore = create<State>((set, get) => {
       clearAssets().catch(() => {});
       set({ project: emptyProject(), assets: {}, selectedSceneId: null, activeTab: 'scenes' });
       flash('초기화했습니다.');
+    },
+
+    clearGeneratedAssets: async () => {
+      const { project } = get();
+      // 그림체 참조는 유지(사용자가 올린 NovelAI 화풍 참조).
+      const keep = new Set(project.styleRefAssetIds ?? []);
+      const ids = new Set<string>();
+      const add = (id?: string) => {
+        if (id && !keep.has(id)) ids.add(id);
+      };
+      for (const sc of project.scenes) {
+        add(sc.backgroundAssetId);
+        add(sc.bgmAssetId);
+        sc.cgAssetIds?.forEach(add);
+      }
+      for (const c of project.characters) {
+        Object.values(c.expressions).forEach(add);
+        c.outfits?.forEach((o) => Object.values(o.expressions).forEach(add));
+      }
+      add(project.menuArt?.main);
+      add(project.menuArt?.game);
+      if (ids.size === 0) return flash('비울 생성 이미지가 없습니다.');
+      // 참조만 비우고 대본·캐릭터 설정(외형·성격·의상 정의·표정 목록)·그림체 참조·GUI 는 유지.
+      set((s) => ({
+        assets: Object.fromEntries(Object.entries(s.assets).filter(([id]) => !ids.has(id))),
+        project: {
+          ...s.project,
+          scenes: s.project.scenes.map((sc) => {
+            const n = { ...sc };
+            delete n.backgroundAssetId;
+            delete n.bgmAssetId;
+            delete n.cgAssetIds;
+            return n;
+          }),
+          characters: s.project.characters.map((c) => ({
+            ...c,
+            expressions: {},
+            outfits: c.outfits?.map((o) => ({ ...o, expressions: {} })),
+          })),
+          menuArt: undefined,
+        },
+      }));
+      for (const id of ids) await deleteAsset(id).catch(() => {});
+      autoSave();
+      flash(`생성 이미지·BGM ${ids.size}개를 비웠습니다. 대본·캐릭터 설정·그림체 참조는 유지됩니다.`);
     },
 
     setToast: (msg) => {

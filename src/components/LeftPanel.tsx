@@ -15,6 +15,7 @@ export default function LeftPanel() {
   const loadSample = useStore((s) => s.loadSample);
   const save = useStore((s) => s.save);
   const resetAll = useStore((s) => s.resetAll);
+  const clearGenerated = useStore((s) => s.clearGeneratedAssets);
   const apiKey = useStore((s) => s.apiKey);
   const setApiKey = useStore((s) => s.setApiKey);
   const exportProject = useStore((s) => s.exportProject);
@@ -49,6 +50,15 @@ export default function LeftPanel() {
     if (confirm('모든 장면·에셋·저장 데이터를 지웁니다. 계속할까요?')) resetAll();
   };
 
+  const onClearGenerated = () => {
+    if (
+      confirm(
+        '생성된 배경·캐릭터 입화·CG·BGM·메뉴 이미지를 모두 삭제합니다.\n(대본·캐릭터 설정·표정/의상 정의·그림체 참조는 유지)\n계속할까요?',
+      )
+    )
+      clearGenerated();
+  };
+
   return (
     <div className="p-3.5 flex flex-col gap-5 text-sm">
       {/* 상단 액션 */}
@@ -60,10 +70,17 @@ export default function LeftPanel() {
           <button className="btn-ghost flex-1" onClick={loadSample}>
             ✨ 샘플
           </button>
-          <button className="btn-ghost" onClick={onReset} title="모두 초기화">
+          <button className="btn-ghost" onClick={onReset} title="전체 초기화 (대본·설정 포함 모두 삭제)">
             ⟲
           </button>
         </div>
+        <button
+          className="btn-ghost text-[11px] text-gray-400 hover:text-rose-500"
+          onClick={onClearGenerated}
+          title="대본·캐릭터 설정·그림체 참조는 두고, 생성된 배경·입화·CG·BGM·메뉴 이미지만 삭제"
+        >
+          🧹 생성물 초기화 (대본·설정 유지)
+        </button>
         <div className="flex gap-2">
           <button
             className="btn-ghost flex-1"
