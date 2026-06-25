@@ -24,8 +24,21 @@ export type ImageQuality = 'low' | 'medium' | 'high' | 'auto';
 /** gpt-image-1 이 허용하는 출력 사이즈. (가로형 / 세로형 / 정방형) */
 export type GptImageSize = '1536x1024' | '1024x1536' | '1024x1024';
 
-/** NovelAI 표준(Opus 무료 ≤1MP) 출력 사이즈. (세로형 / 가로형 / 정방형) */
-export type NaiSize = '832x1216' | '1216x832' | '1024x1024';
+/**
+ * NovelAI 출력 사이즈.
+ * - Normal(≤1MP): Opus 무료 무제한. 832×1216(세로) / 1216×832(가로) / 1024×1024(정방).
+ * - Large(>1MP): 더 선명·디테일하지만 Anlas 소모. 1024×1536 / 1536×1024 / 1472×1472.
+ */
+export type NaiSize =
+  | '832x1216'
+  | '1216x832'
+  | '1024x1024'
+  | '1024x1536'
+  | '1536x1024'
+  | '1472x1472';
+
+/** NovelAI 생성 모드. free=Opus 무료(≤1MP) · high=고품질(큰 해상도, Anlas 소모). */
+export type NaiMode = 'free' | 'high';
 
 export interface AiConfig {
   /** 활성 이미지 provider. 'novelai' 가 기본. */
@@ -88,16 +101,28 @@ export interface AiConfig {
       sampler: string;
       /** 프롬프트 가이던스(CFG). NAI 권장 5~6. */
       scale: number;
-      /** 품질 → 스텝 수. Opus 무료는 ≤28 스텝(그 이상은 Anlas 소모). */
-      steps: Record<ImageQuality, number>;
+      /** 현재 생성 모드(설정에서 변경). free=Opus 무료 · high=고품질(Anlas). */
+      mode: NaiMode;
+      /** 모드별 정의 — 무료(≤1MP)/고품질(큰 해상도). 스텝은 둘 다 ≤28. */
+      modes: Record<
+        NaiMode,
+        {
+          /** UI 표시 이름. */
+          label: string;
+          /** Opus 무료 범위인가(고품질은 Anlas 소모). */
+          free: boolean;
+          /** 생성 스텝(≤28 권장). */
+          steps: number;
+          /** 종류별 출력 사이즈(세로=스프라이트, 가로=배경/CG, 정방=기타). */
+          sizes: { portrait: NaiSize; landscape: NaiSize; square: NaiSize };
+        }
+      >;
       /** 네거티브 프리셋 번호(0=Heavy). */
       ucPreset: number;
       /** 공통 네거티브(uc) 프롬프트. NAI 의 핵심 디폴트(인체 오류 차단). */
       negativePrompt: string;
       /** 긍정 프롬프트 앞에 붙는 NAI 품질 태그. */
       qualityTags: string;
-      /** 종류별 출력 사이즈(세로=스프라이트, 가로=배경/CG, 정방=기타). */
-      sizes: { portrait: NaiSize; landscape: NaiSize; square: NaiSize };
       /** img2img 기본 변형 강도(0~1). 낮을수록 원본 유지. */
       img2imgStrength: number;
       /** 그림체 참조(vibe transfer) 기본 강도(0~1). */
@@ -150,8 +175,24 @@ export const aiConfig: AiConfig = {
       models: ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 'nai-diffusion-4-full', 'nai-diffusion-3'],
       sampler: 'k_euler_ancestral',
       scale: 5,
-      // 모든 스텝을 28 이하로 유지 → Opus 무료 한도(≤1MP, ≤28스텝, 1장) 안에서 동작.
-      steps: { low: 23, medium: 28, high: 28, auto: 28 },
+      // 기본은 무료 모드(Opus 무제한). 고품질은 큰 해상도라 Anlas 를 쓴다.
+      mode: 'free',
+      modes: {
+        free: {
+          label: '무료',
+          free: true,
+          // ≤1MP·≤28스텝·1장 → Opus 구독 무제한 무료.
+          steps: 28,
+          sizes: { portrait: '832x1216', landscape: '1216x832', square: '1024x1024' },
+        },
+        high: {
+          label: '고품질',
+          free: false,
+          // Large 사이즈(>1MP) → 더 선명·디테일, Anlas 소모.
+          steps: 28,
+          sizes: { portrait: '1024x1536', landscape: '1536x1024', square: '1472x1472' },
+        },
+      },
       ucPreset: 0,
       // NovelAI 호출의 핵심 디폴트. 인체 오류(손·손가락·해부학)를 원천 차단하는 고정 네거티브.
       // 앞쪽이 사용자가 지정한 필수 토큰, 뒤쪽은 품질·중복인물 방지 보강.
@@ -161,7 +202,6 @@ export const aiConfig: AiConfig = {
         'signature, watermark, username, blurry, artist name, multiple views, multiple people',
       // 긍정 프롬프트 앞에 붙는 NAI 품질 태그(qualityToggle 과 함께 마감 품질을 끌어올린다).
       qualityTags: 'very aesthetic, masterpiece, best quality, highres',
-      sizes: { portrait: '832x1216', landscape: '1216x832', square: '1024x1024' },
       img2imgStrength: 0.6,
       // 그림체 참조(vibe transfer) 기본 강도/정보추출량(여러 장 업로드 시 각 이미지에 공통 적용).
       vibeStrength: 0.6,
@@ -184,9 +224,21 @@ export function normalizeImageSize(w: number, h: number): GptImageSize {
   return '1024x1024';
 }
 
-/** 배경/CG 의 (가로,세로) 요청을 NovelAI 표준 사이즈로 정규화(Opus 무료 ≤1MP 격자). */
+/** 현재 NovelAI 모드의 사이즈 세트. */
+export function naiActiveSizes(): { portrait: NaiSize; landscape: NaiSize; square: NaiSize } {
+  const nai = aiConfig.image.novelai;
+  return nai.modes[nai.mode].sizes;
+}
+
+/** 현재 NovelAI 모드의 생성 스텝. */
+export function naiActiveSteps(): number {
+  const nai = aiConfig.image.novelai;
+  return nai.modes[nai.mode].steps;
+}
+
+/** 배경/CG 의 (가로,세로) 요청을 현재 NovelAI 모드 사이즈로 정규화. */
 export function naiSize(w: number, h: number): NaiSize {
-  const { sizes } = aiConfig.image.novelai;
+  const sizes = naiActiveSizes();
   const ratio = w / h;
   if (ratio > aiConfig.image.landscapeRatio) return sizes.landscape;
   if (ratio < aiConfig.image.portraitRatio) return sizes.portrait;

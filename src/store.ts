@@ -5,7 +5,7 @@ import { parseText, parseWorkbook } from './parser';
 import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference } from './generators/image';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
-import { aiConfig, normalizeImageSize, type ImageQuality } from './config/aiConfig';
+import { aiConfig, normalizeImageSize, type ImageQuality, type NaiMode } from './config/aiConfig';
 import {
   saveProject,
   loadProject,
@@ -160,9 +160,12 @@ interface State {
 
   // 설정/저장
   setApiKey: (key: string) => void;
-  /** 전역 이미지 생성 품질(초안 low / 표준 medium / 고품질 high). 모든 생성에 적용. */
+  /** (OpenAI 경로 전용) 이미지 생성 품질. NovelAI 는 naiMode 를 쓴다. */
   imageQuality: ImageQuality;
   setImageQuality: (q: ImageQuality) => void;
+  /** NovelAI 생성 모드 — free=Opus 무료(≤1MP) / high=고품질(큰 해상도, Anlas 소모). */
+  naiMode: NaiMode;
+  setNaiMode: (m: NaiMode) => void;
   save: () => void;
   hydrate: () => void;
   resetAll: () => void;
@@ -252,6 +255,7 @@ export const useStore = create<State>((set, get) => {
     archiveFolderName: null,
     archiveReady: false,
     imageQuality: 'medium',
+    naiMode: 'free',
 
     setRawInput: (text) => {
       set((s) => ({ project: { ...s.project, rawInput: text } }));
@@ -1577,6 +1581,17 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    setNaiMode: (m) => {
+      // 생성기(naiActiveSizes/Steps)가 읽는 단일 소스 = aiConfig 모드. 함께 갱신.
+      aiConfig.image.novelai.mode = m;
+      set({ naiMode: m });
+      try {
+        localStorage.setItem('na_nai_mode', m);
+      } catch {
+        /* ignore */
+      }
+    },
+
     save: () => {
       const { project, assets } = get();
       saveProject(project, assets);
@@ -1593,12 +1608,23 @@ export const useStore = create<State>((set, get) => {
           return null;
         }
       })();
+      const savedMode = (() => {
+        try {
+          return localStorage.getItem('na_nai_mode') as NaiMode | null;
+        } catch {
+          return null;
+        }
+      })();
       if (loaded) {
         set({ project: loaded.project, assets: loaded.assets, apiKey, selectedSceneId: loaded.project.scenes[0]?.id ?? null });
       } else {
         set({ apiKey });
       }
       if (savedQuality) set({ imageQuality: savedQuality });
+      if (savedMode === 'free' || savedMode === 'high') {
+        aiConfig.image.novelai.mode = savedMode;
+        set({ naiMode: savedMode });
+      }
       // 이전에 연결한 Ren'Py 폴더 / 이미지 보관 폴더 이름 복원(권한 프롬프트 없이 표시만).
       getConnectedFolderName().then((name) => {
         if (name) set({ folderName: name });

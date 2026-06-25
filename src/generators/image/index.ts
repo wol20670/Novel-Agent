@@ -10,19 +10,19 @@ import {
   novelaiRemoveBackground,
   seedFromString,
 } from './novelaiProvider';
-import { aiConfig, naiSize, type ImageQuality, type GptImageSize } from '../../config/aiConfig';
+import {
+  aiConfig,
+  naiSize,
+  naiActiveSizes,
+  naiActiveSteps,
+  type ImageQuality,
+  type GptImageSize,
+} from '../../config/aiConfig';
 import type { Expression } from '../../types';
 
 /** 활성 provider 가 NovelAI 인가(키가 있을 때만 의미). */
 function useNai(): boolean {
   return aiConfig.provider === 'novelai';
-}
-
-/** 품질(미지정 시 종류별 기본 품질) → NovelAI 스텝 수. */
-function naiSteps(q: ImageQuality | undefined, category: 'background' | 'cg' | 'sprite'): number {
-  const steps = aiConfig.image.novelai.steps;
-  const eff = q ?? aiConfig.image.quality[category];
-  return steps[eff] ?? steps.medium;
 }
 
 export interface ImageRequest {
@@ -49,7 +49,7 @@ export async function generateImage(req: ImageRequest): Promise<ImageResult> {
       const blob = await novelaiGenerate(req.prompt, {
         apiKey,
         size: naiSize(req.width, req.height),
-        steps: naiSteps(req.quality, 'background'),
+        steps: naiActiveSteps(),
       });
       return { blob, source: 'novelai' };
     }
@@ -128,8 +128,8 @@ export async function generateMenuArtImage(opts: {
   const base = buildMenuArtPrompt(opts.title, opts.genreLabel, opts.mood, opts.which);
   const refs = [opts.character, opts.background].filter(Boolean) as Blob[];
   if (useNai()) {
-    const size = aiConfig.image.novelai.sizes.landscape;
-    const steps = naiSteps(quality, 'cg');
+    const size = naiActiveSizes().landscape;
+    const steps = naiActiveSteps();
     // 캐릭터 참조가 있으면 그 입화를 소스로 img2img(외형 유지), 없으면 텍스트 생성.
     if (opts.character) {
       const blob = await novelaiImg2img(base, opts.character, { apiKey, size, steps, strength: 0.6 });
@@ -189,8 +189,8 @@ export async function generateCgFromReference(opts: {
       .join(', ');
     const blob = await novelaiImg2img(prompt, opts.character, {
       apiKey: opts.apiKey.trim(),
-      size: aiConfig.image.novelai.sizes.landscape,
-      steps: naiSteps(opts.quality, 'cg'),
+      size: naiActiveSizes().landscape,
+      steps: naiActiveSteps(),
       strength: 0.7,
     });
     return { blob, source: 'novelai' };
@@ -269,12 +269,11 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
   if (apiKey && useNai()) {
     // NovelAI: 이름 기반 고정 시드 + 외형 설명 + 표정 태그로 "같은 인물, 다른 표정" 일관성 확보
     // (OpenAI 의 reference-edit 대신 NAI 의 시드 고정 방식이 더 안정적·자연스럽다).
-    const cfg = aiConfig.image.novelai;
     const seed = seedFromString(req.name);
     let blob = await novelaiGenerate(spritePrompt(req, true), {
       apiKey,
-      size: cfg.sizes.portrait,
-      steps: naiSteps(req.quality, 'sprite'),
+      size: naiActiveSizes().portrait,
+      steps: naiActiveSteps(),
       seed,
       styleReferences: req.styleReferences,
     });
@@ -334,12 +333,12 @@ export async function editImage(opts: {
   const apiKey = opts.apiKey.trim();
   if (useNai()) {
     // NovelAI: 원본을 소스로 낮은 강도 img2img → 구도 유지하며 지시문대로 미세 변형.
-    const cfg = aiConfig.image.novelai;
-    const size = isSprite ? cfg.sizes.portrait : cfg.sizes.landscape;
+    const sizes = naiActiveSizes();
+    const size = isSprite ? sizes.portrait : sizes.landscape;
     let blob = await novelaiImg2img(opts.instruction, opts.blob, {
       apiKey,
       size,
-      steps: naiSteps(opts.quality, isSprite ? 'sprite' : 'background'),
+      steps: naiActiveSteps(),
       strength: 0.5,
     });
     if (isSprite && aiConfig.image.sprite.transparent) {
