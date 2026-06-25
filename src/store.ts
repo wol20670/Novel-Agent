@@ -232,9 +232,11 @@ export const useStore = create<State>((set, get) => {
     }, 3500);
   };
 
-  // NovelAI + OpenAI 키가 있을 때만 프롬프트를 단부루 태그로 컴파일. 실패하면 undefined → 결정적 프롬프트 폴백.
+  // NovelAI 경로면 프롬프트를 단부루 태그 구조로 조립한다(품질 프리픽스·감정·구조 태그).
+  // 한국어 입력 + OpenAI 키가 있을 때만 내부에서 GPT 번역이 일어나고, 영어 태그/키 없음이면 원문 그대로 사용.
+  // 실패하면 undefined → 생성기의 결정적 프롬프트로 폴백.
   const naiCompile = async (fn: () => Promise<string>): Promise<string | undefined> => {
-    if (aiConfig.provider !== 'novelai' || !get().openaiKey?.trim()) return undefined;
+    if (aiConfig.provider !== 'novelai') return undefined;
     try {
       const out = await fn();
       return out.trim() || undefined;

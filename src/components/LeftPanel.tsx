@@ -192,8 +192,10 @@ export default function LeftPanel() {
         <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
           <span className="label">OpenAI 키 · 선택 (프롬프트 태그 변환 · 테마)</span>
           <p className="text-[10px] text-gray-500 leading-snug">
-            넣으면 한국어 외형/배경을 <code className="text-accent">gpt-4o-mini</code>가 <b className="text-gray-400">단부루 태그</b>로
-            변환해 NovelAI 품질을 끌어올립니다(장당 ~$0.0002, 캐릭터당 1회 캐시). 없으면 변환 없이 동작.
+            넣으면 <b className="text-gray-400">한국어</b> 외형/배경을 <code className="text-accent">gpt-4o-mini</code>가{' '}
+            <b className="text-gray-400">단부루 태그</b>로 변환해 NovelAI 품질을 끌어올립니다(장당 ~$0.0002, 캐릭터당 1회 캐시).
+            처음부터 <b className="text-gray-400">영어 태그</b>로 적으면 변환을 <b className="text-gray-400">자동으로 건너뛰고</b> 바로
+            NovelAI 로 전송됩니다(키 불필요). 품질 프리픽스·감정·구조 태그는 어느 경우든 자동 부착.
           </p>
           <div className="flex gap-2">
             <input
