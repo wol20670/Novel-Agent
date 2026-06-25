@@ -12,7 +12,12 @@ const SYS: Record<CompileMode, string> = {
     'You convert a short Korean character description into comma-separated English Danbooru tags for an anime ' +
     'illustration model (NovelAI Diffusion). Output ONLY lowercase comma-separated tags — no sentences, no ' +
     'explanation, no quotes, no markdown. If it is a single character, start with "1girl, solo" or "1boy, solo" ' +
-    'as appropriate. Use concise tags (hair color/length, eye color, clothing, accessories, body type). ' +
+    'as appropriate. Use concise tags (hair color/length, hairstyle, eye color, clothing, accessories, held items, body type). ' +
+    'IMPORTANT for hair: if a partial-dye / highlight / streak / two-tone is described (브릿지, 메쉬, 하이라이트, 투톤, ' +
+    '인이어/이너 컬러), tag it as "multicolored hair, streaked hair" plus the accent color (e.g. "mint green"), and ALSO ' +
+    'keep the BASE hair color as its own tag. Do NOT recolor the entire hair with the accent color. If a streak is on the ' +
+    'front hair/bangs, add "colored inner hair" or "streaked hair" with the bangs. For items in hands use "holding <item>" ' +
+    '(e.g. holding tablet, holding pen). ' +
     'NEVER output generic medium words (anime style, manga, manga style, 2d illustration, digital painting) ' +
     'and NEVER output quality words (masterpiece, best quality) or background tags. Stay faithful; do not invent. Output plain tags only — never use parentheses or :: weighting syntax.',
   scene:
