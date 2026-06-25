@@ -136,7 +136,7 @@ export default function AssetsTab() {
       <section>
         <h3 className="section-title mb-1">🎬 CG 컷 <span className="text-gray-500 font-normal text-xs">· {cgs.length}종</span></h3>
         <p className="text-xs text-gray-500 mb-3">
-          대본의 <code className="text-accent">#CG 설명</code> 단위. 같은 설명이면 한 컷으로 공유됩니다. <b>생성</b>(AI, 키 있으면 gpt-image-1)하거나 외부 제작 이미지를 업로드해 사용합니다(둘 다 없으면 Canvas 임시). 생성한 CG 도 보관 폴더에 자동 저장됩니다.
+          대본의 <code className="text-accent">#CG 설명</code> 단위. 같은 설명이면 한 컷으로 공유됩니다. <b>생성</b>(AI, 키 있으면 NovelAI)하거나 외부 제작 이미지를 업로드해 사용합니다(둘 다 없으면 Canvas 임시). 생성한 CG 도 보관 폴더에 자동 저장됩니다.
         </p>
         {cgs.length === 0 ? (
           <p className="text-gray-600 text-sm">CG 컷 없음</p>
@@ -207,33 +207,62 @@ function NarrationOnlyRow() {
   );
 }
 
-/** 전 캐릭터 공통 "그림체 참조" 이미지 업로드 — 기본 입화 생성 시 화풍만 참고. */
-function StyleRefRow() {
-  const styleRefId = useStore((s) => s.project.styleRefAssetId);
-  const setStyleRef = useStore((s) => s.setStyleRef);
-  const clearStyleRef = useStore((s) => s.clearStyleRef);
-  const url = useAssetUrl(styleRefId);
+/** 그림체 참조 썸네일 1장(제거 버튼 포함). */
+function StyleRefThumb({ id, onRemove }: { id: string; onRemove: () => void }) {
+  const url = useAssetUrl(id);
   return (
-    <div className="card border-edge p-2.5 mb-3 flex items-center gap-3">
-      <div className="w-12 h-16 rounded border border-edge bg-ink overflow-hidden shrink-0 flex items-center justify-center text-[9px] text-gray-600">
-        {url ? <img src={url} className="w-full h-full object-cover" /> : '없음'}
+    <div className="relative w-12 h-16 rounded border border-edge bg-ink overflow-hidden shrink-0">
+      {url ? (
+        <img src={url} className="w-full h-full object-cover" />
+      ) : (
+        <span className="flex items-center justify-center h-full text-[9px] text-gray-600">…</span>
+      )}
+      <button
+        className="absolute top-0 right-0 w-4 h-4 flex items-center justify-center bg-black/60 text-rose-300 text-[11px] leading-none hover:text-rose-500"
+        onClick={onRemove}
+        title="이 참조 제거"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+/** 전 캐릭터 공통 "그림체 참조" 이미지 업로드(여러 장) — 기본 입화 생성 시 화풍만 참고(vibe transfer). */
+function StyleRefRow() {
+  const ids = useStore((s) => s.project.styleRefAssetIds) ?? [];
+  const addStyleRef = useStore((s) => s.addStyleRef);
+  const removeStyleRef = useStore((s) => s.removeStyleRef);
+  const clearStyleRefs = useStore((s) => s.clearStyleRefs);
+  return (
+    <div className="card border-edge p-2.5 mb-3 flex items-start gap-3">
+      <div className="flex gap-1 flex-wrap shrink-0 max-w-[38%]">
+        {ids.length ? (
+          ids.map((id) => <StyleRefThumb key={id} id={id} onRemove={() => removeStyleRef(id)} />)
+        ) : (
+          <div className="w-12 h-16 rounded border border-edge bg-ink flex items-center justify-center text-[9px] text-gray-600">
+            없음
+          </div>
+        )}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-gray-300 font-semibold">🎨 그림체 참조 (선택, 전 캐릭터 공통)</p>
+        <p className="text-xs text-gray-300 font-semibold">🎨 그림체 참조 (선택 · 여러 장 · 전 캐릭터 공통)</p>
         <p className="text-[10px] text-gray-500 leading-snug">
-          마음에 드는 캐릭터 그림 1장을 올리면 <b className="text-gray-400">기본 입화</b> 생성 시 그 <b className="text-gray-400">화풍·채색만</b> 참고합니다(인물은 외형 설명대로 새로). 링크는 불가 — 이미지 파일을 올리세요.
+          마음에 드는 캐릭터 그림을 <b className="text-gray-400">여러 장</b> 올리면 <b className="text-gray-400">기본 입화</b> 생성 시 그{' '}
+          <b className="text-gray-400">화풍·채색만</b> 참고합니다(NovelAI vibe transfer · 인물은 외형 설명대로 새로). 장수가 많을수록
+          화풍 반영이 정확해집니다. 링크 불가 — 이미지 파일을 올리세요.
         </p>
       </div>
       <div className="flex flex-col gap-1 shrink-0">
         <UploadButton
-          onFile={(f) => setStyleRef(f)}
-          label={styleRefId ? '✓ 교체' : '↥ 업로드'}
+          onFile={(f) => addStyleRef(f)}
+          label="↥ 추가"
           className="btn-ghost text-[11px]"
-          title="그림체 참조 이미지 업로드"
+          title="그림체 참조 이미지 추가"
         />
-        {styleRefId && (
-          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => clearStyleRef()}>
-            해제
+        {ids.length > 0 && (
+          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => clearStyleRefs()}>
+            모두 해제
           </button>
         )}
       </div>

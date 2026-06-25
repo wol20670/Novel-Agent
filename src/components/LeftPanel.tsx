@@ -140,18 +140,20 @@ export default function LeftPanel() {
       <ProjectMeta />
       <Divider />
 
-      {/* OpenAI 키 */}
+      {/* NovelAI 키 */}
       <section className="flex flex-col gap-2">
-        <h2 className="section-title">OpenAI 이미지 API · 선택</h2>
+        <h2 className="section-title">NovelAI 이미지 API · 선택</h2>
         <p className="text-[11px] text-gray-500 leading-snug">
-          키가 있으면 <code className="text-accent">gpt-image-1</code>로 실제 배경을 생성합니다. 없으면 Canvas
-          임시 배경으로 오프라인 동작합니다. <b className="text-gray-400">키는 이 브라우저에만 저장</b>되며 외부로 전송되지 않습니다.
+          키가 있으면 <code className="text-accent">NovelAI Diffusion V4.5</code>로 실제 이미지를 생성합니다(서브컬쳐/애니
+          일러스트 고품질). 없으면 Canvas 임시 이미지로 오프라인 동작합니다. NovelAI 계정 설정의{' '}
+          <b className="text-gray-400">persistent token(pst-…)</b>을 넣으세요. <b className="text-gray-400">키는 이
+          브라우저에만 저장</b>되며 외부로 전송되지 않습니다.
         </p>
         <div className="flex gap-2">
           <input
             type={showKey ? 'text' : 'password'}
             className="field flex-1"
-            placeholder="sk-..."
+            placeholder="pst-..."
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
           />
@@ -163,7 +165,7 @@ export default function LeftPanel() {
           className={`text-[11px] flex items-center gap-1.5 ${apiKey ? 'text-emerald-600' : 'text-gray-500'}`}
         >
           <span className={`w-1.5 h-1.5 rounded-full ${apiKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
-          {apiKey ? '키 저장됨 · OpenAI 모드' : '키 없음 · 오프라인(Canvas) 모드'}
+          {apiKey ? '키 저장됨 · NovelAI 모드' : '키 없음 · 오프라인(Canvas) 모드'}
         </div>
         <QualitySelector />
       </section>
@@ -385,7 +387,7 @@ function ThemeStudio() {
       <ThemePreview theme={theme} />
 
       <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
-        <span className="label">타이틀·메뉴 배경 (gpt-image-1 생성 / 직접 업로드)</span>
+        <span className="label">타이틀·메뉴 배경 (AI 생성 / 직접 업로드)</span>
         {(refChars.length > 0 || refBgKeys.length > 0) && (
           <div className="flex gap-1.5">
             <select
@@ -420,7 +422,7 @@ function ThemeStudio() {
             className="btn-ghost flex-1 text-[11px]"
             disabled={!apiKey || busyMenuMain}
             onClick={() => generateMenuArt('main', menuRefOpts)}
-            title={apiKey ? 'gpt-image-1 로 타이틀(메인 메뉴) 배경 생성 — CG 1장 정도 비용' : 'OpenAI 키가 필요합니다'}
+            title={apiKey ? 'NovelAI 로 타이틀(메인 메뉴) 배경 생성' : '이미지 API 키가 필요합니다'}
           >
             {busyMenuMain ? <Spinner /> : project.menuArt?.main ? '✨ 메인 재생성' : '✨ 메인 AI 생성'}
           </button>
@@ -428,7 +430,7 @@ function ThemeStudio() {
             className="btn-ghost flex-1 text-[11px]"
             disabled={!apiKey || busyMenuGame}
             onClick={() => generateMenuArt('game', menuRefOpts)}
-            title={apiKey ? 'gpt-image-1 로 게임 메뉴 배경 생성' : 'OpenAI 키가 필요합니다'}
+            title={apiKey ? 'NovelAI 로 게임 메뉴 배경 생성' : '이미지 API 키가 필요합니다'}
           >
             {busyMenuGame ? <Spinner /> : project.menuArt?.game ? '✨ 게임 재생성' : '✨ 게임 AI 생성'}
           </button>
@@ -467,7 +469,7 @@ function ThemeStudio() {
 
       {!apiKey && (
         <p className="text-[10px] text-gray-500 leading-snug">
-          키 없이도 스토리·분위기 기반 변형이 적용됩니다. 위 OpenAI 키를 넣으면 더 정교한 AI 생성으로 업그레이드됩니다.
+          키 없이도 스토리·분위기 기반 변형이 적용됩니다. 위 NovelAI 키를 넣으면 더 정교한 AI 생성으로 업그레이드됩니다.
         </p>
       )}
     </div>

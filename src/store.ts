@@ -93,9 +93,12 @@ interface State {
    */
   refineCharacterDesign: (name: string, instruction: string) => Promise<void>;
   clearCharacterSprites: (name: string) => Promise<void>;
-  /** 캐릭터 그림체 참조 이미지 설정/해제(기본 입화 생성 시 화풍만 참고). */
-  setStyleRef: (file: File) => Promise<void>;
-  clearStyleRef: () => Promise<void>;
+  /** 그림체 참조 이미지 추가(여러 장 가능; NovelAI vibe transfer 로 화풍만 참고). */
+  addStyleRef: (file: File) => Promise<void>;
+  /** 특정 그림체 참조 1장 제거. */
+  removeStyleRef: (id: string) => Promise<void>;
+  /** 그림체 참조 전체 해제. */
+  clearStyleRefs: () => Promise<void>;
 
   // 에셋 생성
   generateBackground: (sceneId: string) => Promise<void>;
@@ -319,13 +322,16 @@ export const useStore = create<State>((set, get) => {
         flash('먼저 스토리를 분석하거나 분위기를 입력하세요.');
         return;
       }
+      // 테마는 OpenAI Chat(gpt-4o-mini)으로 만든다. provider 가 NovelAI 면 키는 NAI 토큰이라
+      // OpenAI 로 보내지 않고 오프라인 변형으로 동작한다(키가 NAI 여도 안전).
+      const chatKey = aiConfig.provider === 'openai' ? apiKey || undefined : undefined;
       set({ aiThemeBusy: true });
-      flash(apiKey ? 'AI 테마 생성 중…' : '오프라인 테마 변형 생성 중…');
+      flash(chatKey ? 'AI 테마 생성 중…' : '오프라인 테마 변형 생성 중…');
       try {
         const { theme, source, note } = await generateTheme({
           project,
           mood: project.mood,
-          apiKey: apiKey || undefined,
+          apiKey: chatKey,
         });
         set((s) => ({ project: { ...s.project, guiTheme: theme } }));
         autoSave();
@@ -356,11 +362,14 @@ export const useStore = create<State>((set, get) => {
           const baseId = char.expressions['기본'];
           if (baseId) ref = (await getAsset(baseId)) ?? undefined;
         }
-        // 기준 입화가 없을 때(=기본 텍스트 생성)만 그림체 참조를 적용한다.
-        let styleRef: Blob | undefined;
+        // 기준 입화가 없을 때(=기본 텍스트 생성)만 그림체 참조를 적용한다(여러 장 vibe).
+        let styleRefs: Blob[] | undefined;
         if (!ref) {
-          const sid = get().project.styleRefAssetId;
-          if (sid) styleRef = (await getAsset(sid)) ?? undefined;
+          const ids = get().project.styleRefAssetIds ?? [];
+          if (ids.length) {
+            const blobs = await Promise.all(ids.map((id) => getAsset(id)));
+            styleRefs = blobs.filter((b): b is Blob => !!b);
+          }
         }
         const { blob, source } = await generateSprite({
           name,
@@ -371,7 +380,8 @@ export const useStore = create<State>((set, get) => {
           personality: char.personality,
           quality: get().imageQuality,
           reference: ref,
-          styleReference: styleRef,
+          styleReference: styleRefs?.[0],
+          styleReferences: styleRefs,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -385,7 +395,7 @@ export const useStore = create<State>((set, get) => {
           createdAt: Date.now(),
         };
         // 비용 들인 AI 입화는 보관 폴더에 사본을 쌓아둔다(재생성해도 원본 보존).
-        if (source === 'openai') {
+        if (source !== 'canvas') {
           void archiveImage(blob, `characters/${safeFileName(name)}/${safeFileName(expr)}_${timestamp()}.png`);
         }
         const prev = char.expressions[expr];
@@ -439,7 +449,7 @@ export const useStore = create<State>((set, get) => {
       const char = get().project.characters.find((c) => c.name === name);
       if (!char) return;
       const apiKey = get().apiKey?.trim();
-      if (!apiKey) return flash('이미지 수정은 OpenAI 키가 필요합니다.');
+      if (!apiKey) return flash('이미지 수정은 이미지 API 키가 필요합니다.');
       if (!instruction.trim()) return;
       const curId = char.expressions[expr];
       if (!curId) return flash('먼저 이 표정 입화를 생성하세요.');
@@ -484,7 +494,7 @@ export const useStore = create<State>((set, get) => {
       const char = get().project.characters.find((c) => c.name === name);
       if (!char) return;
       const apiKey = get().apiKey?.trim();
-      if (!apiKey) return flash('이미지 수정은 OpenAI 키가 필요합니다.');
+      if (!apiKey) return flash('이미지 수정은 이미지 API 키가 필요합니다.');
       if (!instruction.trim()) return;
       const baseId = char.expressions['기본'];
       if (!baseId) return flash('먼저 ① 기본 입화를 생성하세요.');
@@ -553,29 +563,39 @@ export const useStore = create<State>((set, get) => {
       flash(`${name} 스프라이트를 비웠습니다.`);
     },
 
-    setStyleRef: async (file) => {
+    addStyleRef: async (file) => {
       try {
-        const id = await uploadAsset(file, 'sprite', 'style_ref.png');
-        const prev = get().project.styleRefAssetId;
-        set((s) => ({ project: { ...s.project, styleRefAssetId: id } }));
-        if (prev) await deleteAsset(prev).catch(() => {});
+        const id = await uploadAsset(file, 'sprite', `style_ref_${Date.now().toString(36)}.png`);
+        set((s) => ({
+          project: { ...s.project, styleRefAssetIds: [...(s.project.styleRefAssetIds ?? []), id] },
+        }));
         autoSave();
-        flash('그림체 참조를 설정했습니다. 기본 입화 생성 시 이 화풍을 참고합니다(인물은 외형 설명대로).');
+        const n = get().project.styleRefAssetIds?.length ?? 1;
+        flash(`그림체 참조를 추가했습니다(${n}장). 기본 입화 생성 시 이 화풍들을 참고합니다(인물은 외형 설명대로).`);
       } catch (e) {
         flash((e as Error).message);
       }
     },
 
-    clearStyleRef: async () => {
-      const prev = get().project.styleRefAssetId;
-      if (prev) await deleteAsset(prev).catch(() => {});
+    removeStyleRef: async (id) => {
+      await deleteAsset(id).catch(() => {});
+      set((s) => ({
+        project: { ...s.project, styleRefAssetIds: (s.project.styleRefAssetIds ?? []).filter((x) => x !== id) },
+      }));
+      autoSave();
+      flash('그림체 참조 1장을 제거했습니다.');
+    },
+
+    clearStyleRefs: async () => {
+      const ids = get().project.styleRefAssetIds ?? [];
+      for (const id of ids) await deleteAsset(id).catch(() => {});
       set((s) => {
         const project = { ...s.project };
-        delete project.styleRefAssetId;
+        delete project.styleRefAssetIds;
         return { project };
       });
       autoSave();
-      flash('그림체 참조를 해제했습니다.');
+      flash('그림체 참조를 모두 해제했습니다.');
     },
 
     updateCharacter: (name, patch) => {
@@ -618,7 +638,7 @@ export const useStore = create<State>((set, get) => {
           createdAt: Date.now(),
         };
         // 비용 들인 AI 배경은 보관 폴더에 사본을 쌓아둔다(재생성해도 원본 보존).
-        if (source === 'openai') {
+        if (source !== 'canvas') {
           void archiveImage(blob, `backgrounds/${safeFileName(scene.background || scene.title)}_${timestamp()}.png`);
         }
         // 같은 배경 이름을 쓰는 모든 장면에 함께 적용(생성 1회 = 일관성 + 비용 절감).
@@ -641,8 +661,8 @@ export const useStore = create<State>((set, get) => {
         flash(
           targets.length > 1
             ? `'${key}' 배경을 ${targets.length}개 장면에 적용했습니다.`
-            : source === 'openai'
-              ? 'OpenAI 배경을 생성했습니다.'
+            : source !== 'canvas'
+              ? 'AI 배경을 생성했습니다.'
               : '임시 배경(Canvas)을 생성했습니다.',
         );
       } catch (e) {
@@ -656,7 +676,7 @@ export const useStore = create<State>((set, get) => {
       const scene = get().project.scenes.find((s) => s.id === sceneId);
       if (!scene) return;
       const apiKey = get().apiKey?.trim();
-      if (!apiKey) return flash('이미지 수정은 OpenAI 키가 필요합니다.');
+      if (!apiKey) return flash('이미지 수정은 이미지 API 키가 필요합니다.');
       if (!instruction.trim()) return;
       if (!scene.backgroundAssetId) return flash('먼저 배경을 생성하세요.');
       const src = await getAsset(scene.backgroundAssetId);
@@ -892,7 +912,7 @@ export const useStore = create<State>((set, get) => {
           createdAt: Date.now(),
         };
         // 비용 들인 AI CG 도 보관 폴더에 사본 저장(재생성해도 원본 보존).
-        if (source === 'openai') void archiveImage(blob, `cg/${safeFileName(key)}_${timestamp()}.png`);
+        if (source !== 'canvas') void archiveImage(blob, `cg/${safeFileName(key)}_${timestamp()}.png`);
         // 같은 설명(컷)을 쓰는 모든 장면의 해당 인덱스에 적용.
         const prevs = new Set<string>();
         set((s) => ({
@@ -914,7 +934,7 @@ export const useStore = create<State>((set, get) => {
         }));
         autoSave();
         for (const p of prevs) await deleteAsset(p).catch(() => {});
-        flash(source === 'openai' ? 'CG 컷을 생성했습니다.' : '임시 CG(Canvas)를 생성했습니다.');
+        flash(source !== 'canvas' ? 'CG 컷을 생성했습니다.' : '임시 CG(Canvas)를 생성했습니다.');
       } catch (e) {
         flash(`CG 생성 실패: ${(e as Error).message}`);
       } finally {
@@ -926,7 +946,7 @@ export const useStore = create<State>((set, get) => {
       const key = desc.trim();
       if (!key) return flash('CG 설명이 비어 있습니다.');
       const apiKey = get().apiKey?.trim();
-      if (!apiKey) return flash('캐릭터 참조 CG 는 OpenAI 키가 필요합니다.');
+      if (!apiKey) return flash('캐릭터 참조 CG 는 이미지 API 키가 필요합니다.');
       const { project } = get();
       const using = project.scenes.filter((s) => s.cg.some((d) => d.trim() === key));
       if (using.length === 0) return;
@@ -961,7 +981,7 @@ export const useStore = create<State>((set, get) => {
           filename: `cg_${Date.now().toString(36)}.png`,
           createdAt: Date.now(),
         };
-        if (source === 'openai')
+        if (source !== 'canvas')
           void archiveImage(blob, `cg/${safeFileName(key)}_${safeFileName(characterName)}_${timestamp()}.png`);
         const prevs = new Set<string>();
         set((s) => ({
@@ -995,7 +1015,7 @@ export const useStore = create<State>((set, get) => {
       const key = desc.trim();
       if (!key) return;
       const apiKey = get().apiKey?.trim();
-      if (!apiKey) return flash('이미지 수정은 OpenAI 키가 필요합니다.');
+      if (!apiKey) return flash('이미지 수정은 이미지 API 키가 필요합니다.');
       if (!instruction.trim()) return;
       // 이 컷의 현재 대표 에셋 찾기.
       let curId: string | undefined;
@@ -1127,7 +1147,7 @@ export const useStore = create<State>((set, get) => {
       const scene = get().project.scenes.find((s) => s.id === sceneId);
       if (!scene) return;
       const apiKey = get().apiKey?.trim();
-      if (!apiKey) return flash('기준 배경 참조 생성은 OpenAI 키가 필요합니다.');
+      if (!apiKey) return flash('기준 배경 참조 생성은 이미지 API 키가 필요합니다.');
       // 참조 배경의 현재 에셋을 찾는다.
       const refScene = get().project.scenes.find((s) => backgroundKey(s) === refKey && s.backgroundAssetId);
       if (!refScene?.backgroundAssetId) return flash('참조할 배경을 먼저 생성하세요.');
@@ -1159,7 +1179,7 @@ export const useStore = create<State>((set, get) => {
           filename: `bg_${sceneId}.png`,
           createdAt: Date.now(),
         };
-        if (source === 'openai')
+        if (source !== 'canvas')
           void archiveImage(blob, `backgrounds/${safeFileName(scene.background || scene.title)}_참조_${timestamp()}.png`);
         const bkey = backgroundKey(scene);
         const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === bkey);
@@ -1272,7 +1292,7 @@ export const useStore = create<State>((set, get) => {
 
     generateMenuArt: async (which, opts) => {
       const { apiKey, project } = get();
-      if (!apiKey?.trim()) return flash('타이틀 AI 생성은 OpenAI 키가 필요합니다.');
+      if (!apiKey?.trim()) return flash('타이틀 AI 생성은 이미지 API 키가 필요합니다.');
       const busyKey = `menu:${which}`;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
       try {
@@ -1311,7 +1331,7 @@ export const useStore = create<State>((set, get) => {
           filename: `${which === 'main' ? 'main_menu' : 'game_menu'}.png`,
           createdAt: Date.now(),
         };
-        if (source === 'openai') void archiveImage(blob, `menu/${which}_${timestamp()}.png`);
+        if (source !== 'canvas') void archiveImage(blob, `menu/${which}_${timestamp()}.png`);
         const prev = project.menuArt?.[which];
         set((s) => ({
           assets: { ...s.assets, [id]: meta },
@@ -1320,7 +1340,7 @@ export const useStore = create<State>((set, get) => {
         if (prev) await deleteAsset(prev).catch(() => {});
         autoSave();
         flash(
-          source === 'openai'
+          source !== 'canvas'
             ? `${which === 'main' ? '타이틀' : '게임 메뉴'} 배경을 AI 로 생성했습니다.`
             : '임시(Canvas) 배경을 생성했습니다.',
         );

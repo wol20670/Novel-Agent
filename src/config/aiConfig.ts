@@ -8,16 +8,28 @@
 //   - 키가 없으면 자동으로 오프라인(Canvas/합성) 폴백이 동작한다. 이 파일은 온라인 경로의
 //     기본값일 뿐, 폴백 동작에는 영향이 없다.
 //
-//  이미지는 GPT(OpenAI gpt-image-1)로 생성한다.
+//  이미지 provider 는 둘 중 하나를 쓴다(aiConfig.provider 로 스위치).
+//   - 'novelai' : NovelAI(image.novelai.net). 서브컬쳐/애니 일러스트 품질이 월등. 기본값.
+//                 응답은 ZIP → 첫 PNG 추출. 투명배경은 생성 단계가 아니라 Director Tools
+//                 의 bg-removal 로 별도 처리. 토큰은 persistent token(pst-…).
+//   - 'openai'  : OpenAI gpt-image-1. 비-애니/폴백·비교용으로 남겨둔다.
 //  → 배경/CG/스프라이트 모두 같은 이미지 모델을 쓰되 사이즈·투명배경만 다르다.
 // ───────────────────────────────────────────────────────────────────────────
+
+/** 활성 이미지 provider. NovelAI 가 검증되면 추후 'openai' 경로를 제거할 수 있다. */
+export type ImageProvider = 'openai' | 'novelai';
 
 export type ImageQuality = 'low' | 'medium' | 'high' | 'auto';
 
 /** gpt-image-1 이 허용하는 출력 사이즈. (가로형 / 세로형 / 정방형) */
 export type GptImageSize = '1536x1024' | '1024x1536' | '1024x1024';
 
+/** NovelAI 표준(Opus 무료 ≤1MP) 출력 사이즈. (세로형 / 가로형 / 정방형) */
+export type NaiSize = '832x1216' | '1216x832' | '1024x1024';
+
 export interface AiConfig {
+  /** 활성 이미지 provider. 'novelai' 가 기본. */
+  provider: ImageProvider;
   image: {
     /** 이미지 생성 엔드포인트(OpenAI Images API). */
     endpoint: string;
@@ -60,6 +72,39 @@ export interface AiConfig {
        */
       consistency: 'appearance' | 'reference';
     };
+    /** NovelAI(image.novelai.net) 설정. provider==='novelai' 일 때 사용. */
+    novelai: {
+      /** API 호스트. 개발(Vite)에선 CORS 우회를 위해 '/nai' 프록시로 대체된다(provider 코드에서 판단). */
+      host: string;
+      /** 이미지 생성 경로(generate / img2img 공용). */
+      generatePath: string;
+      /** Director Tools(배경 제거 등) 경로. */
+      augmentPath: string;
+      /** 모델. 2026 기준 최신 = nai-diffusion-4-5-full. */
+      model: string;
+      /** 선택 가능한 모델 목록(참고/추후 UI 용). */
+      models: string[];
+      /** 샘플러. */
+      sampler: string;
+      /** 프롬프트 가이던스(CFG). NAI 권장 5~6. */
+      scale: number;
+      /** 품질 → 스텝 수. Opus 무료는 ≤28 스텝(그 이상은 Anlas 소모). */
+      steps: Record<ImageQuality, number>;
+      /** 네거티브 프리셋 번호(0=Heavy). */
+      ucPreset: number;
+      /** 공통 네거티브(uc) 프롬프트. NAI 의 핵심 디폴트(인체 오류 차단). */
+      negativePrompt: string;
+      /** 긍정 프롬프트 앞에 붙는 NAI 품질 태그. */
+      qualityTags: string;
+      /** 종류별 출력 사이즈(세로=스프라이트, 가로=배경/CG, 정방=기타). */
+      sizes: { portrait: NaiSize; landscape: NaiSize; square: NaiSize };
+      /** img2img 기본 변형 강도(0~1). 낮을수록 원본 유지. */
+      img2imgStrength: number;
+      /** 그림체 참조(vibe transfer) 기본 강도(0~1). */
+      vibeStrength: number;
+      /** 그림체 참조 정보 추출량(0~1, 1=화풍 강하게 반영). */
+      vibeInfoExtracted: number;
+    };
   };
   chat: {
     /** Chat Completions 엔드포인트(테마/표정 분류 등 텍스트 추론용). */
@@ -74,6 +119,8 @@ export interface AiConfig {
 }
 
 export const aiConfig: AiConfig = {
+  // NovelAI 가 기본. 비교/폴백이 필요하면 'openai' 로 바꾼다.
+  provider: 'novelai',
   image: {
     endpoint: 'https://api.openai.com/v1/images/generations',
     editEndpoint: 'https://api.openai.com/v1/images/edits',
@@ -82,22 +129,43 @@ export const aiConfig: AiConfig = {
     quality: { background: 'medium', cg: 'medium', sprite: 'medium' },
     landscapeRatio: 1.2,
     portraitRatio: 0.83,
+    // NovelAI 는 서브컬쳐 노벨 화풍이 모델 자체의 디폴트라, GPT 용 범용 만화풍 유도어
+    // (anime style / manga 등)나 "NOT photorealistic …" 부정문을 긍정 프롬프트에 넣지 않는다.
+    // 화풍은 모델에 맡기고, 여기엔 "매력 포인트"만 가볍게 적는다(피하고 싶은 건 negativePrompt 로).
     artStyle:
-      '고퀄리티 서브컬쳐/가챠 게임 캐릭터 일러스트 그림체, 미려하고 매력적인 캐릭터 디자인, ' +
-      '정교한 셀 셰이딩과 부드러운 그라데이션, 깨끗하고 또렷한 라인아트, 윤기나는 머리카락과 ' +
-      '디테일한 눈동자, 입체감 있는 음영과 하이라이트, 화사하고 채도 높은 색감, 프로페셔널 일러스트 퀄리티. ' +
-      '(high-quality Japanese gacha / subculture game character illustration, beautiful appealing character ' +
-      'design, refined cel shading with soft gradients, crisp clean lineart, glossy detailed hair and eyes, ' +
-      'volumetric shading — NOT photorealistic, NOT 3D, NOT a photo, NOT sketchy, NOT flat, NOT washed out)',
+      '매력적인 캐릭터 디자인, 정교한 셀 셰이딩, 윤기나는 머리카락과 디테일한 눈동자, ' +
+      '입체적인 음영과 하이라이트, 화사한 색감',
     backgroundStyle:
-      '디테일이 풍부한 비주얼노벨/애니메이션 배경 일러스트, 깊이감 있는 원근과 정교한 묘사, ' +
-      '사실적인 빛과 그림자, 분위기 있는 조명, 높은 디테일과 선명한 질감. ' +
-      '(lush, highly detailed anime-style background art, painterly and atmospheric, ' +
-      'realistic lighting and depth, rich textures, semi-realistic — no people, no characters, no text or watermark)',
+      '디테일이 풍부한 비주얼노벨 배경, 깊이감 있는 원근과 정교한 묘사, 분위기 있는 조명, 인물 없음',
     sprite: {
       size: '1024x1536',
       transparent: true,
       consistency: 'reference',
+    },
+    novelai: {
+      host: 'https://image.novelai.net',
+      generatePath: '/ai/generate-image',
+      augmentPath: '/ai/augment-image',
+      model: 'nai-diffusion-4-5-full',
+      models: ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 'nai-diffusion-4-full', 'nai-diffusion-3'],
+      sampler: 'k_euler_ancestral',
+      scale: 5,
+      // 모든 스텝을 28 이하로 유지 → Opus 무료 한도(≤1MP, ≤28스텝, 1장) 안에서 동작.
+      steps: { low: 23, medium: 28, high: 28, auto: 28 },
+      ucPreset: 0,
+      // NovelAI 호출의 핵심 디폴트. 인체 오류(손·손가락·해부학)를 원천 차단하는 고정 네거티브.
+      // 앞쪽이 사용자가 지정한 필수 토큰, 뒤쪽은 품질·중복인물 방지 보강.
+      negativePrompt:
+        'lowres, bad anatomy, bad hands, text, error, missing fingers, ' +
+        'extra digit, fewer digits, cropped, worst quality, low quality, jpeg artifacts, ' +
+        'signature, watermark, username, blurry, artist name, multiple views, multiple people',
+      // 긍정 프롬프트 앞에 붙는 NAI 품질 태그(qualityToggle 과 함께 마감 품질을 끌어올린다).
+      qualityTags: 'very aesthetic, masterpiece, best quality, highres',
+      sizes: { portrait: '832x1216', landscape: '1216x832', square: '1024x1024' },
+      img2imgStrength: 0.6,
+      // 그림체 참조(vibe transfer) 기본 강도/정보추출량(여러 장 업로드 시 각 이미지에 공통 적용).
+      vibeStrength: 0.6,
+      vibeInfoExtracted: 1.0,
     },
   },
   chat: {
@@ -114,4 +182,13 @@ export function normalizeImageSize(w: number, h: number): GptImageSize {
   if (ratio > aiConfig.image.landscapeRatio) return '1536x1024';
   if (ratio < aiConfig.image.portraitRatio) return '1024x1536';
   return '1024x1024';
+}
+
+/** 배경/CG 의 (가로,세로) 요청을 NovelAI 표준 사이즈로 정규화(Opus 무료 ≤1MP 격자). */
+export function naiSize(w: number, h: number): NaiSize {
+  const { sizes } = aiConfig.image.novelai;
+  const ratio = w / h;
+  if (ratio > aiConfig.image.landscapeRatio) return sizes.landscape;
+  if (ratio < aiConfig.image.portraitRatio) return sizes.portrait;
+  return sizes.square;
 }
