@@ -46,9 +46,6 @@ const EMOTION_TAGS: Record<string, string> = {
 const SPRITE_TAIL = 'transparent background, white background, simple background';
 const SCENE_HEAD = 'scenery, no humans';
 
-/** 한글 포함 여부 — 한글이 없으면 이미 영어 태그로 보고 LLM 변환을 건너뛴다. */
-const HANGUL = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
-
 const cache = new Map<string, Promise<string>>();
 
 function sanitize(s: string): string {
@@ -91,8 +88,8 @@ async function chat(system: string, user: string, apiKey: string): Promise<strin
 export async function compileTags(text: string, mode: CompileMode, apiKey: string): Promise<string> {
   const t = text.trim();
   if (!t) return '';
-  // 이미 영어 태그(한글 없음)이거나 키가 없으면 변환 없이 그대로 사용(GPT 호출 스킵 → 바로 NovelAI 로).
-  if (!HANGUL.test(t) || !apiKey.trim()) return t;
+  // 키가 없으면(영어 입력 모드이거나 OpenAI 키 미설정) 변환 없이 원문 그대로 사용 → 바로 NovelAI 로.
+  if (!apiKey.trim()) return t;
   const key = `${mode}|${t}`;
   const hit = cache.get(key);
   if (hit) return hit;

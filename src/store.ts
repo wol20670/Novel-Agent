@@ -167,6 +167,9 @@ interface State {
    */
   openaiKey: string;
   setOpenaiKey: (key: string) => void;
+  /** 프롬프트 입력 언어 — 'ko'(GPT 로 영문 태그 변환) / 'en'(영어 태그 그대로, 변환 스킵). */
+  promptLang: 'ko' | 'en';
+  setPromptLang: (lang: 'ko' | 'en') => void;
   /** (OpenAI 경로 전용) 이미지 생성 품질. NovelAI 는 naiMode 를 쓴다. */
   imageQuality: ImageQuality;
   setImageQuality: (q: ImageQuality) => void;
@@ -232,8 +235,11 @@ export const useStore = create<State>((set, get) => {
     }, 3500);
   };
 
+  // 번역에 쓸 키 — 입력 언어가 'en'(영어 태그 그대로)면 키를 비워 GPT 변환을 건너뛴다.
+  const translateKey = (): string => (get().promptLang === 'en' ? '' : get().openaiKey.trim());
+
   // NovelAI 경로면 프롬프트를 단부루 태그 구조로 조립한다(품질 프리픽스·감정·구조 태그).
-  // 한국어 입력 + OpenAI 키가 있을 때만 내부에서 GPT 번역이 일어나고, 영어 태그/키 없음이면 원문 그대로 사용.
+  // translateKey 가 있을 때만(=한국어 모드 + OpenAI 키) 내부에서 GPT 번역이 일어난다.
   // 실패하면 undefined → 생성기의 결정적 프롬프트로 폴백.
   const naiCompile = async (fn: () => Promise<string>): Promise<string | undefined> => {
     if (aiConfig.provider !== 'novelai') return undefined;
@@ -268,6 +274,7 @@ export const useStore = create<State>((set, get) => {
     assets: {},
     apiKey: '',
     openaiKey: '',
+    promptLang: 'ko',
     activeTab: 'scenes',
     selectedSceneId: null,
     busy: {},
@@ -419,7 +426,7 @@ export const useStore = create<State>((set, get) => {
           : char.appearance;
         const tag = outfit === '기본' ? '' : `${outfit} `;
         const promptOverride = await naiCompile(() =>
-          compileSpritePrompt({ appearance, emotion: expr, apiKey: get().openaiKey.trim() }),
+          compileSpritePrompt({ appearance, emotion: expr, apiKey: translateKey() }),
         );
         const { blob, source } = await generateSprite({
           name,
@@ -838,7 +845,7 @@ export const useStore = create<State>((set, get) => {
         const promptOverride = await naiCompile(() =>
           compileScenePrompt({
             text: [detail || scene.background || scene.title, ...scene.direction].filter(Boolean).join(', '),
-            apiKey: get().openaiKey.trim(),
+            apiKey: translateKey(),
           }),
         );
         const { blob, source } = await generateImage({
@@ -1128,7 +1135,7 @@ export const useStore = create<State>((set, get) => {
       try {
         const prompt = buildCgPrompt(key, using[0].direction);
         const promptOverride = await naiCompile(() =>
-          compileCgPrompt({ text: [key, ...using[0].direction].filter(Boolean).join(', '), apiKey: get().openaiKey.trim() }),
+          compileCgPrompt({ text: [key, ...using[0].direction].filter(Boolean).join(', '), apiKey: translateKey() }),
         );
         const { blob, source } = await generateImage({
           prompt,
@@ -1618,6 +1625,15 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    setPromptLang: (lang) => {
+      set({ promptLang: lang });
+      try {
+        localStorage.setItem('na_prompt_lang', lang);
+      } catch {
+        /* ignore */
+      }
+    },
+
     setImageQuality: (q) => {
       set({ imageQuality: q });
       try {
@@ -1669,6 +1685,14 @@ export const useStore = create<State>((set, get) => {
         }
       })();
       set({ openaiKey });
+      const savedLang = (() => {
+        try {
+          return localStorage.getItem('na_prompt_lang');
+        } catch {
+          return null;
+        }
+      })();
+      if (savedLang === 'ko' || savedLang === 'en') set({ promptLang: savedLang });
       if (loaded) {
         set({ project: loaded.project, assets: loaded.assets, apiKey, selectedSceneId: loaded.project.scenes[0]?.id ?? null });
       } else {

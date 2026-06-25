@@ -20,6 +20,8 @@ export default function LeftPanel() {
   const setApiKey = useStore((s) => s.setApiKey);
   const openaiKey = useStore((s) => s.openaiKey);
   const setOpenaiKey = useStore((s) => s.setOpenaiKey);
+  const promptLang = useStore((s) => s.promptLang);
+  const setPromptLang = useStore((s) => s.setPromptLang);
   const exportProject = useStore((s) => s.exportProject);
   const importProject = useStore((s) => s.importProject);
   const folderSupported = useStore((s) => s.folderSupported);
@@ -188,30 +190,68 @@ export default function LeftPanel() {
           {apiKey ? '키 저장됨 · NovelAI 모드' : '키 없음 · 오프라인(Canvas) 모드'}
         </div>
 
-        {/* OpenAI 키 — 텍스트 작업용(프롬프트 태그 변환 · AI 테마). 이미지 키와 별개. */}
-        <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
-          <span className="label">OpenAI 키 · 선택 (프롬프트 태그 변환 · 테마)</span>
-          <p className="text-[10px] text-gray-500 leading-snug">
-            넣으면 <b className="text-gray-400">한국어</b> 외형/배경을 <code className="text-accent">gpt-4o-mini</code>가{' '}
-            <b className="text-gray-400">단부루 태그</b>로 변환해 NovelAI 품질을 끌어올립니다(장당 ~$0.0002, 캐릭터당 1회 캐시).
-            처음부터 <b className="text-gray-400">영어 태그</b>로 적으면 변환을 <b className="text-gray-400">자동으로 건너뛰고</b> 바로
-            NovelAI 로 전송됩니다(키 불필요). 품질 프리픽스·감정·구조 태그는 어느 경우든 자동 부착.
-          </p>
-          <div className="flex gap-2">
-            <input
-              type={showOaiKey ? 'text' : 'password'}
-              className="field flex-1"
-              placeholder="sk-..."
-              value={openaiKey}
-              onChange={(e) => setOpenaiKey(e.target.value)}
-            />
-            <button className="btn-ghost" onClick={() => setShowOaiKey((v) => !v)}>
-              {showOaiKey ? '숨김' : '표시'}
-            </button>
+        {/* 프롬프트 입력 언어 + OpenAI 키(한국어 변환·테마용) */}
+        <div className="flex flex-col gap-2 pt-1 border-t border-edge/50">
+          <div className="flex flex-col gap-1">
+            <span className="label">프롬프트 입력 언어</span>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setPromptLang('ko')}
+                title="한국어로 적으면 gpt-4o-mini 가 영문 단부루 태그로 변환 (OpenAI 키 필요)"
+                className={`flex-1 text-[11px] py-1 rounded border transition-colors ${
+                  promptLang === 'ko' ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                🇰🇷 한국어 → 영문 변환
+              </button>
+              <button
+                onClick={() => setPromptLang('en')}
+                title="영어 단부루 태그를 변환 없이 바로 NovelAI 로 전송 (OpenAI 키 불필요)"
+                className={`flex-1 text-[11px] py-1 rounded border transition-colors ${
+                  promptLang === 'en' ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                🔤 영어 태그 그대로
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-500 leading-snug">
+              {promptLang === 'ko'
+                ? '한국어로 적으면 gpt-4o-mini 가 단부루 영문 태그로 변환합니다(아래 OpenAI 키 필요 · 장당 ~$0.0002 · 캐릭터당 1회 캐시).'
+                : '영어 단부루 태그를 변환 없이 바로 NovelAI 로 보냅니다(GPT 미사용 · OpenAI 키 불필요). 예: 1girl, solo, silver hair, school uniform'}
+              {' '}품질 프리픽스·감정·구조 태그는 어느 쪽이든 자동 부착됩니다.
+            </p>
           </div>
-          <div className={`text-[11px] flex items-center gap-1.5 ${openaiKey ? 'text-emerald-600' : 'text-gray-500'}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${openaiKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
-            {openaiKey ? '태그 변환 ON' : '태그 변환 OFF (결정적 프롬프트로 동작)'}
+
+          <div className="flex flex-col gap-1">
+            <span className="label">OpenAI 키 · 선택 (한국어 변환 · AI 테마)</span>
+            <div className="flex gap-2">
+              <input
+                type={showOaiKey ? 'text' : 'password'}
+                className="field flex-1"
+                placeholder="sk-..."
+                value={openaiKey}
+                onChange={(e) => setOpenaiKey(e.target.value)}
+              />
+              <button className="btn-ghost" onClick={() => setShowOaiKey((v) => !v)}>
+                {showOaiKey ? '숨김' : '표시'}
+              </button>
+            </div>
+            <div
+              className={`text-[11px] flex items-center gap-1.5 ${
+                promptLang === 'ko' && openaiKey ? 'text-emerald-600' : 'text-gray-500'
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  promptLang === 'ko' && openaiKey ? 'bg-emerald-400' : 'bg-gray-600'
+                }`}
+              />
+              {promptLang === 'en'
+                ? '영어 모드 · 변환 안 함'
+                : openaiKey
+                  ? '한국어 → 영문 변환 ON'
+                  : '변환 OFF · 한국어 원문 전달 (키 입력 권장)'}
+            </div>
           </div>
         </div>
 
