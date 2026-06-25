@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, projectExpressions, effectiveExpressions } from './types';
 import { parseText, parseWorkbook } from './parser';
-import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference } from './generators/image';
+import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, type BgRemoval } from './generators/image';
 import { compileSpritePrompt, compileScenePrompt, compileCgPrompt } from './generators/image/promptCompiler';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
@@ -176,9 +176,9 @@ interface State {
   /** NovelAI 생성 모드 — free=Opus 무료(≤1MP) / high=고품질(큰 해상도, Anlas 소모). */
   naiMode: NaiMode;
   setNaiMode: (m: NaiMode) => void;
-  /** 스프라이트 배경 누끼(Director Tool) 수행 여부 — false 면 흰 배경 유지(Anlas 절약). 기본 true. */
-  spriteBgRemoval: boolean;
-  setSpriteBgRemoval: (v: boolean) => void;
+  /** 스프라이트 누끼 방식 — browser(무료·브라우저) / novelai(Director·Anlas) / none(흰 배경). 기본 browser. */
+  bgRemovalMethod: BgRemoval;
+  setBgRemovalMethod: (m: BgRemoval) => void;
   save: () => void;
   hydrate: () => void;
   resetAll: () => void;
@@ -289,7 +289,7 @@ export const useStore = create<State>((set, get) => {
     archiveReady: false,
     imageQuality: 'medium',
     naiMode: 'free',
-    spriteBgRemoval: true,
+    bgRemovalMethod: 'browser',
 
     setRawInput: (text) => {
       set((s) => ({ project: { ...s.project, rawInput: text } }));
@@ -444,7 +444,7 @@ export const useStore = create<State>((set, get) => {
           styleReference: styleRefs?.[0],
           styleReferences: styleRefs,
           promptOverride,
-          removeBg: get().spriteBgRemoval,
+          bgRemoval: get().bgRemovalMethod,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -536,7 +536,7 @@ export const useStore = create<State>((set, get) => {
       const key = `sprite:${name}`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
-        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality, removeBg: get().spriteBgRemoval });
+        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality, bgRemoval: get().bgRemovalMethod });
         const id = assetId();
         await putAsset(id, blob);
         const tag = outfit === '기본' ? '' : `${outfit} `;
@@ -591,7 +591,7 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
         // 1) 기본 입화를 지시문대로 수정 → 새 디자인의 기준이 된다.
-        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality, removeBg: get().spriteBgRemoval });
+        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality, bgRemoval: get().bgRemovalMethod });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -1659,10 +1659,10 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
-    setSpriteBgRemoval: (v) => {
-      set({ spriteBgRemoval: v });
+    setBgRemovalMethod: (m) => {
+      set({ bgRemovalMethod: m });
       try {
-        localStorage.setItem('na_sprite_bg', v ? '1' : '0');
+        localStorage.setItem('na_bg_method', m);
       } catch {
         /* ignore */
       }
@@ -1708,8 +1708,8 @@ export const useStore = create<State>((set, get) => {
       })();
       if (savedLang === 'ko' || savedLang === 'en') set({ promptLang: savedLang });
       try {
-        const bg = localStorage.getItem('na_sprite_bg');
-        if (bg === '0') set({ spriteBgRemoval: false });
+        const m = localStorage.getItem('na_bg_method');
+        if (m === 'browser' || m === 'novelai' || m === 'none') set({ bgRemovalMethod: m });
       } catch {
         /* ignore */
       }

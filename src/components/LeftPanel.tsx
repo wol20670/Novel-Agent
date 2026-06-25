@@ -316,8 +316,8 @@ const NAI_MODE_OPTS: { key: 'free' | 'high'; label: string; hint: string }[] = [
 function NaiModeSelector() {
   const mode = useStore((s) => s.naiMode);
   const setMode = useStore((s) => s.setNaiMode);
-  const bgRemoval = useStore((s) => s.spriteBgRemoval);
-  const setBgRemoval = useStore((s) => s.setSpriteBgRemoval);
+  const bgMethod = useStore((s) => s.bgRemovalMethod);
+  const setBgMethod = useStore((s) => s.setBgRemovalMethod);
   return (
     <div className="flex flex-col gap-1">
       <span className="label">생성 모드</span>
@@ -341,19 +341,33 @@ function NaiModeSelector() {
         {NAI_MODE_OPTS.find((o) => o.key === mode)?.hint}. <b className="text-gray-400">무료</b>로 구성·일관성을
         확인하고, 최종본만 <b className="text-gray-400">고품질</b>로 재생성하면 Anlas 를 아낄 수 있어요.
       </p>
-      <label className="flex items-center gap-1.5 text-[11px] text-gray-400 cursor-pointer mt-0.5">
-        <input
-          type="checkbox"
-          checked={bgRemoval}
-          onChange={(e) => setBgRemoval(e.target.checked)}
-          className="accent-accent"
-        />
-        스프라이트 배경 누끼(투명 PNG)
-        <span className="text-[10px] text-gray-600">· Director 도구라 장당 소량 Anlas</span>
-      </label>
-      <p className="text-[10px] text-gray-600 leading-snug">
-        끄면 흰 배경으로 받아 <b className="text-gray-500">Anlas 0</b>(생성은 무료) — 단 투명배경이 아니라 실제 스프라이트론
-        부적합. 비용 추적·테스트용. (생성=무료, 누끼만 유료라 끄면 Anlas 가 안 줄어드는지로 확인 가능.)
+      <span className="label mt-1">스프라이트 누끼(투명 PNG)</span>
+      <div className="flex gap-1">
+        {(
+          [
+            { key: 'browser', label: '무료', hint: '브라우저에서 흰 배경 제거 · Anlas 0 · 오프라인' },
+            { key: 'novelai', label: 'NovelAI', hint: 'Director 툴 누끼 · 고품질이지만 장당 Anlas 소모(예: ~65)' },
+            { key: 'none', label: '안 함', hint: '흰 배경 그대로 · 직접 후처리할 때' },
+          ] as const
+        ).map((o) => (
+          <button
+            key={o.key}
+            onClick={() => setBgMethod(o.key)}
+            title={o.hint}
+            className={`flex-1 text-[11px] py-1 rounded border transition-colors ${
+              bgMethod === o.key ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-gray-500 leading-snug">
+        {bgMethod === 'browser'
+          ? '브라우저에서 무료로 흰 배경을 제거합니다(Anlas 0). 흰 배경 생성물에 최적 — 어두운 머리·옷이면 아주 깔끔.'
+          : bgMethod === 'novelai'
+            ? 'NovelAI Director 툴로 누끼(고품질, 머리카락 경계 강함) — 단 장당 Anlas 소모.'
+            : '흰 배경 그대로 둡니다(Anlas 0). 외부 툴로 직접 누끼할 때만.'}
       </p>
     </div>
   );

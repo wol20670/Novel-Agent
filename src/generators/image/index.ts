@@ -10,6 +10,16 @@ import {
   novelaiRemoveBackground,
   seedFromString,
 } from './novelaiProvider';
+import { browserRemoveBackground } from './bgRemoveLocal';
+
+/** 스프라이트 누끼 방식. browser=무료(브라우저) · novelai=Director(Anlas) · none=흰 배경 유지. */
+export type BgRemoval = 'browser' | 'novelai' | 'none';
+
+/** 선택한 방식으로 누끼 처리(none 이거나 transparent 비활성이면 원본 그대로). */
+async function applyBgRemoval(blob: Blob, method: BgRemoval, apiKey: string): Promise<Blob> {
+  if (!aiConfig.image.sprite.transparent || method === 'none') return blob;
+  return method === 'novelai' ? novelaiRemoveBackground(blob, { apiKey }) : browserRemoveBackground(blob);
+}
 import {
   aiConfig,
   naiSize,
@@ -244,8 +254,8 @@ export interface SpriteRequest {
   promptOverride?: string;
   /** 생성 품질(비용 제어). 미지정 시 sprite 기본값. */
   quality?: ImageQuality;
-  /** NovelAI 누끼(bg-removal) 수행 여부. false 면 흰 배경 유지(Anlas 절약). 기본 true. */
-  removeBg?: boolean;
+  /** 누끼 방식. 미지정 시 browser(무료). */
+  bgRemoval?: BgRemoval;
 }
 
 /** 스프라이트 생성 프롬프트(외형 설명 공유로 일관성↑). */
@@ -283,9 +293,7 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
       seed,
       styleReferences: req.styleReferences,
     });
-    if (aiConfig.image.sprite.transparent && req.removeBg !== false) {
-      blob = await novelaiRemoveBackground(blob, { apiKey });
-    }
+    blob = await applyBgRemoval(blob, req.bgRemoval ?? 'browser', apiKey);
     return { blob, source: 'novelai' };
   }
   if (apiKey) {
@@ -336,8 +344,8 @@ export async function editImage(opts: {
   size?: GptImageSize;
   /** 생성 품질(비용 제어). 미지정 시 종류별 기본값. */
   quality?: ImageQuality;
-  /** (스프라이트) NovelAI 누끼 수행 여부. 기본 true. */
-  removeBg?: boolean;
+  /** (스프라이트) 누끼 방식. 미지정 시 browser(무료). */
+  bgRemoval?: BgRemoval;
 }): Promise<ImageResult> {
   const isSprite = opts.kind === 'sprite';
   const apiKey = opts.apiKey.trim();
@@ -351,9 +359,7 @@ export async function editImage(opts: {
       steps: naiActiveSteps(),
       strength: 0.5,
     });
-    if (isSprite && aiConfig.image.sprite.transparent && opts.removeBg !== false) {
-      blob = await novelaiRemoveBackground(blob, { apiKey });
-    }
+    if (isSprite) blob = await applyBgRemoval(blob, opts.bgRemoval ?? 'browser', apiKey);
     return { blob, source: 'novelai' };
   }
   const blob = await openaiImageEdit(opts.instruction, opts.blob, {
