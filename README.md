@@ -73,9 +73,19 @@ npm run typecheck  # tsc --noEmit
 모든 외부 AI/API 설정은 **`src/config/aiConfig.ts` 한 파일**에 모여 있다. **실연동 시 이 파일 값만 바꾸면** 전체에 반영된다.
 
 - `provider`: 활성 이미지 provider — **`'novelai'`(기본)** 또는 `'openai'`. NovelAI 가 검증되면 추후 OpenAI 경로를 제거할 수 있다.
-- `image.novelai`: NovelAI 호스트·경로(생성/Director Tools)·모델(`nai-diffusion-4-5-full`)·샘플러·스텝(품질별, ≤28)·**네거티브 프롬프트**·품질태그·사이즈·vibe(그림체 참조) 강도.
+- `image.novelai`: NovelAI 호스트·경로(생성/Director Tools)·모델(`nai-diffusion-4-5-curated`, 서브컬처 미소녀 화풍 최적화)·샘플러·scale(6)·생성 모드(무료/고품질)·**네거티브 프롬프트**·품질 프리픽스·vibe(그림체 참조) 강도.
 - `image`(OpenAI): 모델(`gpt-image-1`)·품질·엔드포인트(생성/편집)·사이즈 비율·스프라이트 설정.
-- `chat`: 테마 모델(`gpt-4o-mini`)·엔드포인트·temperature. (NovelAI 는 이미지 전용 — provider 가 NovelAI 면 테마는 OpenAI 키가 없으면 오프라인 변형으로 동작.)
+- `chat`: 텍스트 모델(`gpt-4o-mini`)·엔드포인트·temperature — **프롬프트 태그 변환** + AI 테마용.
+
+### 프롬프트 태그 컴파일러 (선택 · OpenAI 키)
+NovelAI(특히 curated)는 **단부루(Danbooru) 영문 태그** 프롬프트에서 가장 잘 나온다. 좌측에 **OpenAI 키**를 함께 넣으면,
+한국어로 적은 외형/배경/CG 설명을 `gpt-4o-mini` 가 규칙대로 영문 태그로 자동 변환한다(`src/generators/image/promptCompiler.ts`):
+- 모든 긍정 프롬프트 앞에 품질 프리픽스 `masterpiece, best quality, amazing quality, light novel illustration` 자동 탑재.
+- 자연어 → 단부루 태그(예: `은발에 교복을 입은 소녀` → `1girl, solo, silver hair, school uniform`). 구형 만화풍 유도어(anime/manga 등) 제거.
+- 감정 → 가중치 태그(`기쁨` → `(smiling:1.3), (happy:1.2)` …). 기본 표정은 LLM 없이 매핑, 커스텀 표정만 번역.
+- 스프라이트엔 `transparent background, white background, simple background`, 배경엔 `scenery, no humans` 자동 부착.
+- **외형 태그는 캐릭터당 1회만 번역·캐시**해 6표정이 같은 태그를 공유(일관성). 비용 ≈ 장당 $0.0002 (사실상 무시 가능).
+- 키가 없으면 변환 없이 결정적 프롬프트로 폴백(여전히 품질 프리픽스·네거티브·구조 태그는 적용).
 - **API 키는 이 파일/깃에 두지 않는다** — 화면에서 입력 → localStorage 에만 저장. 키 없으면 Canvas/합성 오프라인 폴백.
 
 ### NovelAI 동작 방식 (요약)

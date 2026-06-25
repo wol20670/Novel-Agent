@@ -35,6 +35,8 @@ export interface ImageRequest {
   apiKey?: string;
   /** 생성 품질(비용 제어). 미지정 시 배경 기본값. */
   quality?: ImageQuality;
+  /** NovelAI 용으로 미리 컴파일된 프롬프트(단부루 태그). 있으면 이걸 그대로 쓴다. */
+  promptOverride?: string;
 }
 
 export interface ImageResult {
@@ -46,7 +48,7 @@ export async function generateImage(req: ImageRequest): Promise<ImageResult> {
   const apiKey = req.apiKey?.trim();
   if (apiKey) {
     if (useNai()) {
-      const blob = await novelaiGenerate(req.prompt, {
+      const blob = await novelaiGenerate(req.promptOverride?.trim() || req.prompt, {
         apiKey,
         size: naiSize(req.width, req.height),
         steps: naiActiveSteps(),
@@ -238,6 +240,8 @@ export interface SpriteRequest {
   styleReference?: Blob;
   /** 그림체 참조 여러 장(NovelAI vibe transfer). 화풍만 반영, 인물은 설명대로. */
   styleReferences?: Blob[];
+  /** NovelAI 용으로 미리 컴파일된 프롬프트(단부루 태그). 있으면 spritePrompt 대신 이걸 쓴다. */
+  promptOverride?: string;
   /** 생성 품질(비용 제어). 미지정 시 sprite 기본값. */
   quality?: ImageQuality;
 }
@@ -270,7 +274,7 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
     // NovelAI: 이름 기반 고정 시드 + 외형 설명 + 표정 태그로 "같은 인물, 다른 표정" 일관성 확보
     // (OpenAI 의 reference-edit 대신 NAI 의 시드 고정 방식이 더 안정적·자연스럽다).
     const seed = seedFromString(req.name);
-    let blob = await novelaiGenerate(spritePrompt(req, true), {
+    let blob = await novelaiGenerate(req.promptOverride?.trim() || spritePrompt(req, true), {
       apiKey,
       size: naiActiveSizes().portrait,
       steps: naiActiveSteps(),

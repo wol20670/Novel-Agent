@@ -171,10 +171,11 @@ export const aiConfig: AiConfig = {
       host: 'https://image.novelai.net',
       generatePath: '/ai/generate-image',
       augmentPath: '/ai/augment-image',
-      model: 'nai-diffusion-4-5-full',
-      models: ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 'nai-diffusion-4-full', 'nai-diffusion-3'],
+      // 정통 서브컬처 미소녀 게임 화풍 최적화. (API id 는 하이픈 4-5, 점 4.5 아님)
+      model: 'nai-diffusion-4-5-curated',
+      models: ['nai-diffusion-4-5-curated', 'nai-diffusion-4-5-full', 'nai-diffusion-4-full', 'nai-diffusion-3'],
       sampler: 'k_euler_ancestral',
-      scale: 5,
+      scale: 6,
       // 기본은 무료 모드(Opus 무제한). 고품질은 큰 해상도라 Anlas 를 쓴다.
       mode: 'free',
       modes: {
@@ -194,14 +195,12 @@ export const aiConfig: AiConfig = {
         },
       },
       ucPreset: 0,
-      // NovelAI 호출의 핵심 디폴트. 인체 오류(손·손가락·해부학)를 원천 차단하는 고정 네거티브.
-      // 앞쪽이 사용자가 지정한 필수 토큰, 뒤쪽은 품질·중복인물 방지 보강.
+      // NovelAI 호출의 핵심 디폴트. 인체·인쇄 오류를 원천 차단하는 고정 네거티브.
       negativePrompt:
         'lowres, bad anatomy, bad hands, text, error, missing fingers, ' +
-        'extra digit, fewer digits, cropped, worst quality, low quality, jpeg artifacts, ' +
-        'signature, watermark, username, blurry, artist name, multiple views, multiple people',
-      // 긍정 프롬프트 앞에 붙는 NAI 품질 태그(qualityToggle 과 함께 마감 품질을 끌어올린다).
-      qualityTags: 'very aesthetic, masterpiece, best quality, highres',
+        'extra digit, fewer digits, cropped, worst quality, low quality',
+      // 긍정 프롬프트 맨 앞에 자동 탑재되는 마스터클래스 품질 필터(라이트노벨 일러스트 화풍).
+      qualityTags: 'masterpiece, best quality, amazing quality, light novel illustration',
       img2imgStrength: 0.6,
       // 그림체 참조(vibe transfer) 기본 강도/정보추출량(여러 장 업로드 시 각 이미지에 공통 적용).
       vibeStrength: 0.6,

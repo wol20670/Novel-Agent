@@ -18,6 +18,8 @@ export default function LeftPanel() {
   const clearGenerated = useStore((s) => s.clearGeneratedAssets);
   const apiKey = useStore((s) => s.apiKey);
   const setApiKey = useStore((s) => s.setApiKey);
+  const openaiKey = useStore((s) => s.openaiKey);
+  const setOpenaiKey = useStore((s) => s.setOpenaiKey);
   const exportProject = useStore((s) => s.exportProject);
   const importProject = useStore((s) => s.importProject);
   const folderSupported = useStore((s) => s.folderSupported);
@@ -30,6 +32,7 @@ export default function LeftPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const projFileRef = useRef<HTMLInputElement>(null);
   const [showKey, setShowKey] = useState(false);
+  const [showOaiKey, setShowOaiKey] = useState(false);
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -184,6 +187,32 @@ export default function LeftPanel() {
           <span className={`w-1.5 h-1.5 rounded-full ${apiKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
           {apiKey ? '키 저장됨 · NovelAI 모드' : '키 없음 · 오프라인(Canvas) 모드'}
         </div>
+
+        {/* OpenAI 키 — 텍스트 작업용(프롬프트 태그 변환 · AI 테마). 이미지 키와 별개. */}
+        <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
+          <span className="label">OpenAI 키 · 선택 (프롬프트 태그 변환 · 테마)</span>
+          <p className="text-[10px] text-gray-500 leading-snug">
+            넣으면 한국어 외형/배경을 <code className="text-accent">gpt-4o-mini</code>가 <b className="text-gray-400">단부루 태그</b>로
+            변환해 NovelAI 품질을 끌어올립니다(장당 ~$0.0002, 캐릭터당 1회 캐시). 없으면 변환 없이 동작.
+          </p>
+          <div className="flex gap-2">
+            <input
+              type={showOaiKey ? 'text' : 'password'}
+              className="field flex-1"
+              placeholder="sk-..."
+              value={openaiKey}
+              onChange={(e) => setOpenaiKey(e.target.value)}
+            />
+            <button className="btn-ghost" onClick={() => setShowOaiKey((v) => !v)}>
+              {showOaiKey ? '숨김' : '표시'}
+            </button>
+          </div>
+          <div className={`text-[11px] flex items-center gap-1.5 ${openaiKey ? 'text-emerald-600' : 'text-gray-500'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${openaiKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
+            {openaiKey ? '태그 변환 ON' : '태그 변환 OFF (결정적 프롬프트로 동작)'}
+          </div>
+        </div>
+
         <NaiModeSelector />
       </section>
 

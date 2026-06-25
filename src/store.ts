@@ -3,6 +3,7 @@ import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, projectExpressions, effectiveExpressions } from './types';
 import { parseText, parseWorkbook } from './parser';
 import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference } from './generators/image';
+import { compileSpritePrompt, compileScenePrompt, compileCgPrompt } from './generators/image/promptCompiler';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
 import { aiConfig, normalizeImageSize, type ImageQuality, type NaiMode } from './config/aiConfig';
@@ -160,6 +161,12 @@ interface State {
 
   // 설정/저장
   setApiKey: (key: string) => void;
+  /**
+   * OpenAI 키(선택) — 텍스트 작업용(gpt-4o-mini): NovelAI 프롬프트 단부루 태그 변환 + AI 테마.
+   * 이미지 생성 키(apiKey)와 별개. 없으면 변환 없이 결정적 프롬프트로 폴백.
+   */
+  openaiKey: string;
+  setOpenaiKey: (key: string) => void;
   /** (OpenAI 경로 전용) 이미지 생성 품질. NovelAI 는 naiMode 를 쓴다. */
   imageQuality: ImageQuality;
   setImageQuality: (q: ImageQuality) => void;
@@ -225,6 +232,17 @@ export const useStore = create<State>((set, get) => {
     }, 3500);
   };
 
+  // NovelAI + OpenAI 키가 있을 때만 프롬프트를 단부루 태그로 컴파일. 실패하면 undefined → 결정적 프롬프트 폴백.
+  const naiCompile = async (fn: () => Promise<string>): Promise<string | undefined> => {
+    if (aiConfig.provider !== 'novelai' || !get().openaiKey?.trim()) return undefined;
+    try {
+      const out = await fn();
+      return out.trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   // 외부 업로드 이미지를 에셋으로 저장하고 id 반환.
   const uploadAsset = async (file: File, kind: AssetMeta['kind'], filename: string): Promise<string> => {
     if (!file.type.startsWith('image/')) throw new Error('이미지 파일(PNG/JPG 등)만 업로드할 수 있습니다.');
@@ -247,6 +265,7 @@ export const useStore = create<State>((set, get) => {
     project: emptyProject(),
     assets: {},
     apiKey: '',
+    openaiKey: '',
     activeTab: 'scenes',
     selectedSceneId: null,
     busy: {},
@@ -338,9 +357,8 @@ export const useStore = create<State>((set, get) => {
         flash('먼저 스토리를 분석하거나 분위기를 입력하세요.');
         return;
       }
-      // 테마는 OpenAI Chat(gpt-4o-mini)으로 만든다. provider 가 NovelAI 면 키는 NAI 토큰이라
-      // OpenAI 로 보내지 않고 오프라인 변형으로 동작한다(키가 NAI 여도 안전).
-      const chatKey = aiConfig.provider === 'openai' ? apiKey || undefined : undefined;
+      // 테마는 OpenAI Chat(gpt-4o-mini)으로 만든다. 별도 openaiKey 우선, 없으면 provider 가 OpenAI 일 때만 apiKey.
+      const chatKey = get().openaiKey?.trim() || (aiConfig.provider === 'openai' ? apiKey || undefined : undefined);
       set({ aiThemeBusy: true });
       flash(chatKey ? 'AI 테마 생성 중…' : '오프라인 테마 변형 생성 중…');
       try {
@@ -398,6 +416,9 @@ export const useStore = create<State>((set, get) => {
           ? [char.appearance, `복장/의상: ${outfitObj.appearance}`].filter(Boolean).join(', ')
           : char.appearance;
         const tag = outfit === '기본' ? '' : `${outfit} `;
+        const promptOverride = await naiCompile(() =>
+          compileSpritePrompt({ appearance, emotion: expr, apiKey: get().openaiKey.trim() }),
+        );
         const { blob, source } = await generateSprite({
           name,
           expression: expr,
@@ -409,6 +430,7 @@ export const useStore = create<State>((set, get) => {
           reference: ref,
           styleReference: styleRefs?.[0],
           styleReferences: styleRefs,
+          promptOverride,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -811,8 +833,15 @@ export const useStore = create<State>((set, get) => {
         const detail = get().project.backgroundPrompts?.[backgroundKey(scene)]?.trim();
         const prompt = buildBackgroundPrompt(detail || scene.background, scene.title, scene.direction);
         const { project, apiKey } = get();
+        const promptOverride = await naiCompile(() =>
+          compileScenePrompt({
+            text: [detail || scene.background || scene.title, ...scene.direction].filter(Boolean).join(', '),
+            apiKey: get().openaiKey.trim(),
+          }),
+        );
         const { blob, source } = await generateImage({
           prompt,
+          promptOverride,
           label: scene.background || scene.title,
           width: project.width,
           height: project.height,
@@ -1096,8 +1125,12 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
       try {
         const prompt = buildCgPrompt(key, using[0].direction);
+        const promptOverride = await naiCompile(() =>
+          compileCgPrompt({ text: [key, ...using[0].direction].filter(Boolean).join(', '), apiKey: get().openaiKey.trim() }),
+        );
         const { blob, source } = await generateImage({
           prompt,
+          promptOverride,
           label: key,
           width: project.width,
           height: project.height,
@@ -1574,6 +1607,15 @@ export const useStore = create<State>((set, get) => {
       saveApiKey(key);
     },
 
+    setOpenaiKey: (key) => {
+      set({ openaiKey: key });
+      try {
+        localStorage.setItem('na_openai_key', key);
+      } catch {
+        /* ignore */
+      }
+    },
+
     setImageQuality: (q) => {
       set({ imageQuality: q });
       try {
@@ -1617,6 +1659,14 @@ export const useStore = create<State>((set, get) => {
           return null;
         }
       })();
+      const openaiKey = (() => {
+        try {
+          return localStorage.getItem('na_openai_key') ?? '';
+        } catch {
+          return '';
+        }
+      })();
+      set({ openaiKey });
       if (loaded) {
         set({ project: loaded.project, assets: loaded.assets, apiKey, selectedSceneId: loaded.project.scenes[0]?.id ?? null });
       } else {
