@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { EXPRESSIONS, type Expression, type Scene } from '../types';
+import { effectiveExpressions, emojiFor, type Expression, type Scene } from '../types';
 import { backgroundKey, bgmKey, hasBgm } from '../renpy/generate';
 import { ALL_MOODS } from '../generators/audio/moods';
 import { useAssetUrl } from './useAssetUrl';
@@ -107,6 +107,7 @@ export default function AssetsTab() {
           안 적어도 대사 문맥으로 자동 선택됩니다.
         </p>
         <StyleRefRow />
+        <ExpressionEditor />
         {characters.length === 0 && <p className="text-gray-600 text-sm">등장 캐릭터 없음</p>}
         <div className="grid grid-cols-2 gap-3">
           {characters.filter((c) => !c.isProtagonist).map((c) => (
@@ -270,6 +271,124 @@ function StyleRefRow() {
   );
 }
 
+/** 표정 칩 — 클릭하면 이름 편집(엔터 확정 / Esc 취소). '기본'은 고정. */
+function ExpressionChip({
+  name,
+  onRename,
+  onRemove,
+}: {
+  name: string;
+  onRename: (next: string) => void;
+  onRemove: () => void;
+}) {
+  const fixed = name === '기본';
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(name);
+  if (editing && !fixed) {
+    const commit = () => {
+      setEditing(false);
+      const next = val.trim();
+      if (next && next !== name) onRename(next);
+      else setVal(name);
+    };
+    return (
+      <input
+        autoFocus
+        className="field text-xs w-24 py-0.5"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+          if (e.key === 'Escape') {
+            setEditing(false);
+            setVal(name);
+          }
+        }}
+      />
+    );
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded border border-edge px-2 py-0.5 text-xs ${
+        fixed ? 'bg-ink/60 text-gray-400' : 'bg-ink'
+      }`}
+    >
+      <span>{emojiFor(name)}</span>
+      <button
+        className="hover:text-accent disabled:cursor-default"
+        disabled={fixed}
+        onClick={() => {
+          setVal(name);
+          setEditing(true);
+        }}
+        title={fixed ? '기본 표정은 고정' : '이름 변경'}
+      >
+        {name}
+      </button>
+      {!fixed && (
+        <button className="text-gray-600 hover:text-rose-500 leading-none" onClick={onRemove} title="이 표정 삭제">
+          ×
+        </button>
+      )}
+    </span>
+  );
+}
+
+/** 표정 세트 편집 — 추가/이름변경/삭제('기본'은 고정). 전 캐릭터 공통. */
+function ExpressionEditor() {
+  const exprs = effectiveExpressions(useStore((s) => s.project.expressions));
+  const addExpression = useStore((s) => s.addExpression);
+  const renameExpression = useStore((s) => s.renameExpression);
+  const removeExpression = useStore((s) => s.removeExpression);
+  const [adding, setAdding] = useState('');
+  const submit = () => {
+    if (adding.trim()) {
+      addExpression(adding.trim());
+      setAdding('');
+    }
+  };
+  return (
+    <div className="card border-edge p-2.5 mb-3">
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-xs text-gray-300 font-semibold">😀 표정 세트 · {exprs.length}종</p>
+        <span className="text-[10px] text-gray-500">이름을 바꾸거나 칸을 늘릴 수 있어요 · '기본'은 고정</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {exprs.map((ex) => (
+          <ExpressionChip
+            key={ex}
+            name={ex}
+            onRename={(next) => renameExpression(ex, next)}
+            onRemove={() => {
+              if (
+                window.confirm(
+                  `'${ex}' 표정을 삭제할까요?\n이 표정으로 만든 모든 캐릭터 입화도 함께 삭제됩니다.`,
+                )
+              )
+                removeExpression(ex);
+            }}
+          />
+        ))}
+      </div>
+      <div className="flex gap-1.5 mt-2">
+        <input
+          className="field text-xs flex-1"
+          placeholder="새 표정 이름 (예: 당황, 황당, 윙크) — 엔터로 추가"
+          value={adding}
+          onChange={(e) => setAdding(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit();
+          }}
+        />
+        <button className="btn-ghost text-[11px]" disabled={!adding.trim()} onClick={submit}>
+          ＋ 추가
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CharacterCard({ name }: { name: string }) {
   const c = useStore((s) => s.project.characters.find((x) => x.name === name))!;
   const updateChar = useStore((s) => s.updateCharacter);
@@ -281,7 +400,8 @@ function CharacterCard({ name }: { name: string }) {
   const importSprite = useStore((s) => s.importSprite);
   const clearAll = useStore((s) => s.clearCharacterSprites);
   const busy = useStore((s) => s.busy[`sprite:${name}`]);
-  const hasAny = EXPRESSIONS.some((ex) => c.expressions[ex as Expression]);
+  const exprList = effectiveExpressions(useStore((s) => s.project.expressions));
+  const hasAny = exprList.some((ex) => c.expressions[ex]);
   const hasBase = !!c.expressions['기본'];
 
   return (
@@ -345,7 +465,7 @@ function CharacterCard({ name }: { name: string }) {
         )}
       </div>
       <div className="grid grid-cols-3 gap-1.5">
-        {EXPRESSIONS.map((ex) => (
+        {exprList.map((ex) => (
           <ExpressionThumb
             key={ex}
             name={name}

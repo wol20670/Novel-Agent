@@ -1,5 +1,5 @@
 import { useStore } from '../store';
-import { SCENE_STATUS_LABEL, EXPRESSIONS, EXPR_EMOJI, type SceneStatus, type Expression, type Line } from '../types';
+import { SCENE_STATUS_LABEL, effectiveExpressions, emojiFor, type SceneStatus, type Expression, type Line } from '../types';
 import { inferEmotion } from '../generators/emotion';
 import { useAssetUrl } from './useAssetUrl';
 import Spinner from './Spinner';
@@ -185,6 +185,7 @@ function LineEmotion({
   direction: string[];
 }) {
   const setEmotion = useStore((s) => s.setLineEmotion);
+  const exprList = effectiveExpressions(useStore((s) => s.project.expressions));
   // 화면에 안 서는 화자(주인공 등)는 표정 의미가 없으니 선택기를 숨긴다.
   const narrationOnly = useStore(
     (s) => !line.members?.length && !!s.project.characters.find((c) => c.name === line.speaker)?.isProtagonist,
@@ -203,10 +204,10 @@ function LineEmotion({
       onChange={(e) => setEmotion(sceneId, index, (e.target.value || undefined) as Expression | undefined)}
       title="이 대사의 표정 — 자동(대사 분석) 또는 직접 선택"
     >
-      <option value="">자동 · {EXPR_EMOJI[auto]}{auto}</option>
-      {EXPRESSIONS.map((ex) => (
+      <option value="">자동 · {emojiFor(auto)}{auto}</option>
+      {exprList.map((ex) => (
         <option key={ex} value={ex}>
-          {EXPR_EMOJI[ex as Expression]} {ex}
+          {emojiFor(ex)} {ex}
         </option>
       ))}
     </select>

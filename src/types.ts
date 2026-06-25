@@ -10,14 +10,24 @@ export const SCENE_STATUS_LABEL: Record<SceneStatus, string> = {
   needs_fix: '수정필요',
 };
 
-/** 표준 표정 세트 (캐릭터 스프라이트). */
-export const EXPRESSIONS = ['기본', '기쁨', '슬픔', '화남', '놀람', '수줍음'] as const;
-export type Expression = (typeof EXPRESSIONS)[number];
+/** 기본 표정 세트. 프로젝트가 커스텀 목록(project.expressions)을 두지 않으면 이게 쓰인다. */
+export const DEFAULT_EXPRESSIONS = ['기본', '기쁨', '슬픔', '화남', '놀람', '수줍음'] as const;
+/** 호환용 별칭(기존 코드의 "기본 목록" 참조). */
+export const EXPRESSIONS = DEFAULT_EXPRESSIONS;
+/** 표정 이름. 사용자가 추가/이름변경할 수 있어 자유 문자열이다('기본'은 항상 존재·고정). */
+export type Expression = string;
 
-/** 표정 표시용 이모지 (UI 공통). */
-export const EXPR_EMOJI: Record<Expression, string> = {
+/** 알려진 표정의 표시 이모지(UI 공통). 커스텀 표정은 emojiFor 로 기본 이모지를 준다. */
+export const EXPR_EMOJI: Record<string, string> = {
   기본: '😐', 기쁨: '😊', 슬픔: '😢', 화남: '😠', 놀람: '😲', 수줍음: '😳',
+  // 자주 쓰는 추가 표정 후보(목록에 없어도 무방, 있으면 이모지가 붙는다).
+  당황: '😨', 황당: '😑', 무표정: '😶', 미소: '🙂', 울음: '😭', 분노: '😡', 윙크: '😉',
 };
+
+/** 표정 이름 → 이모지(목록에 없으면 기본 🎭). */
+export function emojiFor(name: string): string {
+  return EXPR_EMOJI[name] ?? '🎭';
+}
 
 export type Line =
   | {
@@ -105,6 +115,11 @@ export interface Project {
   /** AI 테마 생성에 쓰는 분위기/요청 텍스트(선택). */
   mood?: string;
   /**
+   * 캐릭터 표정 세트(선택). 사용자가 추가/이름변경할 수 있다. 비어 있으면 DEFAULT_EXPRESSIONS.
+   * '기본'은 항상 포함되며(스프라이트 기준 입화) 이름변경·삭제 불가.
+   */
+  expressions?: string[];
+  /**
    * 게임 내 "크레딧/라이선스 고지" 화면에 표시할 자유 텍스트(선택).
    * 사용한 일러스트·BGM·효과음·성우 등의 출처/라이선스를 적는다(상업 배포 전 필수 정리).
    */
@@ -140,6 +155,17 @@ export interface Project {
 }
 
 export type GuiOverrides = NonNullable<Project['guiOverrides']>;
+
+/** 프로젝트의 유효 표정 목록('기본'을 항상 맨 앞에 포함). list 미지정/빈 배열이면 기본 세트. */
+export function effectiveExpressions(list?: string[]): string[] {
+  const base = list && list.length ? list.slice() : [...DEFAULT_EXPRESSIONS];
+  return base.includes('기본') ? base : ['기본', ...base];
+}
+
+/** 프로젝트 객체에서 유효 표정 목록을 구한다. */
+export function projectExpressions(p: Project): string[] {
+  return effectiveExpressions(p.expressions);
+}
 
 export function emptyProject(): Project {
   return {

@@ -8,7 +8,7 @@ import { inferEmotion } from '../generators/emotion';
 import { canvasSprite } from '../generators/image/canvasSprite';
 import { getAsset } from '../storage/assetStore';
 import { spreadPositions } from '../renpy/generate';
-import { EXPR_EMOJI, type Scene, type Character, type Expression, type Line } from '../types';
+import { emojiFor, type Scene, type Character, type Expression, type Line } from '../types';
 
 const speakersOf = (l: Line): string[] =>
   l.kind === 'dialogue' ? (l.members?.length ? l.members : [l.speaker]) : [];
@@ -109,7 +109,7 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
                 {name}
                 {showEmo && (
                   <span className="ml-1.5 text-[11px] font-normal opacity-90">
-                    {EXPR_EMOJI[curEmo]} {curEmo}
+                    {emojiFor(curEmo)} {curEmo}
                   </span>
                 )}
               </div>

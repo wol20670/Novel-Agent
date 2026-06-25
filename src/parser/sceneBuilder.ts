@@ -2,7 +2,6 @@
 // 두 파서 모두 (화자, 본문) 형태의 "행"으로 정규화한 뒤 이 빌더에 흘려보낸다.
 
 import type { Scene, Choice, Character, Expression } from '../types';
-import { EXPRESSIONS } from '../types';
 
 const PALETTE = [
   '#9fd3ff', '#ffb3c7', '#c8ffc8', '#ffe5a3',
@@ -114,8 +113,8 @@ export class SceneBuilder {
       name = m[1].trim();
       emo = m[2].trim();
     }
-    const valid =
-      emo && (EXPRESSIONS as readonly string[]).includes(emo) ? (emo as Expression) : undefined;
+    // 표정 이름은 자유 문자열(사용자 커스텀 가능) → 비어있지 않으면 그대로 채택(작가 신뢰).
+    const valid: Expression | undefined = emo ? emo : undefined;
     this.speakers.add(name);
     sc.lines.push({ kind: 'dialogue', speaker: name, text: text.trim(), emotion: valid });
   }

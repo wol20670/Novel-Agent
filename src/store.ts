@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
-import { emptyProject, EXPRESSIONS } from './types';
+import { emptyProject, projectExpressions, effectiveExpressions } from './types';
 import { parseText, parseWorkbook } from './parser';
 import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference } from './generators/image';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
@@ -99,6 +99,11 @@ interface State {
   removeStyleRef: (id: string) => Promise<void>;
   /** 그림체 참조 전체 해제. */
   clearStyleRefs: () => Promise<void>;
+
+  // 표정 세트 편집 (추가 / 이름변경 / 삭제). '기본'은 고정(이름변경·삭제 불가).
+  addExpression: (name: string) => void;
+  renameExpression: (oldName: string, newName: string) => void;
+  removeExpression: (name: string) => Promise<void>;
 
   // 에셋 생성
   generateBackground: (sceneId: string) => Promise<void>;
@@ -423,9 +428,10 @@ export const useStore = create<State>((set, get) => {
       // 일관성(reference) 모드 + 키 있음: '기본'을 먼저 만들고, 그 입화를 기준으로
       // 나머지 표정은 "표정만" 편집해 같은 인물로 유지한다. 그 외엔 각자 생성.
       const useRef = !!get().apiKey && aiConfig.image.sprite.consistency === 'reference';
+      const exprs = projectExpressions(get().project);
       const ordered: Expression[] = useRef
-        ? ['기본', ...EXPRESSIONS.filter((e) => e !== '기본')]
-        : [...EXPRESSIONS];
+        ? ['기본', ...exprs.filter((e) => e !== '기본')]
+        : [...exprs];
       let reference: Blob | undefined;
       for (const expr of ordered) {
         const blob = await get().generateCharacterSprite(
@@ -435,7 +441,7 @@ export const useStore = create<State>((set, get) => {
         );
         if (useRef && expr === '기본' && blob) reference = blob;
       }
-      flash(`${name} 스프라이트 ${EXPRESSIONS.length}종 생성 완료.`);
+      flash(`${name} 스프라이트 ${exprs.length}종 생성 완료.`);
     },
 
     generateCharacterBase: async (name) => {
@@ -529,7 +535,9 @@ export const useStore = create<State>((set, get) => {
         await deleteAsset(baseId).catch(() => {});
         autoSave();
         // 2) 이미 만들어둔 다른 표정도 새 기본을 기준으로 다시 그려 디자인을 맞춘다.
-        const others = EXPRESSIONS.filter((e) => e !== '기본' && char.expressions[e as Expression]);
+        const others = projectExpressions(get().project).filter(
+          (e) => e !== '기본' && char.expressions[e as Expression],
+        );
         for (const expr of others) {
           await get().generateCharacterSprite(name, expr as Expression, blob);
         }
@@ -606,6 +614,75 @@ export const useStore = create<State>((set, get) => {
         },
       }));
       autoSave();
+    },
+
+    addExpression: (name) => {
+      const n = name.trim();
+      if (!n) return;
+      const cur = effectiveExpressions(get().project.expressions);
+      if (cur.includes(n)) return flash('이미 있는 표정입니다.');
+      set((s) => ({ project: { ...s.project, expressions: [...cur, n] } }));
+      autoSave();
+      flash(`'${n}' 표정을 추가했습니다.`);
+    },
+
+    renameExpression: (oldName, newName) => {
+      const next = newName.trim();
+      if (oldName === '기본') return flash('기본 표정은 이름을 바꿀 수 없습니다.');
+      if (!next || next === oldName) return;
+      const cur = effectiveExpressions(get().project.expressions);
+      if (!cur.includes(oldName)) return;
+      if (cur.includes(next)) return flash('이미 있는 표정 이름입니다.');
+      set((s) => ({
+        project: {
+          ...s.project,
+          expressions: cur.map((e) => (e === oldName ? next : e)),
+          // 각 캐릭터의 표정→에셋 키 이전(이미 만든 입화 유지).
+          characters: s.project.characters.map((c) => {
+            if (!(oldName in c.expressions)) return c;
+            const ex = { ...c.expressions };
+            ex[next] = ex[oldName];
+            delete ex[oldName];
+            return { ...c, expressions: ex };
+          }),
+          // 대사에 지정된 표정 이름도 함께 이전.
+          scenes: s.project.scenes.map((sc) => ({
+            ...sc,
+            lines: sc.lines.map((l) =>
+              l.kind === 'dialogue' && l.emotion === oldName ? { ...l, emotion: next } : l,
+            ),
+          })),
+        },
+      }));
+      autoSave();
+      flash(`표정 이름을 '${oldName}' → '${next}' 로 바꿨습니다.`);
+    },
+
+    removeExpression: async (name) => {
+      if (name === '기본') return flash('기본 표정은 삭제할 수 없습니다.');
+      const cur = effectiveExpressions(get().project.expressions);
+      if (!cur.includes(name)) return;
+      // 해당 표정으로 만든 입화 에셋 수집(삭제용).
+      const toDelete: string[] = [];
+      for (const c of get().project.characters) {
+        const id = c.expressions[name];
+        if (id) toDelete.push(id);
+      }
+      set((s) => ({
+        project: {
+          ...s.project,
+          expressions: cur.filter((e) => e !== name),
+          characters: s.project.characters.map((c) => {
+            if (!(name in c.expressions)) return c;
+            const ex = { ...c.expressions };
+            delete ex[name];
+            return { ...c, expressions: ex };
+          }),
+        },
+      }));
+      for (const id of toDelete) await deleteAsset(id).catch(() => {});
+      autoSave();
+      flash(`'${name}' 표정을 삭제했습니다.`);
     },
 
     generateBackground: async (sceneId) => {
