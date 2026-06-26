@@ -353,6 +353,8 @@ export const TAG_DICTIONARY: TagEntry[] = [
   // Expression
   { ko: ['화난'], en: 'angry', cat: 'Expression' },
   { ko: ['부끄러워하는', '홍조', '부끄러운 표정'], en: 'blush', cat: 'Expression' },
+  { ko: ['수줍음'], en: 'blushing, shy', cat: 'Expression' },
+  { ko: ['밝은 미소'], en: 'bright smile', cat: 'Expression' },
   { ko: ['슬픈', '우는'], en: 'crying, tears', cat: 'Expression' },
   { ko: ['무표정한'], en: 'expressionless', cat: 'Expression' },
   { ko: ['빛나는 눈'], en: 'glowing eyes', cat: 'Expression' },
@@ -749,7 +751,10 @@ export const TAG_DICTIONARY: TagEntry[] = [
   // Lighting
   { ko: ['역광'], en: 'backlight', cat: 'Lighting' },
   { ko: ['시네마틱 조명', '시네마틱 라이팅'], en: 'cinematic lighting', cat: 'Lighting' },
+  { ko: ['드라마틱한 조명'], en: 'dramatic lighting', cat: 'Lighting' },
   { ko: ['빛줄기', '광선', '광선 효과'], en: 'light rays', cat: 'Lighting' },
+  { ko: ['자연광'], en: 'natural lighting, sunlight', cat: 'Lighting' },
+  { ko: ['밤'], en: 'night, dark, moonlight', cat: 'Lighting' },
   { ko: ['측면 조명'], en: 'sidelighting', cat: 'Lighting' },
   { ko: ['부드러운 조명'], en: 'soft lighting', cat: 'Lighting' },
   { ko: ['무대 조명'], en: 'stage lights, spotlight', cat: 'Lighting' },
@@ -790,44 +795,103 @@ export const TAG_DICTIONARY: TagEntry[] = [
   { ko: ['섬세한 디테일'], en: 'intricate details', cat: 'Quality' },
   { ko: ['윤기나는 피부'], en: 'lustrous skin', cat: 'Quality' },
   { ko: ['최고 품질', '걸작', 'NAI V2부터 제외'], en: 'masterpiece', cat: 'Quality' },
+  { ko: ['고품질'], en: 'masterpiece, best quality, ultra-detailed', cat: 'Quality' },
   { ko: ['초상화', '얼굴부터 어깨까지 노출'], en: 'portrait', cat: 'Quality' },
   { ko: ['울트라 HD'], en: 'UHD', cat: 'Quality' },
+  { ko: ['초고해상도'], en: 'ultra high resolution', cat: 'Quality' },
   { ko: ['매우 미적인'], en: 'very aesthetic', cat: 'Quality' },
   { ko: ['최상위 미학 품질', 'waifu scorer 기반'], en: 'very awa', cat: 'Quality' },
+  // Academy
+  { ko: ['방과후'], en: 'after school', cat: 'Academy' },
   // Pattern
   { ko: ['미국 국기 무늬'], en: 'american flag', cat: 'Pattern' },
+  // Art Style
+  { ko: ['애니메이션 스타일'], en: 'anime style, cel shaded', cat: 'Art Style' },
+  // Pattern
   { ko: ['아가일', '◆ 무늬'], en: 'argyle', cat: 'Pattern' },
+  // Action
+  { ko: ['갑옷'], en: 'armor', cat: 'Action' },
+  { ko: ['전투 장면'], en: 'battle scene', cat: 'Action' },
+  // Pattern
   { ko: ['곰 무늬'], en: 'bear', cat: 'Pattern' },
+  // Appearance
+  { ko: ['금발'], en: 'blonde hair', cat: 'Appearance' },
   // Detail
   { ko: ['피 묻은 옷'], en: 'blood on clothes', cat: 'Detail' },
+  // Action
+  { ko: ['피 묻은'], en: 'bloodstained', cat: 'Action' },
+  // Appearance
+  { ko: ['파란 머리카락'], en: 'blue hair', cat: 'Appearance' },
   // Pattern
   { ko: ['토끼 무늬'], en: 'bunny', cat: 'Pattern' },
   { ko: ['위장 무늬'], en: 'camouflage', cat: 'Pattern' },
+  // Costume
+  { ko: ['캐주얼 원피스'], en: 'casual dress, frills', cat: 'Costume' },
+  // Pattern
   { ko: ['고양이 무늬'], en: 'cat', cat: 'Pattern' },
   { ko: ['체크 무늬'], en: 'checkered', cat: 'Pattern' },
+  // Academy
+  { ko: ['교실'], en: 'classroom', cat: 'Academy' },
+  // Dark Fantasy
+  { ko: ['어두운 분위기'], en: 'dark atmosphere', cat: 'Dark Fantasy' },
+  // Idol
+  { ko: ['화려한 조명'], en: 'dazzling lights', cat: 'Idol' },
+  // Pattern
   { ko: ['사선 줄무늬'], en: 'diagonal-striped', cat: 'Pattern' },
   // Action_Pose
   { ko: ['역동적인 포즈'], en: 'dynamic pose', cat: 'Action_Pose' },
+  // Appearance
+  { ko: ['눈동자 색상'], en: 'eye color', cat: 'Appearance' },
   // Pattern
   { ko: ['국기 무늬'], en: 'flag', cat: 'Pattern' },
+  // Composition
+  { ko: ['정면 샷'], en: 'front view', cat: 'Composition' },
   // Action_Pose
   { ko: ['마이크 잡기'], en: 'holding microphone', cat: 'Action_Pose' },
   { ko: ['무기를 쥐고 있는'], en: 'holding weapon', cat: 'Action_Pose' },
+  // Idol
+  { ko: ['아이돌 의상'], en: 'idol costume', cat: 'Idol' },
   // Weapon
   { ko: ['일본도', '카타나'], en: 'katana', cat: 'Weapon' },
   // Pattern
   { ko: ['레이스'], en: 'lace', cat: 'Pattern' },
+  // Idol
+  { ko: ['라이브 콘서트'], en: 'live concert', cat: 'Idol' },
+  // Composition
+  { ko: ['로우 앵글'], en: 'low angle', cat: 'Composition' },
+  // Dark Fantasy
+  { ko: ['마법진'], en: 'magic circle', cat: 'Dark Fantasy' },
+  // Idol
+  { ko: ['마이크'], en: 'microphone', cat: 'Idol' },
+  // Slice of Life
+  { ko: ['평화로운'], en: 'peaceful', cat: 'Slice of Life' },
+  // Art Style
+  { ko: ['사실적인'], en: 'photorealistic, realistic', cat: 'Art Style' },
+  // Pattern
   { ko: ['격자 무늬'], en: 'plaid', cat: 'Pattern' },
   { ko: ['물방울 무늬'], en: 'polka dot', cat: 'Pattern' },
   { ko: ['인쇄한 무늬'], en: 'print', cat: 'Pattern' },
   { ko: ['무지개 무늬'], en: 'rainbow', cat: 'Pattern' },
   { ko: ['골지 문양'], en: 'ribbed', cat: 'Pattern' },
+  // Costume
+  { ko: ['교복'], en: 'school uniform, sailor collar', cat: 'Costume' },
   // Detail
   { ko: ['반짝이는 머릿결'], en: 'shiny hair', cat: 'Detail' },
+  // Idol
+  { ko: ['무대'], en: 'stage', cat: 'Idol' },
   // Pattern
   { ko: ['딸기 무늬'], en: 'strawberry', cat: 'Pattern' },
   { ko: ['줄무늬'], en: 'striped', cat: 'Pattern' },
+  // Academy
+  { ko: ['학생'], en: 'student', cat: 'Academy' },
+  // Slice of Life
+  { ko: ['햇살'], en: 'sunlight', cat: 'Slice of Life' },
+  // Composition
+  { ko: ['상반신'], en: 'upper body', cat: 'Composition' },
+  // Pattern
   { ko: ['세로 줄무늬'], en: 'vertical-striped', cat: 'Pattern' },
+  // Composition
+  { ko: ['광각 렌즈'], en: 'wide angle', cat: 'Composition' },
   // @generated:end
 ];
 
