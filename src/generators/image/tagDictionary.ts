@@ -32,56 +32,48 @@ export const TAG_DICTIONARY: TagEntry[] = [
   // @generated:start
   // Clothing
   { ko: ['교복', '세일러복'], en: 'school uniform, serafuku', cat: 'Clothing' },
-  { ko: ['정장', '바지 정장'], en: 'business suit, pantsuit', cat: 'Clothing' },
-  { ko: ['캐주얼 복장', '평상복'], en: 'casual wear', cat: 'Clothing' },
+  { ko: ['정장', '바지'], en: 'business suit, pantsuit', cat: 'Clothing' },
+  { ko: ['캐주얼 복장'], en: 'casual wear', cat: 'Clothing' },
   { ko: ['드레스'], en: 'dress', cat: 'Clothing' },
-
   // Accessory
   { ko: ['안경'], en: 'glasses', cat: 'Accessory' },
   { ko: ['귀걸이'], en: 'earrings', cat: 'Accessory' },
   { ko: ['넥타이', '리본'], en: 'necktie, bowtie', cat: 'Accessory' },
-
   // Background
-  { ko: ['단순한 배경', '심플 배경'], en: 'simple background', cat: 'Background' },
-  { ko: ['흰색 배경', '흰 배경'], en: 'white background', cat: 'Background' },
+  { ko: ['단순한 배경'], en: 'simple background', cat: 'Background' },
+  { ko: ['흰색 배경'], en: 'white background', cat: 'Background' },
   { ko: ['단색 배경'], en: 'monochrome background', cat: 'Background' },
-  { ko: ['투명한 배경', '투명 배경'], en: 'transparent background', cat: 'Background' },
-
+  { ko: ['투명한 배경'], en: 'transparent background', cat: 'Background' },
   // Lighting
   { ko: ['시네마틱 조명'], en: 'cinematic lighting', cat: 'Lighting' },
   { ko: ['역광'], en: 'backlight', cat: 'Lighting' },
   { ko: ['부드러운 조명'], en: 'soft lighting', cat: 'Lighting' },
   { ko: ['빛줄기', '광선'], en: 'light rays', cat: 'Lighting' },
-
   // Effect
   { ko: ['렌즈 플레어'], en: 'lens flare', cat: 'Effect' },
-  { ko: ['피사계 심도', '배경 흐림', '아웃포커싱'], en: 'depth of field', cat: 'Effect' },
+  { ko: ['피사계 심도'], en: 'depth of field', cat: 'Effect' },
   { ko: ['입자 효과', '반짝임'], en: 'particle effects, sparkles', cat: 'Effect' },
-
   // Style
-  { ko: ['다채로운 색감', '화려한 색감'], en: 'colorful', cat: 'Style' },
-
+  { ko: ['다채로운 색감'], en: 'colorful', cat: 'Style' },
   // Expression
-  { ko: ['미소 짓는', '미소'], en: 'smile', cat: 'Expression' },
+  { ko: ['미소 짓는'], en: 'smile', cat: 'Expression' },
   { ko: ['입을 벌린'], en: 'open mouth', cat: 'Expression' },
-  { ko: ['부끄러워하는', '홍조', '볼 빨개짐'], en: 'blush', cat: 'Expression' },
+  { ko: ['부끄러워하는', '홍조'], en: 'blush', cat: 'Expression' },
   { ko: ['화난'], en: 'angry', cat: 'Expression' },
   { ko: ['슬픈', '우는'], en: 'crying, tears', cat: 'Expression' },
-  { ko: ['무표정한', '무표정'], en: 'expressionless', cat: 'Expression' },
-  { ko: ['윙크하는', '윙크'], en: 'wink', cat: 'Expression' },
+  { ko: ['무표정한'], en: 'expressionless', cat: 'Expression' },
+  { ko: ['윙크하는'], en: 'wink', cat: 'Expression' },
   { ko: ['당황한', '땀방울'], en: 'sweatdrop', cat: 'Expression' },
-  { ko: ['자신만만한', '의기양양한'], en: 'smug', cat: 'Expression' },
-
+  { ko: ['자신만만한'], en: 'smug', cat: 'Expression' },
   // Camera
   { ko: ['전신'], en: 'full body', cat: 'Camera' },
   { ko: ['허벅지 위', '카우보이 샷'], en: 'cowboy shot', cat: 'Camera' },
   { ko: ['상반신'], en: 'upper body', cat: 'Camera' },
-  { ko: ['얼굴 접사', '클로즈업'], en: 'close-up', cat: 'Camera' },
-  { ko: ['정면을 보는', '정면 응시'], en: 'looking at viewer', cat: 'Camera' },
+  { ko: ['얼굴 접사'], en: 'close-up', cat: 'Camera' },
+  { ko: ['정면을 보는'], en: 'looking at viewer', cat: 'Camera' },
   { ko: ['위에서 아래로', '하이 앵글'], en: 'from above', cat: 'Camera' },
   { ko: ['아래서 위로', '로우 앵글'], en: 'from below', cat: 'Camera' },
-  { ko: ['역동적인 구도', '다이내믹 앵글'], en: 'dynamic angle', cat: 'Camera' },
-
+  { ko: ['역동적인 구도'], en: 'dynamic angle', cat: 'Camera' },
   // Quality
   { ko: ['최고 품질'], en: 'masterpiece', cat: 'Quality' },
   { ko: ['고품질'], en: 'best quality', cat: 'Quality' },
@@ -89,10 +81,9 @@ export const TAG_DICTIONARY: TagEntry[] = [
   { ko: ['고해상도'], en: 'highres', cat: 'Quality' },
   { ko: ['섬세한 묘사'], en: 'highly detailed', cat: 'Quality' },
   { ko: ['터무니없는', '초고퀄'], en: 'absurdres', cat: 'Quality' },
-
   // Subject
-  { ko: ['1명의 여성', '여성 1명'], en: '1girl', cat: 'Subject' },
-  { ko: ['1명의 남성', '남성 1명'], en: '1boy', cat: 'Subject' },
+  { ko: ['1명의 여성'], en: '1girl', cat: 'Subject' },
+  { ko: ['1명의 남성'], en: '1boy', cat: 'Subject' },
   // @generated:end
 ];
 
