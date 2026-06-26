@@ -96,6 +96,8 @@ interface State {
   generateCharacterSprite: (name: string, expr: Expression, reference?: Blob, outfit?: string, seed?: number) => Promise<Blob | undefined>;
   /** 이미 생성된 입화를 지시문대로 미세 수정(예: "머리를 더 길게"). 키 필요. */
   refineSprite: (name: string, expr: Expression, instruction: string, outfit?: string) => Promise<void>;
+  /** 정밀 수정 — 원본 이미지를 보존(img2img)하며 지시만 반영. 포즈·구도 유지, Anlas 소모. */
+  refineSpritePrecise: (name: string, expr: Expression, instruction: string, outfit?: string) => Promise<void>;
 
   // 캐릭터 의상(복장) — 의상마다 표정 세트를 따로 가진다. #복장 태그로 장면별 지정.
   addOutfit: (charName: string, name: string, appearance?: string) => void;
@@ -682,6 +684,78 @@ export const useStore = create<State>((set, get) => {
         flash(`${name} · ${tag}${expr} 입화를 수정했습니다.`);
       } catch (e) {
         flash(`수정 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [key]: false } }));
+      }
+    },
+
+    refineSpritePrecise: async (name, expr, instruction, outfit = '기본') => {
+      const char = get().project.characters.find((c) => c.name === name);
+      if (!char) return;
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('정밀 수정은 이미지 API 키가 필요합니다.');
+      if (!instruction.trim()) return;
+      const outfitObj = outfit !== '기본' ? char.outfits?.find((o) => o.name === outfit) : undefined;
+      if (outfit !== '기본' && !outfitObj) return flash(`'${outfit}' 의상을 찾지 못했습니다.`);
+      const exprStore = outfit === '기본' ? char.expressions : outfitObj!.expressions;
+      const curId = exprStore[expr];
+      if (!curId) return flash('먼저 이 표정 입화를 생성하세요.');
+      const src = await getAsset(curId);
+      if (!src) return flash('원본 입화를 찾지 못했습니다.');
+      const key = `sprite:${name}`;
+      set((s) => ({ busy: { ...s.busy, [key]: true } }));
+      try {
+        // 원본 이미지 보존(img2img) + 외형·지시 컴파일 프롬프트로 정밀 변형. 포즈·구도 유지, Anlas 소모.
+        const baseApp = outfitObj?.appearance
+          ? [char.appearance, `복장/의상: ${outfitObj.appearance}`].filter(Boolean).join(', ')
+          : char.appearance;
+        const appearance = [baseApp, instruction].filter(Boolean).join(', ');
+        const promptOverride = await naiCompile(() =>
+          compileSpritePrompt({ appearance, emotion: expr, apiKey: translateKey() }),
+        );
+        const { blob, source } = await editImage({
+          blob: src,
+          instruction: promptOverride || appearance,
+          apiKey,
+          kind: 'sprite',
+          strength: 0.55,
+          bgRemoval: get().bgRemovalMethod,
+        });
+        const id = assetId();
+        await putAsset(id, blob);
+        const tag = outfit === '기본' ? '' : `${outfit} `;
+        const meta: AssetMeta = {
+          id,
+          kind: 'sprite',
+          prompt: `${name} ${tag}${expr} 정밀수정: ${instruction}`,
+          mime: 'image/png',
+          source,
+          filename: `sprite_${name}_${outfit === '기본' ? '' : safeFileName(outfit) + '_'}${expr}.png`,
+          createdAt: Date.now(),
+        };
+        const sub = outfit === '기본' ? '' : `${safeFileName(outfit)}/`;
+        void archiveImage(blob, `characters/${safeFileName(name)}/${sub}${safeFileName(expr)}_정밀수정_${timestamp()}.png`);
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: {
+            ...s.project,
+            characters: s.project.characters.map((c) => {
+              if (c.name !== name) return c;
+              if (outfit === '기본') return { ...c, expressions: { ...c.expressions, [expr]: id } };
+              return {
+                ...c,
+                outfits: (c.outfits ?? []).map((o) =>
+                  o.name === outfit ? { ...o, expressions: { ...o.expressions, [expr]: id } } : o,
+                ),
+              };
+            }),
+          },
+        }));
+        await deleteAsset(curId).catch(() => {});
+        autoSave();
+        flash(`${name} · ${tag}${expr} 정밀 수정 완료(원본 유지·Anlas 소모).`);
+      } catch (e) {
+        flash(`정밀 수정 실패: ${(e as Error).message}`);
       } finally {
         set((s) => ({ busy: { ...s.busy, [key]: false } }));
       }

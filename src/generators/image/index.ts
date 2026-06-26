@@ -232,6 +232,8 @@ export async function editImage(opts: {
   instruction: string;
   apiKey: string;
   kind: 'background' | 'sprite';
+  /** img2img 변형 강도(0~1, 낮을수록 원본 유지). 미지정 시 종류별 기본값. */
+  strength?: number;
   /** (스프라이트) 누끼 방식. 미지정 시 browser(무료). */
   bgRemoval?: BgRemoval;
 }): Promise<ImageResult> {
@@ -239,12 +241,11 @@ export async function editImage(opts: {
   const apiKey = opts.apiKey.trim();
   const sizes = naiActiveSizes();
   const size = isSprite ? sizes.portrait : sizes.landscape;
-  // 표정 수정(스프라이트)은 인물 정체성을 더 보존하도록 강도를 낮춘다(원본 유지력↑).
   let blob = await novelaiImg2img(opts.instruction, opts.blob, {
     apiKey,
     size,
     steps: naiActiveSteps(),
-    strength: isSprite ? 0.4 : 0.5,
+    strength: opts.strength ?? (isSprite ? 0.5 : 0.5),
   });
   if (isSprite) blob = await applyBgRemoval(blob, opts.bgRemoval ?? 'browser', apiKey);
   return { blob, source: 'novelai' };
