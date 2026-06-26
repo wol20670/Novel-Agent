@@ -196,9 +196,10 @@ export const aiConfig: AiConfig = {
       },
       ucPreset: 0,
       // NovelAI 호출의 핵심 디폴트. 인체·인쇄 오류를 원천 차단하는 고정 네거티브.
+      // heterochromia: 공식 가이드 권장 — 의도치 않은 좌우 홍채색 불일치(눈동자 오류) 차단.
       negativePrompt:
         'lowres, bad anatomy, bad hands, text, error, missing fingers, ' +
-        'extra digit, fewer digits, cropped, worst quality, low quality',
+        'extra digit, fewer digits, cropped, worst quality, low quality, heterochromia',
       // V4.5 품질 태그는 프롬프트 "맨 끝"에 붙인다(모델별 권장값). 기본=Curated 권장.
       // V4.5 Full 이면 'location, very aesthetic, masterpiece, no text' 로 바꾼다.
       // qualityToggle(서버 자동부착)에 의존하지 않고 직접 부착해 결정적으로 동작시킨다.
