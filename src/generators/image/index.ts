@@ -175,6 +175,8 @@ export interface SpriteRequest {
   promptOverride?: string;
   /** 네거티브 프롬프트 오버라이드(미지정 시 config 기본값). */
   negative?: string;
+  /** 시드 오버라이드(미지정 시 이름 기반 고정). 디자인 리롤 시 새 시드를 넘긴다. */
+  seed?: number;
   /** 누끼 방식. 미지정 시 browser(무료). */
   bgRemoval?: BgRemoval;
 }
@@ -205,7 +207,7 @@ function spritePrompt(req: SpriteRequest): string {
 export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
   const apiKey = req.apiKey?.trim();
   if (apiKey) {
-    const seed = seedFromString(req.name);
+    const seed = req.seed ?? seedFromString(req.name);
     let blob = await novelaiGenerate(req.promptOverride?.trim() || spritePrompt(req), {
       apiKey,
       size: naiActiveSizes().portrait,

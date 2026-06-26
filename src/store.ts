@@ -93,7 +93,7 @@ interface State {
   /** 기본(메인) 입화만 1장 생성 — 이후 표정은 이 기본을 기준으로 하나씩 생성(토큰 절약). */
   generateCharacterBase: (name: string, outfit?: string) => Promise<void>;
   /** 한 표정 입화 생성. reference(기준 입화)를 주거나, 없으면 저장된 '기본'을 자동 기준으로 일관성 유지. */
-  generateCharacterSprite: (name: string, expr: Expression, reference?: Blob, outfit?: string) => Promise<Blob | undefined>;
+  generateCharacterSprite: (name: string, expr: Expression, reference?: Blob, outfit?: string, seed?: number) => Promise<Blob | undefined>;
   /** 이미 생성된 입화를 지시문대로 미세 수정(예: "머리를 더 길게"). 키 필요. */
   refineSprite: (name: string, expr: Expression, instruction: string, outfit?: string) => Promise<void>;
 
@@ -513,7 +513,7 @@ export const useStore = create<State>((set, get) => {
       flash(`랜덤 생성 종료 (총 ${n}장).`);
     },
 
-    generateCharacterSprite: async (name, expr, _reference, outfit = '기본') => {
+    generateCharacterSprite: async (name, expr, _reference, outfit = '기본', seed) => {
       const char = get().project.characters.find((c) => c.name === name);
       if (!char) return undefined;
       const outfitObj = outfit !== '기본' ? char.outfits?.find((o) => o.name === outfit) : undefined;
@@ -550,6 +550,7 @@ export const useStore = create<State>((set, get) => {
           personality: char.personality,
           styleReferences: styleRefs,
           promptOverride,
+          seed,
           bgRemoval: get().bgRemovalMethod,
         });
         const id = assetId();
@@ -708,12 +709,14 @@ export const useStore = create<State>((set, get) => {
           },
         }));
         autoSave();
+        // 구조 변경(머리 길이 등)이 실제 반영되도록 새 시드로 리롤. 모든 표정은 이 시드를 공유해 일관성 유지.
+        const designSeed = Math.floor(Math.random() * 4_294_967_295);
         const have = projectExpressions(get().project).filter((e) => char.expressions[e as Expression]);
         const ordered = have.includes('기본') ? have : ['기본', ...have];
         for (const expr of ordered) {
-          await get().generateCharacterSprite(name, expr as Expression, undefined);
+          await get().generateCharacterSprite(name, expr as Expression, undefined, '기본', designSeed);
         }
-        flash(`${name} 디자인을 수정하고 표정 ${ordered.length}종을 다시 그렸습니다(무료).`);
+        flash(`${name} 디자인을 수정하고 표정 ${ordered.length}종을 다시 그렸습니다(무료·구조 변경 반영).`);
       } catch (e) {
         flash(`디자인 수정 실패: ${(e as Error).message}`);
       } finally {
