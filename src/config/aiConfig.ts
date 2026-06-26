@@ -161,7 +161,7 @@ export const aiConfig: AiConfig = {
       // V4.5 품질 태그는 프롬프트 "맨 끝"에 붙인다(모델별 권장값). 기본=Curated 권장.
       // V4.5 Full 이면 'location, very aesthetic, masterpiece, no text' 로 바꾼다.
       // qualityToggle(서버 자동부착)에 의존하지 않고 직접 부착해 결정적으로 동작시킨다.
-      qualityTags: 'very aesthetic, best quality, amazing quality, masterpiece, no text, -0.8::feet::, rating:general',
+      qualityTags: 'very aesthetic, best quality, amazing quality, masterpiece, absurdres, no text, -0.8::feet::, rating:general',
       img2imgStrength: 0.6,
       // 그림체 참조(vibe transfer) 기본 강도/정보추출량(여러 장 업로드 시 각 이미지에 공통 적용).
       vibeStrength: 0.6,

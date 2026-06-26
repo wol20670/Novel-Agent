@@ -272,7 +272,8 @@ function randomBishoujoPrompt(): string {
     maybe(0.5) ? pickOne(acc) : undefined,
     pickOne(ensByCat('Expression')),
     maybe(0.4) ? pickOne(pose) : undefined,
-    'cowboy shot, looking at viewer',
+    // 전신 풀샷(머리~발끝) + 작아지는 얼굴 보강.
+    'full body, looking at viewer, detailed face, beautiful detailed eyes',
     'white background, simple background',
   ]
     .filter(Boolean)
