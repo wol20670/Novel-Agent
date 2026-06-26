@@ -4,6 +4,11 @@
 // 여기서는 본문 태그 + 감정/구조 태그만 조립한다(이중 prefix 방지).
 
 import { aiConfig } from '../../config/aiConfig';
+import {
+  dictionaryPromptBlock,
+  recordUnmatchedTags,
+  type TagCategory,
+} from './tagDictionary';
 
 type CompileMode = 'character' | 'scene' | 'cg' | 'emotion';
 
@@ -36,6 +41,29 @@ const SYS: Record<CompileMode, string> = {
     'You convert a Korean facial expression/emotion word into 1-2 English Danbooru expression tags. ' +
     'Output ONLY lowercase comma-separated tags — no sentences, no quotes, no "1girl", no markdown.',
 };
+
+// 모드별로 System Prompt 에 주입할 사전 카테고리.
+const DICT_CATS: Record<CompileMode, TagCategory[]> = {
+  character: ['Subject', 'Clothing', 'Accessory', 'Expression', 'Camera', 'Style'],
+  scene: ['Background', 'Lighting', 'Effect', 'Style', 'Camera'],
+  cg: ['Subject', 'Clothing', 'Accessory', 'Expression', 'Camera', 'Lighting', 'Effect', 'Style'],
+  emotion: ['Expression'],
+};
+
+// 사전 매칭 규칙 — DB 우선 매칭, 없는 묘사만 직접 Danbooru 태그 생성.
+const DICT_RULE =
+  'Below is a [Tag Dictionary] (Korean meaning => English NovelAI tag). RULES: ' +
+  '(1) Whenever the input expresses a meaning that exists in the dictionary, you MUST use the exact ' +
+  'dictionary English tag(s) for it — do not paraphrase or invent a synonym. ' +
+  '(2) For descriptions NOT covered by the dictionary, generate your own Danbooru-style English tags and append them. ' +
+  '(3) Keep everything comma-separated, lowercase, plain tags only.';
+
+/** 모드별 최종 System Prompt = 기본 지시 + 사전 규칙 + 주입된 사전 블록. */
+function systemFor(mode: CompileMode): string {
+  const block = dictionaryPromptBlock(DICT_CATS[mode]);
+  if (!block) return SYS[mode];
+  return `${SYS[mode]}\n\n${DICT_RULE}\n\n[Tag Dictionary]\n${block}`;
+}
 
 // 알려진 표정 → 강조 태그. NovelAI V4.5 가중치 문법은 `weight::tag::` (예: 1.3::smiling::).
 // (Stable Diffusion 의 (tag:1.3) 문법은 NovelAI 에서 동작하지 않음.)
@@ -99,7 +127,12 @@ export async function compileTags(text: string, mode: CompileMode, apiKey: strin
   const key = `${mode}|${t}`;
   const hit = cache.get(key);
   if (hit) return hit;
-  const p = chat(SYS[mode], t, apiKey);
+  const p = chat(systemFor(mode), t, apiKey).then((out) => {
+    // 변환 과정 가시화(devtools 에서 입력→출력 확인) + 미등록 태그 피드백 누적.
+    console.info(`%c[태그변환:${mode}]`, 'color:#60a5fa', `"${t}" → ${out}`);
+    if (mode !== 'emotion') recordUnmatchedTags(out.split(','));
+    return out;
+  });
   cache.set(key, p);
   try {
     return await p;
