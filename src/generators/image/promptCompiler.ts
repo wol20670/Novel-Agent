@@ -73,13 +73,15 @@ function systemFor(mode: CompileMode): string {
 
 // 알려진 표정 → 강조 태그. NovelAI V4.5 가중치 문법은 `weight::tag::` (예: 1.3::smiling::).
 // (Stable Diffusion 의 (tag:1.3) 문법은 NovelAI 에서 동작하지 않음.)
+// 얼굴(표정)만 바꾸도록 "약한 단일 페이스 태그"로 둔다. 강한 가중치/포즈 함의 태그(happy 등)는
+// 같은 시드라도 구도·복장까지 흔들어버리므로 피한다(표정만 바뀌고 나머지는 유지되게).
 const EMOTION_TAGS: Record<string, string> = {
-  기본: 'neutral expression',
-  기쁨: '1.3::smiling::, 1.2::happy::',
-  슬픔: '1.3::crying::, 1.2::sad expression::',
-  화남: '1.3::angry::, 1.2::frown::',
-  놀람: '1.3::surprised::, 1.2::wide-eyed::',
-  수줍음: '1.3::blush::, 1.2::shy::',
+  기본: 'neutral expression, closed mouth',
+  기쁨: 'smile',
+  슬픔: 'sad, frown',
+  화남: 'angry, frown',
+  놀람: 'surprised, open mouth',
+  수줍음: 'blush, embarrassed',
 };
 
 /** 캐릭터 단독 입화 구조 태그(배경 제거) · 배경 단독 구조 태그(인물 제외). */

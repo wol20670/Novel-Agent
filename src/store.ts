@@ -535,9 +535,11 @@ export const useStore = create<State>((set, get) => {
           const blobs = await Promise.all(ids.map((id) => getAsset(id)));
           styleRefs = blobs.filter((b): b is Blob => !!b);
         }
-        // 의상이면 기본 외형에 의상 묘사를 덧붙여 생성한다(같은 인물, 다른 옷).
-        const appearance = outfitObj?.appearance
-          ? [char.appearance, `복장/의상: ${outfitObj.appearance}`].filter(Boolean).join(', ')
+        // 의상이면 기본 외형에 의상 묘사를 덧붙여 생성(같은 인물, 다른 옷).
+        // 묘사칸이 비어있으면 의상 "이름"이라도 옷으로 써서 최소한 그 복장이 나오게 한다.
+        const outfitDesc = outfitObj ? outfitObj.appearance?.trim() || outfit : undefined;
+        const appearance = outfitDesc
+          ? [char.appearance, `복장/의상: ${outfitDesc}`].filter(Boolean).join(', ')
           : char.appearance;
         const tag = outfit === '기본' ? '' : `${outfit} `;
         const promptOverride = await naiCompile(() =>
@@ -632,8 +634,9 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
         // 무료(text2img) 재생성: 외형 설명에 수정 지시를 더해 같은 시드로 다시 그린다(Anlas 0, 실제 반영).
-        const baseApp = outfitObj?.appearance
-          ? [char.appearance, `복장/의상: ${outfitObj.appearance}`].filter(Boolean).join(', ')
+        const outfitDesc = outfitObj ? outfitObj.appearance?.trim() || outfit : undefined;
+        const baseApp = outfitDesc
+          ? [char.appearance, `복장/의상: ${outfitDesc}`].filter(Boolean).join(', ')
           : char.appearance;
         const appearance = [baseApp, instruction].filter(Boolean).join(', ');
         const promptOverride = await naiCompile(() =>
@@ -706,8 +709,9 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
         // 원본 이미지 보존(img2img) + 외형·지시 컴파일 프롬프트로 정밀 변형. 포즈·구도 유지, Anlas 소모.
-        const baseApp = outfitObj?.appearance
-          ? [char.appearance, `복장/의상: ${outfitObj.appearance}`].filter(Boolean).join(', ')
+        const outfitDesc = outfitObj ? outfitObj.appearance?.trim() || outfit : undefined;
+        const baseApp = outfitDesc
+          ? [char.appearance, `복장/의상: ${outfitDesc}`].filter(Boolean).join(', ')
           : char.appearance;
         const appearance = [baseApp, instruction].filter(Boolean).join(', ');
         const promptOverride = await naiCompile(() =>
