@@ -625,12 +625,27 @@ export const useStore = create<State>((set, get) => {
       const exprStore = outfit === '기본' ? char.expressions : outfitObj!.expressions;
       const curId = exprStore[expr];
       if (!curId) return flash('먼저 이 표정 입화를 생성하세요.');
-      const src = await getAsset(curId);
-      if (!src) return flash('원본 입화를 찾지 못했습니다.');
       const key = `sprite:${name}`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
-        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', bgRemoval: get().bgRemovalMethod });
+        // 무료(text2img) 재생성: 외형 설명에 수정 지시를 더해 같은 시드로 다시 그린다(Anlas 0, 실제 반영).
+        const baseApp = outfitObj?.appearance
+          ? [char.appearance, `복장/의상: ${outfitObj.appearance}`].filter(Boolean).join(', ')
+          : char.appearance;
+        const appearance = [baseApp, instruction].filter(Boolean).join(', ');
+        const promptOverride = await naiCompile(() =>
+          compileSpritePrompt({ appearance, emotion: expr, apiKey: translateKey() }),
+        );
+        const { blob, source } = await generateSprite({
+          name,
+          expression: expr,
+          color: char.color,
+          apiKey,
+          appearance,
+          personality: char.personality,
+          promptOverride,
+          bgRemoval: get().bgRemovalMethod,
+        });
         const id = assetId();
         await putAsset(id, blob);
         const tag = outfit === '기본' ? '' : `${outfit} `;
@@ -679,48 +694,26 @@ export const useStore = create<State>((set, get) => {
       if (!instruction.trim()) return;
       const baseId = char.expressions['기본'];
       if (!baseId) return flash('먼저 ① 기본 입화를 생성하세요.');
-      const src = await getAsset(baseId);
-      if (!src) return flash('기본 입화 원본을 찾지 못했습니다.');
       const key = `sprite:${name}`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
-        // 1) 기본 입화를 지시문대로 수정 → 새 디자인의 기준이 된다.
-        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', bgRemoval: get().bgRemovalMethod });
-        const id = assetId();
-        await putAsset(id, blob);
-        const meta: AssetMeta = {
-          id,
-          kind: 'sprite',
-          prompt: `${name} 기본 디자인 수정: ${instruction}`,
-          mime: 'image/png',
-          source,
-          filename: `sprite_${name}_기본.png`,
-          createdAt: Date.now(),
-        };
-        void archiveImage(blob, `characters/${safeFileName(name)}/기본_디자인수정_${timestamp()}.png`);
+        // 디자인 수정 = 외형 설명에 지시를 영구 반영 → 모든 표정을 무료(text2img)로 다시 그린다(Anlas 0).
+        const newAppearance = [char.appearance, instruction].filter(Boolean).join(', ');
         set((s) => ({
-          assets: { ...s.assets, [id]: meta },
           project: {
             ...s.project,
             characters: s.project.characters.map((c) =>
-              c.name === name ? { ...c, expressions: { ...c.expressions, ['기본']: id } } : c,
+              c.name === name ? { ...c, appearance: newAppearance } : c,
             ),
           },
         }));
-        await deleteAsset(baseId).catch(() => {});
         autoSave();
-        // 2) 이미 만들어둔 다른 표정도 새 기본을 기준으로 다시 그려 디자인을 맞춘다.
-        const others = projectExpressions(get().project).filter(
-          (e) => e !== '기본' && char.expressions[e as Expression],
-        );
-        for (const expr of others) {
-          await get().generateCharacterSprite(name, expr as Expression, blob);
+        const have = projectExpressions(get().project).filter((e) => char.expressions[e as Expression]);
+        const ordered = have.includes('기본') ? have : ['기본', ...have];
+        for (const expr of ordered) {
+          await get().generateCharacterSprite(name, expr as Expression, undefined);
         }
-        flash(
-          others.length
-            ? `${name} 디자인을 수정하고 표정 ${others.length}종을 새 기준으로 다시 그렸습니다.`
-            : `${name} 기본 디자인을 수정했습니다.`,
-        );
+        flash(`${name} 디자인을 수정하고 표정 ${ordered.length}종을 다시 그렸습니다(무료).`);
       } catch (e) {
         flash(`디자인 수정 실패: ${(e as Error).message}`);
       } finally {
