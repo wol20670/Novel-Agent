@@ -444,7 +444,7 @@ export const useStore = create<State>((set, get) => {
             color: '#88aaff',
             apiKey,
             promptOverride: randomBishoujoPrompt(),
-            bgRemoval: 'browser',
+            bgRemoval: get().bgRemovalMethod, // 좌측에서 고른 누끼 방식(AI/브라우저/…)을 그대로 사용
           });
           if (!get().batchRunning) break; // 생성 도중 멈춤 반영
           const url = URL.createObjectURL(blob);
