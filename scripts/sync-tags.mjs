@@ -50,6 +50,24 @@ function parseCsv(text) {
   return rows;
 }
 
+/**
+ * 영문 태그 정규화 → NovelAI 공식 권장(띄어쓰기). 단, 이모티콘 표정 태그(^_^, o_o, >_<, 0_0 …)는
+ * 언더바가 의미라서 보존한다. "긴 영단어_단어"(long_hair, two-tone_hair) 형태만 공백으로 바꾼다.
+ */
+function normalizeEn(s) {
+  return s
+    .split(',')
+    .map((t) => {
+      t = t.trim();
+      if (!t.includes('_')) return t;
+      const parts = t.split('_');
+      const wordy = parts.every((p) => /^[a-z0-9-]+$/i.test(p)) && parts.some((p) => p.length >= 3);
+      return wordy ? parts.join(' ').replace(/\s+/g, ' ') : t; // 이모티콘 등은 그대로
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
 /** "교복 (세일러복)" / "넥타이 / 리본" → ['교복','세일러복'] / ['넥타이','리본'] */
 function parseKo(cell) {
   const out = [];
@@ -93,7 +111,7 @@ async function main() {
       // 새 카테고리는 그대로 포함한다(드롭하지 않음). 오타일 수도 있으니 알림만.
       warnings.push(`낯선 카테고리 "${cat}" (행: ${ko}) — 포함함(오타가 아닌지 확인)`);
     }
-    entries.push({ ko: parseKo(ko), en, cat });
+    entries.push({ ko: parseKo(ko), en: normalizeEn(en), cat });
   }
 
   if (!entries.length) throw new Error('파싱된 태그가 0개입니다. 시트 구조를 확인하세요.');
