@@ -42,11 +42,11 @@ const SYS: Record<CompileMode, string> = {
     'Output ONLY lowercase comma-separated tags — no sentences, no quotes, no "1girl", no markdown.',
 };
 
-// 모드별 사전 주입 분류(카테고리는 시트에서 자유 추가되므로 "규칙"으로 자동 분류).
+// 모드별 사전 주입 분류(표준 11개 카테고리 기준, 규칙으로 자동 분류).
 //  - 장면(배경)에 쓰는 환경 카테고리.
-const SCENE_CATS = new Set(['Background', 'Lighting', 'Effect', 'Style', 'Camera']);
-//  - 캐릭터에 넣지 않을 카테고리(환경 + 품질). 그 외(Body·Hair 등 새 카테고리 포함)는 캐릭터에 주입.
-const CHARACTER_EXCLUDE = new Set(['Background', 'Lighting', 'Effect', 'Quality']);
+const SCENE_CATS = new Set(['Scene', 'LightFX', 'Style', 'Camera']);
+//  - 캐릭터에 넣지 않을 카테고리(환경 + 품질). 그 외(Subject·Body·Expression·Pose·Clothing·Accessory)는 캐릭터에 주입.
+const CHARACTER_EXCLUDE = new Set(['Scene', 'LightFX', 'Quality']);
 
 /** 모드별로 System Prompt 에 주입할 카테고리 목록(현재 사전에 존재하는 카테고리에서 선별). */
 function dictCatsFor(mode: CompileMode): string[] {
