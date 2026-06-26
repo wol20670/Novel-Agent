@@ -262,8 +262,8 @@ function randomBishoujoPrompt(): string {
   const pose = ensByCat('Pose');
   const clothes = pickN(ensByCat('Clothing'), maybe(0.5) ? 2 : 1).map(colorizeClothes);
   return [
-    // 흑백 방지는 네거티브가 담당 → 여기선 머리/눈/톤/의상 색을 무작위로 다양화.
-    '1girl, solo, bishoujo, anime coloring',
+    // 구도 태그는 "앞쪽 + 가중치"로 둬야 강하게 먹는다(끝에 두면 무릎 위로 잘림).
+    '1girl, solo, bishoujo, 1.4::full body::, full body shot, standing, head to toe, anime coloring',
     randomHair(),
     pickOne(EYE_COLORS),
     maybe(0.7) ? pickOne(PALETTE_TONES) : undefined,
@@ -272,8 +272,8 @@ function randomBishoujoPrompt(): string {
     maybe(0.5) ? pickOne(acc) : undefined,
     pickOne(ensByCat('Expression')),
     maybe(0.4) ? pickOne(pose) : undefined,
-    // 전신 풀샷(머리~발끝) + 작아지는 얼굴 보강.
-    'full body, looking at viewer, detailed face, beautiful detailed eyes',
+    // 작아지는 얼굴 보강(구도는 앞쪽 full body 가 담당).
+    'looking at viewer, detailed face, beautiful detailed eyes',
     'white background, simple background',
   ]
     .filter(Boolean)
@@ -486,8 +486,8 @@ export const useStore = create<State>((set, get) => {
             color: '#88aaff',
             apiKey,
             promptOverride: randomBishoujoPrompt(),
-            // 흑백/만화풍으로 빠지지 않게 네거티브에 추가(배치 한정).
-            negative: `${aiConfig.image.novelai.negativePrompt}, monochrome, greyscale, sketch, lineart, manga`,
+            // 흑백·만화풍 + 상반신 컷(전신 강제) 차단(배치 한정).
+            negative: `${aiConfig.image.novelai.negativePrompt}, monochrome, greyscale, sketch, lineart, manga, cowboy shot, upper body, portrait, close-up, cropped`,
             bgRemoval: get().bgRemovalMethod, // 좌측에서 고른 누끼 방식(AI/브라우저/…)을 그대로 사용
           });
           if (!get().batchRunning) break; // 생성 도중 멈춤 반영
