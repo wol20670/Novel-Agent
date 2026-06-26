@@ -395,7 +395,6 @@ function CharacterCard({ name }: { name: string }) {
   const genAll = useStore((s) => s.generateCharacterSprites);
   const genBase = useStore((s) => s.generateCharacterBase);
   const genOne = useStore((s) => s.generateCharacterSprite);
-  const refineSprite = useStore((s) => s.refineSprite);
   const refineSpritePrecise = useStore((s) => s.refineSpritePrecise);
   const refineDesign = useStore((s) => s.refineCharacterDesign);
   const importSprite = useStore((s) => s.importSprite);
@@ -511,7 +510,7 @@ function CharacterCard({ name }: { name: string }) {
       <div className="flex items-center gap-2 mb-2">
         <p className="text-[10px] text-gray-500 leading-snug flex-1">
           {hasBase
-            ? `'${outfit}' 의상 · 표정 썸네일 = 기본 기준으로 그 표정만 생성. 썸네일 ✏️ = 그 표정만 수정.`
+            ? `썸네일 클릭 = 그 표정 생성/재생성(무료). ✏️ = 이 그림 그대로 두고 정밀 수정(Anlas). 위 🎨 디자인 수정 = 머리·의상 크게 바꾸기(무료, 다시 그림).`
             : `'${outfit}' 의상의 ① 기본 입화를 먼저 만들고 → 표정 썸네일을 하나씩 눌러 생성하세요.`}
         </p>
         {hasBase && outfit === '기본' && (
@@ -541,15 +540,10 @@ function CharacterCard({ name }: { name: string }) {
             onGen={() => genOne(name, ex as Expression, undefined, outfit)}
             onUpload={(f) => importSprite(name, ex as Expression, f, outfit)}
             onRefine={() => {
-              const ins = window.prompt(`이 '${ex}' 입화를 어떻게 수정할까요? (예: 백팩 추가, 표정을 더 환하게)`);
-              if (!ins || !ins.trim()) return;
-              const precise = window.confirm(
-                '원본 포즈·구도를 그대로 유지하며 정밀 수정할까요?\n\n' +
-                  '확인 = 🎯 정밀 수정 (원본 보존 · Anlas 소모)\n' +
-                  '취소 = 🆓 무료 재생성 (구도 바뀔 수 있음 · Anlas 0)',
+              const ins = window.prompt(
+                `🎯 '${ex}' 정밀 수정 — 이 그림은 그대로 두고 바꿀 점만 적으세요.\n(예: 백팩 추가, 안경 씌우기, 표정 더 환하게)\n※ Anlas 소모. 머리 길이 등 크게 바꾸려면 위의 🎨 디자인 수정을 쓰세요.`,
               );
-              if (precise) refineSpritePrecise(name, ex as Expression, ins.trim(), outfit);
-              else refineSprite(name, ex as Expression, ins.trim(), outfit);
+              if (ins && ins.trim()) refineSpritePrecise(name, ex as Expression, ins.trim(), outfit);
             }}
           />
         ))}
@@ -616,7 +610,7 @@ function ExpressionThumb({
             onClick={onRefine}
             disabled={busy}
             className="bg-black/55 text-white text-[10px] rounded px-1 py-0.5 hover:bg-black/75"
-            title={`${expr} 입화를 지시문대로 미세 수정`}
+            title={`🎯 정밀 수정: 이 그림 그대로 두고 지시만 반영 (Anlas 소모)`}
           >
             ✏️
           </button>
