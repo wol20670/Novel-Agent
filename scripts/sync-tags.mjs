@@ -16,9 +16,9 @@ import { dirname, resolve } from 'node:path';
 // 시트 ID(공유 "링크 뷰어" 시트는 비밀이 아니므로 코드에 둬도 무방). 다른 시트로 바꾸려면 SHEET_ID 환경변수.
 const SHEET_ID = process.env.SHEET_ID || '1D159kXhntNGz_-cfPN9K6VSmwFpQr77Ki2jWBoFNAug';
 const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
-// 표준 11개 카테고리(정렬·오타 경고용). 시트에 새 카테고리를 추가해도 동기화는 된다(아래 참고).
+// 표준 12개 카테고리(정렬·오타 경고용). 시트에 새 카테고리를 추가해도 동기화는 된다(아래 참고).
 const CATEGORIES = [
-  'Subject', 'Body', 'Expression', 'Pose', 'Clothing', 'Accessory',
+  'Subject', 'Body', 'Colors', 'Expression', 'Pose', 'Clothing', 'Accessory',
   'Scene', 'LightFX', 'Style', 'Camera', 'Quality',
 ];
 
