@@ -10,16 +10,25 @@ import {
   seedFromString,
 } from './novelaiProvider';
 import { browserRemoveBackground } from './bgRemoveLocal';
+import { aiRemoveBackground } from './bgRemoveAi';
 import { aiConfig, naiSize, naiActiveSizes, naiActiveSteps } from '../../config/aiConfig';
 import type { Expression } from '../../types';
 
-/** 스프라이트 누끼 방식. browser=무료(브라우저) · novelai=Director(Anlas) · none=흰 배경 유지. */
-export type BgRemoval = 'browser' | 'novelai' | 'none';
+/**
+ * 스프라이트 누끼 방식.
+ *  - browser : 무료·즉시(브라우저 flood-fill). 단순 배경에 빠르지만 가장자리 색충돌에 약함.
+ *  - ai      : 무료·고품질(ML 세그멘테이션, MODNet). 색 충돌 없음. 첫 1회 모델 다운로드(~수십 MB).
+ *  - novelai : Director Tools(Anlas 소모). 머리카락 경계 최강.
+ *  - none    : 흰 배경 유지.
+ */
+export type BgRemoval = 'browser' | 'ai' | 'novelai' | 'none';
 
 /** 선택한 방식으로 누끼 처리(none 이거나 transparent 비활성이면 원본 그대로). */
 async function applyBgRemoval(blob: Blob, method: BgRemoval, apiKey: string): Promise<Blob> {
   if (!aiConfig.image.sprite.transparent || method === 'none') return blob;
-  return method === 'novelai' ? novelaiRemoveBackground(blob, { apiKey }) : browserRemoveBackground(blob);
+  if (method === 'novelai') return novelaiRemoveBackground(blob, { apiKey });
+  if (method === 'ai') return aiRemoveBackground(blob);
+  return browserRemoveBackground(blob);
 }
 
 export interface ImageRequest {

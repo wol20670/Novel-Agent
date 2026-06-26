@@ -1647,7 +1647,7 @@ export const useStore = create<State>((set, get) => {
       if (savedLang === 'ko' || savedLang === 'en') set({ promptLang: savedLang });
       try {
         const m = localStorage.getItem('na_bg_method');
-        if (m === 'browser' || m === 'novelai' || m === 'none') set({ bgRemovalMethod: m });
+        if (m === 'browser' || m === 'ai' || m === 'novelai' || m === 'none') set({ bgRemovalMethod: m });
       } catch {
         /* ignore */
       }

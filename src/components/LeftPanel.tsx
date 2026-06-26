@@ -345,7 +345,8 @@ function NaiModeSelector() {
       <div className="flex gap-1">
         {(
           [
-            { key: 'browser', label: '무료', hint: '브라우저에서 흰 배경 제거 · Anlas 0 · 오프라인' },
+            { key: 'browser', label: '빠름', hint: '브라우저 flood-fill · Anlas 0 · 즉시 · 단순 배경에 최적' },
+            { key: 'ai', label: 'AI', hint: 'ML 세그멘테이션(MODNet) · Anlas 0 · 색 충돌 없음 · 첫 1회 모델 다운로드(~수십 MB)' },
             { key: 'novelai', label: 'NovelAI', hint: 'Director 툴 누끼 · 고품질이지만 장당 Anlas 소모(예: ~65)' },
             { key: 'none', label: '안 함', hint: '흰 배경 그대로 · 직접 후처리할 때' },
           ] as const
@@ -364,10 +365,12 @@ function NaiModeSelector() {
       </div>
       <p className="text-[10px] text-gray-500 leading-snug">
         {bgMethod === 'browser'
-          ? '브라우저에서 무료로 흰 배경을 제거합니다(Anlas 0). 흰 배경 생성물에 최적 — 어두운 머리·옷이면 아주 깔끔.'
-          : bgMethod === 'novelai'
-            ? 'NovelAI Director 툴로 누끼(고품질, 머리카락 경계 강함) — 단 장당 Anlas 소모.'
-            : '흰 배경 그대로 둡니다(Anlas 0). 외부 툴로 직접 누끼할 때만.'}
+          ? '브라우저 flood-fill 로 흰 배경 제거(Anlas 0·즉시). 단순 배경에 최적이나, 흰 옷·가장자리 색이 닿으면 약함.'
+          : bgMethod === 'ai'
+            ? 'AI 세그멘테이션(MODNet)으로 인물만 분리(Anlas 0). 색 충돌 없어 흰 옷도 안전 · 권장. 첫 1회만 모델 다운로드(이후 캐시).'
+            : bgMethod === 'novelai'
+              ? 'NovelAI Director 툴로 누끼(고품질, 머리카락 경계 강함) — 단 장당 Anlas 소모.'
+              : '흰 배경 그대로 둡니다(Anlas 0). 외부 툴로 직접 누끼할 때만.'}
       </p>
     </div>
   );
