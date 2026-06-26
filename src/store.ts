@@ -5,6 +5,7 @@ import { parseText, parseWorkbook } from './parser';
 import { generateImage, generateSprite, generateExpression, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, type BgRemoval } from './generators/image';
 import { compileSpritePrompt, compileScenePrompt, compileCgPrompt } from './generators/image/promptCompiler';
 import { ALL_TAGS } from './generators/image/tagDictionary';
+import { seedFromString } from './generators/image/novelaiProvider';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
 import { aiConfig, type NaiMode } from './config/aiConfig';
@@ -592,6 +593,8 @@ export const useStore = create<State>((set, get) => {
           }
         }
         if (!result) {
+          // 의상은 의상별 고정 시드(이름+의상)로 → 기본 구도와 충돌 않고 깔끔한 의상(불필요한 백팩 등 미생성).
+          const effSeed = seed ?? (outfit !== '기본' ? seedFromString(`${name}·${outfit}`) : undefined);
           result = await generateSprite({
             name,
             expression: expr,
@@ -601,7 +604,7 @@ export const useStore = create<State>((set, get) => {
             personality: char.personality,
             styleReferences: styleRefs,
             promptOverride,
-            seed,
+            seed: effSeed,
             bgRemoval: get().bgRemovalMethod,
           });
         }
@@ -1018,8 +1021,9 @@ export const useStore = create<State>((set, get) => {
             c.name === charName
               ? {
                   ...c,
+                  // 입력 중에는 원본 그대로 저장(여기서 trim 하면 단어 사이 띄어쓰기를 못 침). trim 은 생성 시.
                   outfits: (c.outfits ?? []).map((o) =>
-                    o.name === name ? { ...o, appearance: appearance.trim() || undefined } : o,
+                    o.name === name ? { ...o, appearance } : o,
                   ),
                 }
               : c,
