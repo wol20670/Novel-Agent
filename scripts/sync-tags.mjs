@@ -16,9 +16,10 @@ import { dirname, resolve } from 'node:path';
 // 시트 ID(공유 "링크 뷰어" 시트는 비밀이 아니므로 코드에 둬도 무방). 다른 시트로 바꾸려면 SHEET_ID 환경변수.
 const SHEET_ID = process.env.SHEET_ID || '1D159kXhntNGz_-cfPN9K6VSmwFpQr77Ki2jWBoFNAug';
 const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
+// 알려진 카테고리(정렬·오타 경고용). 시트에 새 카테고리를 추가해도 동기화는 된다(아래 참고).
 const CATEGORIES = [
-  'Clothing', 'Accessory', 'Background', 'Lighting', 'Effect',
-  'Style', 'Expression', 'Camera', 'Quality', 'Subject',
+  'Subject', 'Body', 'Clothing', 'Accessory', 'Expression', 'Camera',
+  'Style', 'Background', 'Lighting', 'Effect', 'Quality',
 ];
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -87,17 +88,19 @@ async function main() {
     const cat = (r[2] || '').trim();
     if (!ko || !en) continue;                 // 빈 줄/구분 줄
     if (ko === '한국어 의미' || ko.startsWith('한국어')) continue; // 헤더(반복 포함)
+    if (!cat) { warnings.push(`카테고리 빈칸 (행: ${ko}) → 건너뜀`); continue; }
     if (!CATEGORIES.includes(cat)) {
-      warnings.push(`알 수 없는 카테고리 "${cat}" (행: ${ko}) → 건너뜀`);
-      continue;
+      // 새 카테고리는 그대로 포함한다(드롭하지 않음). 오타일 수도 있으니 알림만.
+      warnings.push(`낯선 카테고리 "${cat}" (행: ${ko}) — 포함함(오타가 아닌지 확인)`);
     }
     entries.push({ ko: parseKo(ko), en, cat });
   }
 
   if (!entries.length) throw new Error('파싱된 태그가 0개입니다. 시트 구조를 확인하세요.');
 
-  // 카테고리 순서대로 정렬 + 섹션 주석.
-  entries.sort((a, b) => CATEGORIES.indexOf(a.cat) - CATEGORIES.indexOf(b.cat));
+  // 카테고리 순서대로 정렬(낯선 카테고리는 끝으로) + 섹션 주석.
+  const catRank = (c) => { const i = CATEGORIES.indexOf(c); return i < 0 ? CATEGORIES.length : i; };
+  entries.sort((a, b) => catRank(a.cat) - catRank(b.cat));
   const lines = [];
   let curCat = '';
   for (const e of entries) {

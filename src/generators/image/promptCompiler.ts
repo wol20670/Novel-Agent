@@ -7,7 +7,7 @@ import { aiConfig } from '../../config/aiConfig';
 import {
   dictionaryPromptBlock,
   recordUnmatchedTags,
-  type TagCategory,
+  ALL_CATEGORIES,
 } from './tagDictionary';
 
 type CompileMode = 'character' | 'scene' | 'cg' | 'emotion';
@@ -42,13 +42,19 @@ const SYS: Record<CompileMode, string> = {
     'Output ONLY lowercase comma-separated tags — no sentences, no quotes, no "1girl", no markdown.',
 };
 
-// 모드별로 System Prompt 에 주입할 사전 카테고리.
-const DICT_CATS: Record<CompileMode, TagCategory[]> = {
-  character: ['Subject', 'Clothing', 'Accessory', 'Expression', 'Camera', 'Style'],
-  scene: ['Background', 'Lighting', 'Effect', 'Style', 'Camera'],
-  cg: ['Subject', 'Clothing', 'Accessory', 'Expression', 'Camera', 'Lighting', 'Effect', 'Style'],
-  emotion: ['Expression'],
-};
+// 모드별 사전 주입 분류(카테고리는 시트에서 자유 추가되므로 "규칙"으로 자동 분류).
+//  - 장면(배경)에 쓰는 환경 카테고리.
+const SCENE_CATS = new Set(['Background', 'Lighting', 'Effect', 'Style', 'Camera']);
+//  - 캐릭터에 넣지 않을 카테고리(환경 + 품질). 그 외(Body·Hair 등 새 카테고리 포함)는 캐릭터에 주입.
+const CHARACTER_EXCLUDE = new Set(['Background', 'Lighting', 'Effect', 'Quality']);
+
+/** 모드별로 System Prompt 에 주입할 카테고리 목록(현재 사전에 존재하는 카테고리에서 선별). */
+function dictCatsFor(mode: CompileMode): string[] {
+  if (mode === 'emotion') return ['Expression'];
+  if (mode === 'scene') return ALL_CATEGORIES.filter((c) => SCENE_CATS.has(c));
+  if (mode === 'cg') return ALL_CATEGORIES.filter((c) => c !== 'Quality'); // 인물+배경 모두
+  return ALL_CATEGORIES.filter((c) => !CHARACTER_EXCLUDE.has(c)); // character
+}
 
 // 사전 매칭 규칙 — DB 우선 매칭, 없는 묘사만 직접 Danbooru 태그 생성.
 const DICT_RULE =
@@ -60,7 +66,7 @@ const DICT_RULE =
 
 /** 모드별 최종 System Prompt = 기본 지시 + 사전 규칙 + 주입된 사전 블록. */
 function systemFor(mode: CompileMode): string {
-  const block = dictionaryPromptBlock(DICT_CATS[mode]);
+  const block = dictionaryPromptBlock(dictCatsFor(mode));
   if (!block) return SYS[mode];
   return `${SYS[mode]}\n\n${DICT_RULE}\n\n[Tag Dictionary]\n${block}`;
 }
