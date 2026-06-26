@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, projectExpressions, effectiveExpressions } from './types';
 import { parseText, parseWorkbook } from './parser';
-import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, type BgRemoval } from './generators/image';
+import { generateImage, generateSprite, generateExpression, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, type BgRemoval } from './generators/image';
 import { compileSpritePrompt, compileScenePrompt, compileCgPrompt } from './generators/image/promptCompiler';
 import { ALL_TAGS } from './generators/image/tagDictionary';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
@@ -282,6 +282,34 @@ function randomBishoujoPrompt(): string {
     .join(', ');
 }
 
+// 한국어 표정명 → NovelAI Emotion 프리셋(24종). 매핑되면 Emotion 툴로 "표정만" 변경 가능.
+const KO_EMOTION_MOOD: Record<string, string> = {
+  기본: 'neutral', 무표정: 'neutral',
+  기쁨: 'happy', 행복: 'happy', 즐거움: 'happy', 미소: 'happy',
+  슬픔: 'sad', 우울: 'sad',
+  화남: 'angry', 분노: 'angry',
+  짜증: 'irritated',
+  놀람: 'surprised',
+  수줍음: 'shy', 부끄러움: 'shy',
+  공포: 'scared', 무서움: 'scared',
+  피곤: 'tired', 졸림: 'tired',
+  신남: 'excited', 흥분: 'excited',
+  긴장: 'nervous',
+  생각: 'thinking', 고민: 'thinking',
+  혼란: 'confused', 당황: 'confused',
+  역겨움: 'disgusted',
+  의기양양: 'smug', 거만: 'smug',
+  지루함: 'bored',
+  박장대소: 'laughing', 웃음: 'laughing',
+  당혹: 'embarrassed',
+  걱정: 'worried',
+  사랑: 'love',
+  결연: 'determined',
+  아픔: 'hurt',
+  장난: 'playful',
+};
+const moodFor = (expr: string): string | undefined => KO_EMOTION_MOOD[expr.trim()];
+
 export const useStore = create<State>((set, get) => {
   // 디바운스 자동저장
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -545,18 +573,39 @@ export const useStore = create<State>((set, get) => {
         const promptOverride = await naiCompile(() =>
           compileSpritePrompt({ appearance, emotion: expr, apiKey: translateKey() }),
         );
-        const { blob, source } = await generateSprite({
-          name,
-          expression: expr,
-          color: char.color,
-          apiKey: get().apiKey,
-          appearance,
-          personality: char.personality,
-          styleReferences: styleRefs,
-          promptOverride,
-          seed,
-          bgRemoval: get().bgRemovalMethod,
-        });
+        // 표정(비-기본)이고 기본 입화가 있으며 mood 가 매핑되면 → Emotion Director 툴로 "표정만" 변경
+        // (구도·복장·인물 완벽 보존, 웹 Director 툴과 동일·무료 조건). 실패 시 일반 생성으로 폴백.
+        let result: { blob: Blob; source: 'novelai' | 'canvas' } | undefined;
+        const mood = expr !== '기본' ? moodFor(expr) : undefined;
+        const baseId = exprStore['기본'] ?? char.expressions['기본'];
+        if (get().apiKey?.trim() && mood && baseId) {
+          const baseBlob = await getAsset(baseId);
+          if (baseBlob) {
+            try {
+              result = await generateExpression(baseBlob, mood, {
+                apiKey: get().apiKey,
+                bgRemoval: get().bgRemovalMethod,
+              });
+            } catch {
+              /* Emotion 툴 실패 → 아래 일반 생성으로 폴백 */
+            }
+          }
+        }
+        if (!result) {
+          result = await generateSprite({
+            name,
+            expression: expr,
+            color: char.color,
+            apiKey: get().apiKey,
+            appearance,
+            personality: char.personality,
+            styleReferences: styleRefs,
+            promptOverride,
+            seed,
+            bgRemoval: get().bgRemovalMethod,
+          });
+        }
+        const { blob, source } = result;
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {

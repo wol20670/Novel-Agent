@@ -7,6 +7,7 @@ import {
   novelaiGenerate,
   novelaiImg2img,
   novelaiRemoveBackground,
+  novelaiEmotion,
   seedFromString,
 } from './novelaiProvider';
 import { browserRemoveBackground } from './bgRemoveLocal';
@@ -157,6 +158,21 @@ export async function generateCgFromReference(opts: {
     steps: naiActiveSteps(),
     strength: 0.7,
   });
+  return { blob, source: 'novelai' };
+}
+
+/**
+ * 표정만 변경 — 기본 입화(base)에 NovelAI Emotion Director Tool 로 표정만 덮어씌운다.
+ * 구도·복장·인물 완벽 보존. mood = happy/sad/angry/surprised/shy 등 24개 프리셋.
+ * 무료 조건은 일반 생성과 동일(웹 Director 툴과 같은 엔드포인트).
+ */
+export async function generateExpression(
+  base: Blob,
+  mood: string,
+  opts: { apiKey: string; bgRemoval?: BgRemoval; prompt?: string },
+): Promise<ImageResult> {
+  let blob = await novelaiEmotion(base, mood, { apiKey: opts.apiKey, prompt: opts.prompt });
+  blob = await applyBgRemoval(blob, opts.bgRemoval ?? 'browser', opts.apiKey);
   return { blob, source: 'novelai' };
 }
 

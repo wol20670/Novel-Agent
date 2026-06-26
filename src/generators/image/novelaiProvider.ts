@@ -266,3 +266,27 @@ export async function novelaiRemoveBackground(source: Blob, opts: { apiKey: stri
   );
   return postAndUnzip(apiBase() + cfg.augmentPath, body, opts.apiKey, '배경 제거');
 }
+
+/**
+ * Director Tools 표정 변경(emotion) → 기존 이미지의 "표정만" 바꾼다(구도·복장·인물 보존).
+ * mood = 24개 프리셋(happy/sad/angry/surprised/shy …). 무료 조건은 일반 생성과 동일(웹과 같은 엔드포인트).
+ */
+export async function novelaiEmotion(
+  source: Blob,
+  mood: string,
+  opts: { apiKey: string; prompt?: string; defry?: number },
+): Promise<Blob> {
+  const cfg = aiConfig.image.novelai;
+  const { width, height } = await imageSize(source);
+  const image = await blobToBase64(source);
+  const body = {
+    req_type: 'emotion',
+    width,
+    height,
+    image,
+    prompt: `${mood};;${opts.prompt ?? ''}`,
+    defry: opts.defry ?? 0,
+  };
+  console.info(`%c[NovelAI] emotion Director (표정만 변경)`, 'color:#60a5fa', { mood, width, height });
+  return postAndUnzip(apiBase() + cfg.augmentPath, body, opts.apiKey, '표정 변경');
+}
