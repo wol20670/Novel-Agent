@@ -1,8 +1,1 @@
-# ko,en,cat — 추가할 매핑을 여기에 적고 `npm run push:tags` 하면 시트에 병합 반영됩니다(이후 자동으로 비워짐).
-# 동의어는 / 로, 영문 태그가 여러 개면 "큰따옴표"로 감싸세요.
-갸루피스 / 브이 / 피스,peace sign,Body
-컬러렌즈 / 핑크 컬러렌즈,"pink eyes, colored contacts",Body
-크로스백 / 슬링백,messenger bag,Accessory
-흰색 셔츠 / 흰 셔츠,"white shirt, collared shirt",Clothing
-하늘색 체크 치마 / 체크 치마,"plaid skirt, light blue skirt",Clothing
-C컵 / 보통 가슴,medium breasts,Body
+# ko,en,cat — 여기에 추가할 매핑을 적고 `npm run push:tags` 하면 시트에 반영됩니다.
