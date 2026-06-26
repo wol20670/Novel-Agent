@@ -13,7 +13,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-const SHEET_ID = process.env.SHEET_ID || '1IzM2kBgjLJ-ALEXIhDNYtF1ZRUW8iFmZoEYN0hrDb58';
+// 시트 ID(공유 "링크 뷰어" 시트는 비밀이 아니므로 코드에 둬도 무방). 다른 시트로 바꾸려면 SHEET_ID 환경변수.
+const SHEET_ID = process.env.SHEET_ID || '1D159kXhntNGz_-cfPN9K6VSmwFpQr77Ki2jWBoFNAug';
 const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
 const CATEGORIES = [
   'Clothing', 'Accessory', 'Background', 'Lighting', 'Effect',
