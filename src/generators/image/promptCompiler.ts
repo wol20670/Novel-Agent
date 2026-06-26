@@ -78,6 +78,9 @@ const EMOTION_TAGS: Record<string, string> = {
 
 /** 캐릭터 단독 입화 구조 태그(배경 제거) · 배경 단독 구조 태그(인물 제외). */
 const SPRITE_TAIL = 'transparent background, white background, simple background';
+// 입화 프레이밍 — 표정 6종을 같은 구도로 고정(공식 가이드: 구도/앵글 태그를 앞쪽 배치).
+// VN 대화용 반신(허벅지 위)+정면. 전신이 필요하면 'full body' 로 바꾼다.
+const SPRITE_FRAMING = 'cowboy shot, looking at viewer';
 const SCENE_HEAD = 'scenery, no humans';
 
 const cache = new Map<string, Promise<string>>();
@@ -159,7 +162,7 @@ export async function compileSpritePrompt(opts: {
       emo = '';
     }
   }
-  return [charTags, emo, SPRITE_TAIL].filter(Boolean).join(', ');
+  return [charTags, SPRITE_FRAMING, emo, SPRITE_TAIL].filter(Boolean).join(', ');
 }
 
 /** 배경(scenery) 프롬프트(인물 제외 + 장면 태그). 품질 프리픽스는 provider 가 붙인다. */

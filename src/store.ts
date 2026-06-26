@@ -6,7 +6,7 @@ import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildC
 import { compileSpritePrompt, compileScenePrompt, compileCgPrompt } from './generators/image/promptCompiler';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
-import { aiConfig, normalizeImageSize, type ImageQuality, type NaiMode } from './config/aiConfig';
+import { aiConfig, type NaiMode } from './config/aiConfig';
 import {
   saveProject,
   loadProject,
@@ -153,7 +153,7 @@ interface State {
   clearCgGroup: (desc: string) => Promise<void>;
   importMenuArt: (which: 'main' | 'game', file: File) => Promise<void>;
   /**
-   * 타이틀/게임 메뉴 배경을 gpt-image-1 로 생성해 슬롯에 적용(+보관). 키 필요.
+   * 타이틀/게임 메뉴 배경을 NovelAI 로 생성해 슬롯에 적용(+보관). 키 필요.
    * opts 로 메인 캐릭터·배경을 참조하면 게임과 어울리게 합성한다.
    */
   generateMenuArt: (which: 'main' | 'game', opts?: { charName?: string; bgKey?: string }) => Promise<void>;
@@ -170,9 +170,6 @@ interface State {
   /** 프롬프트 입력 언어 — 'ko'(GPT 로 영문 태그 변환) / 'en'(영어 태그 그대로, 변환 스킵). */
   promptLang: 'ko' | 'en';
   setPromptLang: (lang: 'ko' | 'en') => void;
-  /** (OpenAI 경로 전용) 이미지 생성 품질. NovelAI 는 naiMode 를 쓴다. */
-  imageQuality: ImageQuality;
-  setImageQuality: (q: ImageQuality) => void;
   /** NovelAI 생성 모드 — free=Opus 무료(≤1MP) / high=고품질(큰 해상도, Anlas 소모). */
   naiMode: NaiMode;
   setNaiMode: (m: NaiMode) => void;
@@ -245,7 +242,6 @@ export const useStore = create<State>((set, get) => {
   // translateKey 가 있을 때만(=한국어 모드 + OpenAI 키) 내부에서 GPT 번역이 일어난다.
   // 실패하면 undefined → 생성기의 결정적 프롬프트로 폴백.
   const naiCompile = async (fn: () => Promise<string>): Promise<string | undefined> => {
-    if (aiConfig.provider !== 'novelai') return undefined;
     try {
       const out = await fn();
       return out.trim() || undefined;
@@ -287,7 +283,6 @@ export const useStore = create<State>((set, get) => {
     folderName: null,
     archiveFolderName: null,
     archiveReady: false,
-    imageQuality: 'medium',
     naiMode: 'free',
     bgRemovalMethod: 'browser',
 
@@ -365,13 +360,13 @@ export const useStore = create<State>((set, get) => {
 
     aiThemeBusy: false,
     generateAiTheme: async () => {
-      const { project, apiKey } = get();
+      const { project } = get();
       if (project.scenes.length === 0 && !(project.mood ?? '').trim()) {
         flash('먼저 스토리를 분석하거나 분위기를 입력하세요.');
         return;
       }
-      // 테마는 OpenAI Chat(gpt-4o-mini)으로 만든다. 별도 openaiKey 우선, 없으면 provider 가 OpenAI 일 때만 apiKey.
-      const chatKey = get().openaiKey?.trim() || (aiConfig.provider === 'openai' ? apiKey || undefined : undefined);
+      // 테마는 OpenAI Chat(gpt-4o-mini)으로 만든다. 텍스트용 openaiKey 사용(없으면 오프라인 변형).
+      const chatKey = get().openaiKey?.trim() || undefined;
       set({ aiThemeBusy: true });
       flash(chatKey ? 'AI 테마 생성 중…' : '오프라인 테마 변형 생성 중…');
       try {
@@ -396,7 +391,7 @@ export const useStore = create<State>((set, get) => {
       flash('프리셋 테마로 복귀했습니다.');
     },
 
-    generateCharacterSprite: async (name, expr, reference, outfit = '기본') => {
+    generateCharacterSprite: async (name, expr, _reference, outfit = '기본') => {
       const char = get().project.characters.find((c) => c.name === name);
       if (!char) return undefined;
       const outfitObj = outfit !== '기본' ? char.outfits?.find((o) => o.name === outfit) : undefined;
@@ -408,21 +403,13 @@ export const useStore = create<State>((set, get) => {
       const key = `sprite:${name}`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
-        // 표정(비-기본)을 개별 생성할 때, 명시 reference 가 없으면 같은 의상의 '기본'(없으면 기본 의상의
-        // '기본')을 자동 기준으로 삼아 같은 인물로 그린다(일관성 + 기본 1장만 마음에 들면 표정은 그걸 기반).
-        let ref = reference;
-        if (!ref && expr !== '기본' && aiConfig.image.sprite.consistency === 'reference') {
-          const baseId = exprStore['기본'] ?? char.expressions['기본'];
-          if (baseId) ref = (await getAsset(baseId)) ?? undefined;
-        }
-        // 기준 입화가 없을 때(=기본 텍스트 생성)만 그림체 참조를 적용한다(여러 장 vibe).
+        // NovelAI 는 이름 기반 고정 시드로 "같은 인물, 다른 표정"을 유지하므로 기준 입화(reference)가
+        // 필요 없다. 그림체 참조(여러 장 vibe)만 로드해 화풍을 반영한다.
         let styleRefs: Blob[] | undefined;
-        if (!ref) {
-          const ids = get().project.styleRefAssetIds ?? [];
-          if (ids.length) {
-            const blobs = await Promise.all(ids.map((id) => getAsset(id)));
-            styleRefs = blobs.filter((b): b is Blob => !!b);
-          }
+        const ids = get().project.styleRefAssetIds ?? [];
+        if (ids.length) {
+          const blobs = await Promise.all(ids.map((id) => getAsset(id)));
+          styleRefs = blobs.filter((b): b is Blob => !!b);
         }
         // 의상이면 기본 외형에 의상 묘사를 덧붙여 생성한다(같은 인물, 다른 옷).
         const appearance = outfitObj?.appearance
@@ -439,9 +426,6 @@ export const useStore = create<State>((set, get) => {
           apiKey: get().apiKey,
           appearance,
           personality: char.personality,
-          quality: get().imageQuality,
-          reference: ref,
-          styleReference: styleRefs?.[0],
           styleReferences: styleRefs,
           promptOverride,
           bgRemoval: get().bgRemovalMethod,
@@ -491,22 +475,10 @@ export const useStore = create<State>((set, get) => {
     },
 
     generateCharacterSprites: async (name, outfit = '기본') => {
-      // 일관성(reference) 모드 + 키 있음: '기본'을 먼저 만들고, 그 입화를 기준으로
-      // 나머지 표정은 "표정만" 편집해 같은 인물로 유지한다. 그 외엔 각자 생성.
-      const useRef = !!get().apiKey && aiConfig.image.sprite.consistency === 'reference';
+      // NovelAI 는 이름 기반 고정 시드로 표정별 인물 일관성을 유지하므로 각 표정을 독립 생성한다.
       const exprs = projectExpressions(get().project);
-      const ordered: Expression[] = useRef
-        ? ['기본', ...exprs.filter((e) => e !== '기본')]
-        : [...exprs];
-      let reference: Blob | undefined;
-      for (const expr of ordered) {
-        const blob = await get().generateCharacterSprite(
-          name,
-          expr,
-          expr === '기본' ? undefined : reference,
-          outfit,
-        );
-        if (useRef && expr === '기본' && blob) reference = blob;
+      for (const expr of exprs) {
+        await get().generateCharacterSprite(name, expr, undefined, outfit);
       }
       flash(`${name}${outfit === '기본' ? '' : ` · ${outfit}`} 스프라이트 ${exprs.length}종 생성 완료.`);
     },
@@ -536,7 +508,7 @@ export const useStore = create<State>((set, get) => {
       const key = `sprite:${name}`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
-        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality, bgRemoval: get().bgRemovalMethod });
+        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', bgRemoval: get().bgRemovalMethod });
         const id = assetId();
         await putAsset(id, blob);
         const tag = outfit === '기본' ? '' : `${outfit} `;
@@ -591,7 +563,7 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
         // 1) 기본 입화를 지시문대로 수정 → 새 디자인의 기준이 된다.
-        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', quality: get().imageQuality, bgRemoval: get().bgRemovalMethod });
+        const { blob, source } = await editImage({ blob: src, instruction, apiKey, kind: 'sprite', bgRemoval: get().bgRemovalMethod });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -859,9 +831,7 @@ export const useStore = create<State>((set, get) => {
           label: scene.background || scene.title,
           width: project.width,
           height: project.height,
-          apiKey,
-          quality: get().imageQuality,
-        });
+          apiKey,        });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -920,14 +890,11 @@ export const useStore = create<State>((set, get) => {
       const key = `${sceneId}:bg`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
-        const { project } = get();
         const { blob, source } = await editImage({
           blob: src,
           instruction,
           apiKey,
           kind: 'background',
-          size: normalizeImageSize(project.width, project.height),
-          quality: get().imageQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -1148,9 +1115,7 @@ export const useStore = create<State>((set, get) => {
           label: key,
           width: project.width,
           height: project.height,
-          apiKey,
-          quality: get().imageQuality,
-        });
+          apiKey,        });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -1217,10 +1182,7 @@ export const useStore = create<State>((set, get) => {
           directions: using[0].direction,
           character: charBlob,
           background: bgBlob,
-          apiKey,
-          size: normalizeImageSize(project.width, project.height),
-          quality: get().imageQuality,
-        });
+          apiKey,        });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -1284,14 +1246,11 @@ export const useStore = create<State>((set, get) => {
       const busyKey = `cg:${key}`;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
       try {
-        const { project } = get();
         const { blob, source } = await editImage({
           blob: src,
           instruction,
           apiKey,
           kind: 'background',
-          size: normalizeImageSize(project.width, project.height),
-          quality: get().imageQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -1415,10 +1374,7 @@ export const useStore = create<State>((set, get) => {
           blob: refBlob,
           instruction,
           apiKey,
-          kind: 'background',
-          size: normalizeImageSize(project.width, project.height),
-          quality: get().imageQuality,
-        });
+          kind: 'background',        });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -1568,9 +1524,7 @@ export const useStore = create<State>((set, get) => {
           mood: project.mood,
           character: charBlob,
           background: bgBlob,
-          apiKey,
-          quality: get().imageQuality,
-        });
+          apiKey,        });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -1639,15 +1593,6 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
-    setImageQuality: (q) => {
-      set({ imageQuality: q });
-      try {
-        localStorage.setItem('na_image_quality', q);
-      } catch {
-        /* ignore */
-      }
-    },
-
     setNaiMode: (m) => {
       // 생성기(naiActiveSizes/Steps)가 읽는 단일 소스 = aiConfig 모드. 함께 갱신.
       aiConfig.image.novelai.mode = m;
@@ -1677,13 +1622,6 @@ export const useStore = create<State>((set, get) => {
     hydrate: () => {
       const loaded = loadProject();
       const apiKey = loadApiKey();
-      const savedQuality = (() => {
-        try {
-          return localStorage.getItem('na_image_quality') as ImageQuality | null;
-        } catch {
-          return null;
-        }
-      })();
       const savedMode = (() => {
         try {
           return localStorage.getItem('na_nai_mode') as NaiMode | null;
@@ -1718,7 +1656,6 @@ export const useStore = create<State>((set, get) => {
       } else {
         set({ apiKey });
       }
-      if (savedQuality) set({ imageQuality: savedQuality });
       if (savedMode === 'free' || savedMode === 'high') {
         aiConfig.image.novelai.mode = savedMode;
         set({ naiMode: savedMode });
