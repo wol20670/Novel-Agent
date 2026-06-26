@@ -258,6 +258,8 @@ export default function LeftPanel() {
         <NaiModeSelector />
       </section>
 
+      <BatchGen />
+
       {/* 이미지 보관 폴더 */}
       {folderSupported && (
         <section className="flex flex-col gap-2">
@@ -373,6 +375,48 @@ function NaiModeSelector() {
               : '흰 배경 그대로 둡니다(Anlas 0). 외부 툴로 직접 누끼할 때만.'}
       </p>
     </div>
+  );
+}
+
+/** DB 태그를 무작위 조합해 미소녀 입화를 멈출 때까지 1장씩(무료) 생성하는 패널. */
+function BatchGen() {
+  const running = useStore((s) => s.batchRunning);
+  const results = useStore((s) => s.batchResults);
+  const start = useStore((s) => s.startBatchGen);
+  const stop = useStore((s) => s.stopBatchGen);
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="section-title">🎲 랜덤 미소녀 생성</h2>
+      <p className="text-[11px] text-gray-500 leading-snug">
+        DB 태그를 무작위 조합해 <b className="text-gray-400">멈출 때까지 1장씩 무료</b>로 계속 생성합니다(브라우저
+        누끼 · Anlas 0). 결과는 아래 + 소스 보관 폴더(<code className="text-accent">random/</code>)에 저장돼요.
+      </p>
+      <button
+        onClick={() => (running ? stop() : start())}
+        className={`text-xs py-1.5 rounded border font-medium transition-colors ${
+          running
+            ? 'border-red-500 text-red-400 bg-red-500/10 hover:bg-red-500/20'
+            : 'border-accent text-accent bg-accent/10 hover:bg-accent/20'
+        }`}
+      >
+        {running ? `■ 멈춤 (생성됨 ${results.length})` : '▶ 시작'}
+      </button>
+      {results.length > 0 && (
+        <div className="grid grid-cols-4 gap-1">
+          {results.map((url, i) => (
+            <a
+              key={i}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="block aspect-[2/3] overflow-hidden rounded border border-edge bg-black/20"
+            >
+              <img src={url} alt="" className="w-full h-full object-cover" />
+            </a>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

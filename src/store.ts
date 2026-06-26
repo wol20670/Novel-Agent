@@ -4,6 +4,7 @@ import { emptyProject, projectExpressions, effectiveExpressions } from './types'
 import { parseText, parseWorkbook } from './parser';
 import { generateImage, generateSprite, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, type BgRemoval } from './generators/image';
 import { compileSpritePrompt, compileScenePrompt, compileCgPrompt } from './generators/image/promptCompiler';
+import { ALL_TAGS } from './generators/image/tagDictionary';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
 import { aiConfig, type NaiMode } from './config/aiConfig';
@@ -77,6 +78,13 @@ interface State {
 
   // GUI 테마 (AI/오프라인 생성)
   aiThemeBusy: boolean;
+  /** 랜덤 배치 생성 진행 중 여부. */
+  batchRunning: boolean;
+  /** 배치로 만든 결과 썸네일(object URL, 최신순, 세션 메모리). */
+  batchResults: string[];
+  /** DB 태그 랜덤 조합으로 미소녀 입화를 멈출 때까지 1장씩(무료) 계속 생성. */
+  startBatchGen: () => Promise<void>;
+  stopBatchGen: () => void;
   generateAiTheme: () => Promise<void>;
   clearAiTheme: () => void;
 
@@ -202,6 +210,32 @@ interface State {
   /** 사용자 제스처에서 보관 폴더 쓰기 권한을 재요청(리로드 후 저장 활성화). */
   verifyArchive: () => Promise<void>;
   disconnectArchive: () => Promise<void>;
+}
+
+// 랜덤 배치 생성용 — DB 태그를 카테고리별로 골라 미소녀 프롬프트를 무작위 조합.
+const ensByCat = (cat: string): string[] => ALL_TAGS.filter((t) => t.cat === cat).map((t) => t.en);
+const pickOne = <T,>(a: T[]): T | undefined => (a.length ? a[Math.floor(Math.random() * a.length)] : undefined);
+const pickN = <T,>(a: T[], n: number): T[] => {
+  const copy = [...a];
+  const out: T[] = [];
+  for (let i = 0; i < n && copy.length; i++) out.push(copy.splice(Math.floor(Math.random() * copy.length), 1)[0]);
+  return out;
+};
+function randomBishoujoPrompt(): string {
+  const acc = ensByCat('Accessory');
+  const pose = ensByCat('Pose');
+  return [
+    '1girl, solo, bishoujo',
+    ...pickN(ensByCat('Body'), 3),
+    ...pickN(ensByCat('Clothing'), Math.random() < 0.5 ? 1 : 2),
+    Math.random() < 0.5 ? pickOne(acc) : undefined,
+    pickOne(ensByCat('Expression')),
+    Math.random() < 0.4 ? pickOne(pose) : undefined,
+    'cowboy shot, looking at viewer',
+    'white background, simple background',
+  ]
+    .filter(Boolean)
+    .join(', ');
 }
 
 export const useStore = create<State>((set, get) => {
@@ -389,6 +423,50 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ project: { ...s.project, guiTheme: undefined } }));
       autoSave();
       flash('프리셋 테마로 복귀했습니다.');
+    },
+
+    batchRunning: false,
+    batchResults: [],
+    stopBatchGen: () => set({ batchRunning: false }),
+    startBatchGen: async () => {
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('먼저 NovelAI 토큰을 입력하세요.');
+      if (get().batchRunning) return;
+      set({ batchRunning: true });
+      flash('랜덤 미소녀 생성 시작 — 멈출 때까지 1장씩 무료로 생성합니다.');
+      let n = 0;
+      let warnedArchive = false;
+      while (get().batchRunning) {
+        try {
+          const { blob } = await generateSprite({
+            name: `rand-${Date.now()}`,
+            expression: '기본',
+            color: '#88aaff',
+            apiKey,
+            promptOverride: randomBishoujoPrompt(),
+            bgRemoval: 'browser',
+          });
+          if (!get().batchRunning) break; // 생성 도중 멈춤 반영
+          const url = URL.createObjectURL(blob);
+          set((s) => {
+            const next = [url, ...s.batchResults];
+            next.slice(60).forEach((u) => URL.revokeObjectURL(u)); // 60장 초과분 URL 정리
+            return { batchResults: next.slice(0, 60) };
+          });
+          const ok = await archiveImage(blob, `random/미소녀_${timestamp()}.png`);
+          if (!ok && !warnedArchive) {
+            warnedArchive = true;
+            flash('팁: 소스 보관 폴더를 연결하면 PNG 파일로도 저장됩니다.');
+          }
+          n++;
+        } catch (e) {
+          flash(`배치 중단: ${(e as Error).message}`);
+          set({ batchRunning: false });
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 1200)); // 무료 "한 번에 하나" + 레이트리밋 배려
+      }
+      flash(`랜덤 생성 종료 (총 ${n}장).`);
     },
 
     generateCharacterSprite: async (name, expr, _reference, outfit = '기본') => {
