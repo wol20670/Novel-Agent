@@ -5,6 +5,7 @@
   "type": "module",
   "description": "오프라인 동작 Ren'Py 비주얼노벨 제작 보조 앱",
   "scripts": {
+    "predev": "node scripts/sync-tags.mjs --soft",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",

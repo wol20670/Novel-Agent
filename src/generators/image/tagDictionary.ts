@@ -87,21 +87,52 @@ export const TAG_DICTIONARY: TagEntry[] = [
   // @generated:end
 ];
 
+// 시트와 별개로 직접 유지하는 추가/보정 동의어(동기화에 덮어쓰이지 않음).
+// 시트엔 없지만 자주 쓰는 한국어 표현을 같은 영문 태그에 매핑해 매칭률을 높인다.
+export const TAG_OVERRIDES: TagEntry[] = [
+  { ko: ['바지 정장'], en: 'business suit, pantsuit', cat: 'Clothing' },
+  { ko: ['평상복'], en: 'casual wear', cat: 'Clothing' },
+  { ko: ['심플 배경'], en: 'simple background', cat: 'Background' },
+  { ko: ['흰 배경'], en: 'white background', cat: 'Background' },
+  { ko: ['아웃포커싱'], en: 'depth of field', cat: 'Effect' },
+  { ko: ['화려한 색감'], en: 'colorful', cat: 'Style' },
+  { ko: ['미소'], en: 'smile', cat: 'Expression' },
+  { ko: ['볼 빨개짐'], en: 'blush', cat: 'Expression' },
+  { ko: ['무표정'], en: 'expressionless', cat: 'Expression' },
+  { ko: ['윙크'], en: 'wink', cat: 'Expression' },
+  { ko: ['의기양양한'], en: 'smug', cat: 'Expression' },
+  { ko: ['클로즈업'], en: 'close-up', cat: 'Camera' },
+  { ko: ['정면 응시'], en: 'looking at viewer', cat: 'Camera' },
+  { ko: ['다이내믹 앵글'], en: 'dynamic angle', cat: 'Camera' },
+  { ko: ['여성 1명'], en: '1girl', cat: 'Subject' },
+  { ko: ['남성 1명'], en: '1boy', cat: 'Subject' },
+];
+
+/** 헬퍼가 사용하는 최종 사전 = 시트 동기화분 + 직접 유지 오버라이드. */
+export const ALL_TAGS: TagEntry[] = [...TAG_DICTIONARY, ...TAG_OVERRIDES];
+
 /** 해당 카테고리만 골라 System Prompt 에 주입할 텍스트 블록으로 렌더링. */
 export function dictionaryPromptBlock(cats: TagCategory[]): string {
   const lines: string[] = [];
   for (const cat of cats) {
-    const rows = TAG_DICTIONARY.filter((e) => e.cat === cat);
+    const rows = ALL_TAGS.filter((e) => e.cat === cat);
     if (!rows.length) continue;
+    // 같은 영문 태그(en)끼리 한국어 동의어를 한 줄로 합쳐 보여준다(시트+오버라이드 통합).
+    const byEn = new Map<string, string[]>();
+    for (const e of rows) {
+      const cur = byEn.get(e.en) ?? [];
+      for (const k of e.ko) if (!cur.includes(k)) cur.push(k);
+      byEn.set(e.en, cur);
+    }
     lines.push(`[${cat}]`);
-    for (const e of rows) lines.push(`${e.ko.join(' / ')} => ${e.en}`);
+    for (const [en, ko] of byEn) lines.push(`${ko.join(' / ')} => ${en}`);
   }
   return lines.join('\n');
 }
 
 /** 사전에 등록된 모든 영문 태그(개별 단위, 소문자)의 집합 — 미등록 태그 판별용. */
 export const DICTIONARY_EN_TAGS: Set<string> = new Set(
-  TAG_DICTIONARY.flatMap((e) => e.en.split(',').map((t) => t.trim().toLowerCase())).filter(Boolean),
+  ALL_TAGS.flatMap((e) => e.en.split(',').map((t) => t.trim().toLowerCase())).filter(Boolean),
 );
 
 // 사전에 없어도 정상인 구조/범용 태그(미등록 후보로 잡지 않음).

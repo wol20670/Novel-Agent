@@ -3,6 +3,7 @@
 // 사용법:
 //   npm run sync:tags          # 시트를 읽어 tagDictionary.ts 의 @generated 블록을 덮어씀
 //   npm run sync:tags -- --dry # 덮어쓰지 않고 결과만 출력(검증용)
+//   node scripts/sync-tags.mjs --soft # 실패해도 exit 0(오프라인에서 dev 가 멈추지 않게 — predev 용)
 //
 // 권한: 시트가 "링크가 있는 모든 사용자 → 뷰어" 면 충분(편집권 불필요). 키/인증 없음.
 // 시트 구조(권장): [한국어(동의어는 / 로 구분) | 영문 태그 | 카테고리] — 헤더 1줄.
@@ -22,6 +23,7 @@ const CATEGORIES = [
 const here = dirname(fileURLToPath(import.meta.url));
 const TARGET = resolve(here, '../src/generators/image/tagDictionary.ts');
 const DRY = process.argv.includes('--dry');
+const SOFT = process.argv.includes('--soft'); // 실패를 경고로만 처리(dev 부팅 차단 방지)
 
 /** 따옴표/쉼표/개행을 처리하는 최소 CSV 파서 → 행(셀 배열)들. */
 function parseCsv(text) {
@@ -64,6 +66,7 @@ const esc = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 async function main() {
   const res = await fetch(CSV_URL);
   if (!res.ok) {
+    await res.arrayBuffer().catch(() => {}); // 소켓을 비워 정상 종료(미소비 시 Windows 종료 어서션).
     if (res.status === 401 || res.status === 403) {
       throw new Error(`시트 접근 거부(HTTP ${res.status}). 공유 설정을 "링크가 있는 모든 사용자 → 뷰어"로 바꾸세요.`);
     }
@@ -122,6 +125,13 @@ async function main() {
 }
 
 main().catch((e) => {
+  if (SOFT) {
+    // 오프라인 등 — dev 부팅을 막지 않는다. process.exit() 대신 exitCode 만 두어
+    // 남은 비동기 핸들이 자연히 닫힌 뒤 종료(Windows libuv 종료 어서션 회피).
+    console.warn(`⚠ 태그 동기화 건너뜀(기존 사전 사용): ${e.message}`);
+    process.exitCode = 0;
+    return;
+  }
   console.error('✗', e.message);
-  process.exit(1);
+  process.exitCode = 1;
 });
