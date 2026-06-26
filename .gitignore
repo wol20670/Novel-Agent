@@ -10,3 +10,7 @@ e2e-shots/
 .lint-tmp/
 .romance-build/
 *_renpy.zip
+
+# 비밀: 서비스 계정 키·시트 백업 (절대 커밋 금지)
+.secrets/
+*.iam.gserviceaccount.com.json
