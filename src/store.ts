@@ -225,7 +225,8 @@ function randomBishoujoPrompt(): string {
   const acc = ensByCat('Accessory');
   const pose = ensByCat('Pose');
   return [
-    '1girl, solo, bishoujo',
+    // 색 강제(흑백/만화풍으로 빠지는 것 방지) — NovelAI 가중치 문법.
+    '1girl, solo, bishoujo, 1.3::colorful::, vibrant colors, anime coloring',
     ...pickN(ensByCat('Body'), 3),
     ...pickN(ensByCat('Clothing'), Math.random() < 0.5 ? 1 : 2),
     Math.random() < 0.5 ? pickOne(acc) : undefined,
@@ -444,6 +445,8 @@ export const useStore = create<State>((set, get) => {
             color: '#88aaff',
             apiKey,
             promptOverride: randomBishoujoPrompt(),
+            // 흑백/만화풍으로 빠지지 않게 네거티브에 추가(배치 한정).
+            negative: `${aiConfig.image.novelai.negativePrompt}, monochrome, greyscale, sketch, lineart, manga`,
             bgRemoval: get().bgRemovalMethod, // 좌측에서 고른 누끼 방식(AI/브라우저/…)을 그대로 사용
           });
           if (!get().batchRunning) break; // 생성 도중 멈춤 반영

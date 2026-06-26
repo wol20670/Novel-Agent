@@ -173,6 +173,8 @@ export interface SpriteRequest {
   styleReferences?: Blob[];
   /** NovelAI 용으로 미리 컴파일된 프롬프트(단부루 태그). 있으면 spritePrompt 대신 이걸 쓴다. */
   promptOverride?: string;
+  /** 네거티브 프롬프트 오버라이드(미지정 시 config 기본값). */
+  negative?: string;
   /** 누끼 방식. 미지정 시 browser(무료). */
   bgRemoval?: BgRemoval;
 }
@@ -210,6 +212,7 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
       steps: naiActiveSteps(),
       seed,
       styleReferences: req.styleReferences,
+      negative: req.negative,
     });
     blob = await applyBgRemoval(blob, req.bgRemoval ?? 'browser', apiKey);
     return { blob, source: 'novelai' };
