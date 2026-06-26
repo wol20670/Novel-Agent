@@ -68,7 +68,12 @@ function normalizeEn(s) {
     .join(', ');
 }
 
-/** "교복 (세일러복)" / "넥타이 / 리본" → ['교복','세일러복'] / ['넥타이','리본'] */
+// 한국어 칸에 섞인 "메모(주석)" 판별 → 동의어로 오인되지 않게 자동 제외.
+// (예: "NAI V2부터 제외", "권장하지 않음", "v3 전용" …) 실제 태그 의미어는 이런 단어를 안 쓴다.
+const NOTE_RE = /제외|권장|주의|참고|금지|않음|안\s?함|더\s?이상|deprecated|구버전|\bNAI\b|v?\d+(?:\.\d+)?\s*(?:부터|전용|이상|이하)/i;
+const isNote = (s) => NOTE_RE.test(s);
+
+/** "교복 (세일러복)" / "넥타이 / 리본" → ['교복','세일러복'] / ['넥타이','리본'] (메모 토큰 제거) */
 function parseKo(cell) {
   const out = [];
   // 동의어 구분자: '/' 권장이지만 현행 시트의 ',' 도 관용 처리(ko 열엔 한 의미에 쉼표가 없음).
@@ -78,7 +83,7 @@ function parseKo(cell) {
     if (m) { if (m[1].trim()) out.push(m[1].trim()); if (m[2].trim()) out.push(m[2].trim()); }
     else if (piece) out.push(piece);
   }
-  return out;
+  return out.filter((k) => !isNote(k));
 }
 
 const esc = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
