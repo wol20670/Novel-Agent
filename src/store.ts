@@ -232,19 +232,46 @@ const EYE_COLORS = [
   'yellow eyes', 'golden eyes', 'aqua eyes', 'grey eyes', 'pink eyes',
 ];
 
+// 톤(전체 색감 분위기) — 매번 무작위로 하나 골라 비슷한 느낌 방지(파스텔·비비드·차분·웜·쿨).
+const PALETTE_TONES = ['pastel colors', 'vivid colors', 'muted colors', 'warm color palette', 'cool color palette'];
+// 의상 색 — 단순 의상 태그 앞에 붙여 옷 색을 다양화.
+const OUTFIT_COLORS = ['red', 'blue', 'green', 'yellow', 'purple', 'pink', 'black', 'white', 'orange', 'teal', 'brown', 'navy'];
+const HAS_COLOR = /\b(red|blue|green|yellow|purple|pink|black|white|orange|brown|grey|gray|silver|gold|golden|navy|teal|aqua)\b/i;
+
+const maybe = (p: number): boolean => Math.random() < p;
+
+/** 머리색 — 30% 확률로 그라데이션/투톤(서로 다른 두 색). */
+function randomHair(): string {
+  const c1 = pickOne(HAIR_COLORS)!;
+  if (maybe(0.3)) {
+    let c2 = pickOne(HAIR_COLORS)!;
+    for (let i = 0; i < 5 && c2 === c1; i++) c2 = pickOne(HAIR_COLORS)!;
+    return `${c1}, ${c2}, gradient hair, multicolored hair, streaked hair`;
+  }
+  return c1;
+}
+
+/** 단순 의상 태그(쉼표·기존 색 없음)에 55% 확률로 색을 붙인다. */
+function colorizeClothes(c: string): string {
+  if (c.includes(',') || HAS_COLOR.test(c)) return c;
+  return maybe(0.55) ? `${pickOne(OUTFIT_COLORS)} ${c}` : c;
+}
+
 function randomBishoujoPrompt(): string {
   const acc = ensByCat('Accessory');
   const pose = ensByCat('Pose');
+  const clothes = pickN(ensByCat('Clothing'), maybe(0.5) ? 2 : 1).map(colorizeClothes);
   return [
-    // 흑백 방지는 네거티브가 담당 → 여기선 색 톤을 강제하지 않고 머리/눈 색을 무작위로 다양화.
+    // 흑백 방지는 네거티브가 담당 → 여기선 머리/눈/톤/의상 색을 무작위로 다양화.
     '1girl, solo, bishoujo, anime coloring',
-    pickOne(HAIR_COLORS),
+    randomHair(),
     pickOne(EYE_COLORS),
-    ...pickN(ensByCat('Body'), 2), // 색 외 신체 특징(머리/눈 색은 위에서 이미 지정)
-    ...pickN(ensByCat('Clothing'), Math.random() < 0.5 ? 1 : 2),
-    Math.random() < 0.5 ? pickOne(acc) : undefined,
+    maybe(0.7) ? pickOne(PALETTE_TONES) : undefined,
+    ...pickN(ensByCat('Body'), 2), // 색 외 신체 특징
+    ...clothes,
+    maybe(0.5) ? pickOne(acc) : undefined,
     pickOne(ensByCat('Expression')),
-    Math.random() < 0.4 ? pickOne(pose) : undefined,
+    maybe(0.4) ? pickOne(pose) : undefined,
     'cowboy shot, looking at viewer',
     'white background, simple background',
   ]
