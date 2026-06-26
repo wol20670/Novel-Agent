@@ -27,7 +27,9 @@ export interface TagEntry {
 
 // 개선한 표 구조(시트 권장): [한국어(동의어 / 구분) | 영문태그 | 카테고리] 단일 헤더 1줄.
 // (기존 시트는 카테고리 블록마다 헤더가 반복돼 파싱이 어려웠음 → 카테고리는 한 열로 통합.)
+// 아래 @generated 블록은 `npm run sync:tags` 가 시트 CSV 로 덮어쓴다(직접 편집 금지).
 export const TAG_DICTIONARY: TagEntry[] = [
+  // @generated:start
   // Clothing
   { ko: ['교복', '세일러복'], en: 'school uniform, serafuku', cat: 'Clothing' },
   { ko: ['정장', '바지 정장'], en: 'business suit, pantsuit', cat: 'Clothing' },
@@ -91,6 +93,7 @@ export const TAG_DICTIONARY: TagEntry[] = [
   // Subject
   { ko: ['1명의 여성', '여성 1명'], en: '1girl', cat: 'Subject' },
   { ko: ['1명의 남성', '남성 1명'], en: '1boy', cat: 'Subject' },
+  // @generated:end
 ];
 
 /** 해당 카테고리만 골라 System Prompt 에 주입할 텍스트 블록으로 렌더링. */
