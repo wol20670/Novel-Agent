@@ -221,13 +221,26 @@ const pickN = <T,>(a: T[], n: number): T[] => {
   for (let i = 0; i < n && copy.length; i++) out.push(copy.splice(Math.floor(Math.random() * copy.length), 1)[0]);
   return out;
 };
+// 다양한 머리색·눈색 팔레트 — 매 생성마다 무작위로 1개씩 명시해 노랑/핑크 쏠림을 깬다.
+const HAIR_COLORS = [
+  'black hair', 'dark brown hair', 'brown hair', 'blonde hair', 'platinum blonde hair',
+  'white hair', 'silver hair', 'grey hair', 'blue hair', 'light blue hair', 'navy hair',
+  'pink hair', 'red hair', 'green hair', 'dark green hair', 'purple hair', 'orange hair', 'aqua hair',
+];
+const EYE_COLORS = [
+  'blue eyes', 'green eyes', 'red eyes', 'brown eyes', 'purple eyes',
+  'yellow eyes', 'golden eyes', 'aqua eyes', 'grey eyes', 'pink eyes',
+];
+
 function randomBishoujoPrompt(): string {
   const acc = ensByCat('Accessory');
   const pose = ensByCat('Pose');
   return [
-    // 색 강제(흑백/만화풍으로 빠지는 것 방지) — NovelAI 가중치 문법.
-    '1girl, solo, bishoujo, 1.3::colorful::, vibrant colors, anime coloring',
-    ...pickN(ensByCat('Body'), 3),
+    // 흑백 방지는 네거티브가 담당 → 여기선 색 톤을 강제하지 않고 머리/눈 색을 무작위로 다양화.
+    '1girl, solo, bishoujo, anime coloring',
+    pickOne(HAIR_COLORS),
+    pickOne(EYE_COLORS),
+    ...pickN(ensByCat('Body'), 2), // 색 외 신체 특징(머리/눈 색은 위에서 이미 지정)
     ...pickN(ensByCat('Clothing'), Math.random() < 0.5 ? 1 : 2),
     Math.random() < 0.5 ? pickOne(acc) : undefined,
     pickOne(ensByCat('Expression')),
