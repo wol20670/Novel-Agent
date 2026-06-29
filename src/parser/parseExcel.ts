@@ -7,10 +7,11 @@
 // 캐릭터 외형·성격, 배경/CG 프롬프트, GUI 등 "설정"은 엑셀이 아니라 앱(에셋·테마 화면)에서
 // 관리한다. 엑셀은 대본 전용이다.
 
-import * as XLSX from 'xlsx';
 import { SceneBuilder, applyTag, type BuildResult } from './sceneBuilder';
 
-export function parseWorkbook(data: ArrayBuffer): BuildResult {
+export async function parseWorkbook(data: ArrayBuffer): Promise<BuildResult> {
+  // 지연 로딩: 무거운 xlsx 는 엑셀 분석 시에만 받아온다(초기 번들 경량화).
+  const XLSX = await import('xlsx');
   const wb = XLSX.read(data, { type: 'array' });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json<(string | number | undefined)[]>(sheet, {

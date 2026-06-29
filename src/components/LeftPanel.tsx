@@ -40,7 +40,7 @@ export default function LeftPanel() {
     const file = e.target.files?.[0];
     if (!file) return;
     const buf = await file.arrayBuffer();
-    analyzeExcel(buf);
+    await analyzeExcel(buf);
     if (fileRef.current) fileRef.current.value = '';
   };
 

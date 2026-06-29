@@ -1,6 +1,5 @@
 // 입력 양식 템플릿 다운로드: 엑셀(.xlsx) / 텍스트(.txt).
 
-import * as XLSX from 'xlsx';
 import { downloadBlob } from './zip/buildZip';
 import { SAMPLE_STORY } from './sample';
 
@@ -10,7 +9,9 @@ import { SAMPLE_STORY } from './sample';
  *  2) 작성법(읽어보기) — 태그 설명. 파서가 무시한다.
  * 캐릭터 외형·성격, 배경/CG 프롬프트, GUI 등 모든 "설정"은 앱(에셋·테마 화면)에서 한다.
  */
-export function downloadExcelTemplate(): void {
+export async function downloadExcelTemplate(): Promise<void> {
+  // 지연 로딩: 무거운 xlsx 는 양식 다운로드 시에만 받아온다(초기 번들 경량화).
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
   // ── ① 스토리 시트 ──

@@ -4,7 +4,6 @@
 // - CORS: 개발(Vite)에선 '/nai' 프록시로 우회, 배포에선 host 직접 호출.
 // 모델·사이즈·스텝·네거티브 기본값은 src/config/aiConfig.ts 한 곳에서 가져온다.
 
-import JSZip from 'jszip';
 import { aiConfig, type NaiSize } from '../../config/aiConfig';
 
 /** 개발 모드에선 Vite dev proxy('/nai')로, 배포에선 실제 host 로 보낸다(CORS 우회). */
@@ -143,7 +142,8 @@ async function postRaw(url: string, body: unknown, apiKey: string, label: string
 async function bufToImage(buf: ArrayBuffer, label: string): Promise<Blob> {
   const u8 = new Uint8Array(buf);
   if (u8[0] === 0x50 && u8[1] === 0x4b) {
-    // ZIP (generate/img2img/augment 응답).
+    // ZIP (generate/img2img/augment 응답). jszip 은 지연 로딩(초기 번들 경량화, 첫 호출만 로드).
+    const { default: JSZip } = await import('jszip');
     const zip = await JSZip.loadAsync(buf);
     const pngs = Object.values(zip.files)
       .filter((f) => !f.dir && /\.png$/i.test(f.name))
