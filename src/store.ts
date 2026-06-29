@@ -74,7 +74,7 @@ interface State {
   setRawInput: (text: string) => void;
   loadSample: () => void;
   analyzeText: (text: string) => void;
-  analyzeExcel: (data: ArrayBuffer) => void;
+  analyzeExcel: (data: ArrayBuffer) => Promise<void>;
 
   // 장면 편집
   updateScene: (id: string, patch: Partial<Scene>) => void;
@@ -444,8 +444,8 @@ export const useStore = create<State>((set, get) => {
       flash(`${scenes.length}개 장면, ${characters.length}명 캐릭터를 분석했습니다.`);
     },
 
-    analyzeExcel: (data) => {
-      const { scenes, characters } = parseWorkbook(data);
+    analyzeExcel: async (data) => {
+      const { scenes, characters } = await parseWorkbook(data);
       if (scenes.length === 0) {
         flash('엑셀에서 장면을 찾지 못했습니다. A/B열 형식을 확인하세요.');
         return;

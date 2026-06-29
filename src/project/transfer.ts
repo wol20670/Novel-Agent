@@ -2,7 +2,6 @@
 // 메타데이터(project + assets 맵)는 project.json 에, 바이너리(PNG/WAV)는 assets/ 에 담는다.
 // base64 JSON 대비 바이너리를 그대로 저장 + DEFLATE 압축이라 용량 효율이 좋다.
 
-import JSZip from 'jszip';
 import type { Project, AssetMeta } from '../types';
 import { getAsset, putAsset } from '../storage/assetStore';
 
@@ -36,6 +35,7 @@ export async function exportProjectFile(
   project: Project,
   assets: Record<string, AssetMeta>,
 ): Promise<ExportResult> {
+  const { default: JSZip } = await import('jszip'); // 지연 로딩(초기 번들 경량화)
   const zip = new JSZip();
   const manifest: ProjectManifest = {
     version: PROJECT_FILE_VERSION,
@@ -70,6 +70,7 @@ export interface ImportResult {
 
 /** .npproj.zip 을 읽어 에셋 바이너리를 IndexedDB 에 복원하고 메타를 반환한다. */
 export async function importProjectFile(file: File | Blob): Promise<ImportResult> {
+  const { default: JSZip } = await import('jszip'); // 지연 로딩(초기 번들 경량화)
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const manifestFile = zip.file('project.json');
   if (!manifestFile) {

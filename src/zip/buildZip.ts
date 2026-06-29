@@ -2,7 +2,6 @@
 // 텍스트 .rpy 는 generate.ts, 바이너리는 IndexedDB 의 생성 에셋을 쓰되
 // 아직 생성되지 않은 배경/CG/BGM 은 즉석 폴백(Canvas/합성)으로 채워 실행 가능한 ZIP 을 보장한다.
 
-import JSZip from 'jszip';
 import type { Project } from '../types';
 import { generateRenpyFiles } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
@@ -154,6 +153,7 @@ export async function collectProjectFiles(
 }
 
 export async function buildRenpyZip(project: Project): Promise<ZipResult> {
+  const { default: JSZip } = await import('jszip'); // 지연 로딩(초기 번들 경량화)
   const { files, placeholders } = await collectProjectFiles(project);
   const zip = new JSZip();
   for (const f of files) zip.file(f.path, f.data);
