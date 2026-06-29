@@ -11,7 +11,7 @@
 //   > 앞자리에 앉는다.
 //   > 창가 자리에 앉는다.
 
-import { SceneBuilder, applyTag, type BuildResult } from './sceneBuilder';
+import { SceneBuilder, applyTag, splitJointSpeaker, type BuildResult } from './sceneBuilder';
 
 const FIELD = /^(장면|배경|BGM|복장|연출|CG|점프)\s*[:：]\s*(.*)$/i;
 
@@ -69,8 +69,11 @@ export function parseText(input: string): BuildResult {
     if (idx > 0) {
       const speaker = line.slice(0, idx).trim();
       const text = line.slice(idx + 1).trim();
-      // 화자 이름에 공백이 많거나 콜론 뒤가 비면 지문 취급
-      if (speaker && text && speaker.length <= 20 && !speaker.includes(' ')) {
+      // 합동 화자("A & B" / "A, B")는 구분자로 둘 이상이 분해되면 공백이 있어도 대사로 받는다.
+      // 그 외엔 단일 화자 휴리스틱(공백 없는 짧은 이름)으로 지문 오인을 막는다.
+      const looksJoint = splitJointSpeaker(speaker).length >= 2;
+      const looksSingle = speaker.length <= 20 && !speaker.includes(' ');
+      if (speaker && text && (looksJoint || looksSingle)) {
         b.addDialogue(speaker, text);
         continue;
       }

@@ -14,10 +14,6 @@ type DirHandle = FileSystemDirectoryHandle & {
 
 let cached: DirHandle | null = null;
 
-export function isArchiveSupported(): boolean {
-  return typeof window !== 'undefined' && 'showDirectoryPicker' in window;
-}
-
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(HANDLE_DB, 1);

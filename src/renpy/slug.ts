@@ -30,12 +30,3 @@ export class SlugMap {
     return this.map.has(key.trim());
   }
 }
-
-/** 에셋 파일명용 슬러그(확장자 제외). 한글이면 해시 기반 영문명. */
-export function fileSlug(name: string, fallback: string): string {
-  const ascii = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return ascii || fallback;
-}

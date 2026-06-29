@@ -12,7 +12,8 @@
 ```
 
 - **AI 키 없이도 완전 동작**: 배경/스프라이트는 Canvas 임시 이미지, BGM 은 Web Audio 합성기로 오프라인 생성.
-- **NovelAI 키 입력 시**: `NovelAI Diffusion V4.5` 로 실제 배경·CG·캐릭터 입화 생성(서브컬쳐/애니 일러스트 고품질). 키는 브라우저(localStorage)에만 저장. OpenAI `gpt-image-1` 경로도 코드에 남아 있어 `aiConfig.provider` 로 전환 가능.
+- **NovelAI 토큰 입력 시**: `NovelAI Diffusion V4.5` 로 실제 배경·CG·캐릭터 입화 생성(서브컬쳐/애니 일러스트 고품질). 이미지 생성은 **NovelAI 단일**(OpenAI 이미지 경로는 제거됨). 토큰은 브라우저(localStorage)에만 저장. **OpenAI 키는 선택** — 이미지가 아니라 **텍스트용**(한국어→영문 단부루 태그 변환 · AI 테마)으로만 쓰인다.
+- **무료 farming → 업스케일**: 무료 조건(≤1MP·전신·28step)으로 랜덤/지정 입화를 멈출 때까지 1장씩 생성해 디자인을 탐색하고, 마음에 드는 결과를 **NovelAI 업스케일(4×)** 로 같은 그림 그대로 고해상도화해 최종 입화로 쓴다(프롬프트·시드 보존).
 - **자체 제작 풀 GUI**: 메인/게임 메뉴·저장/불러오기·설정·기록·도움말·정보·**크레딧** 등 전 화면 직접 정의(외부 GUI 이미지 의존 0). 장르 프리셋 5종 + AI 테마 생성.
 - **표정·의상 편집**: 표정 세트를 추가·이름변경·삭제하고, 캐릭터마다 의상을 만들어 **대본 `#복장` 태그로 장면별 의상**을 입힌다(의상마다 표정 세트 별도).
 - **직접 업로드**: 외부 AI 이미지를 배경·스프라이트·CG·메뉴 배경 슬롯에 그대로 업로드(키 불필요).
@@ -72,18 +73,16 @@ npm run typecheck  # tsc --noEmit
 
 모든 외부 AI/API 설정은 **`src/config/aiConfig.ts` 한 파일**에 모여 있다. **실연동 시 이 파일 값만 바꾸면** 전체에 반영된다.
 
-- `provider`: 활성 이미지 provider — **`'novelai'`(기본)** 또는 `'openai'`. NovelAI 가 검증되면 추후 OpenAI 경로를 제거할 수 있다.
-- `image.novelai`: NovelAI 호스트·경로(생성/Director Tools)·모델(`nai-diffusion-4-5-curated`, 서브컬처 미소녀 화풍 최적화)·샘플러·scale(6)·생성 모드(무료/고품질)·**네거티브 프롬프트**·품질 프리픽스·vibe(그림체 참조) 강도.
-- `image`(OpenAI): 모델(`gpt-image-1`)·품질·엔드포인트(생성/편집)·사이즈 비율·스프라이트 설정.
-- `chat`: 텍스트 모델(`gpt-4o-mini`)·엔드포인트·temperature — **프롬프트 태그 변환** + AI 테마용.
+- `image.novelai`: NovelAI 호스트(이미지 `image.novelai.net` · Primary `api.novelai.net`)·경로(생성/Director Tools/**업스케일**/**encode-vibe**)·모델(`nai-diffusion-4-5-curated`, 서브컬처 미소녀 화풍 최적화)·샘플러·scale(6)·생성 모드(무료/고품질)·**네거티브 프롬프트**·품질 프리픽스·vibe(그림체 참조) 강도.
+- `chat`: 텍스트 모델(`gpt-4o-mini`)·엔드포인트·temperature — **프롬프트 태그 변환** + AI 테마용(이미지 아님).
 
 ### 프롬프트 태그 컴파일러 (선택 · OpenAI 키)
 NovelAI(특히 curated)는 **단부루(Danbooru) 영문 태그** 프롬프트에서 가장 잘 나온다. 좌측에 **OpenAI 키**를 함께 넣으면,
 한국어로 적은 외형/배경/CG 설명을 `gpt-4o-mini` 가 규칙대로 영문 태그로 자동 변환한다(`src/generators/image/promptCompiler.ts`):
-- 품질 태그는 V4.5 권장대로 프롬프트 **맨 끝**에 부착(Curated: `location, masterpiece, no text, -0.8::feet::, rating:general`). `qualityToggle` 대신 직접 부착해 결정적으로 동작.
+- 품질 태그는 V4.5 권장대로 프롬프트 **맨 끝**에 부착(`very aesthetic, best quality, amazing quality, masterpiece, absurdres, no text, rating:general`). `qualityToggle` 대신 직접 부착해 결정적으로 동작. (전신 입화와 충돌하던 `-0.8::feet::` 는 제거.)
 - 자연어 → 단부루 태그(예: `은발에 교복을 입은 소녀` → `1girl, solo, silver hair, school uniform`). 태그 순서 `1girl/1boy → 캐릭터 → 나머지`. 구형 만화풍 유도어(anime/manga 등) 제거.
 - 감정 → 강조 태그. NovelAI V4.5 가중치 문법은 **`weight::tag::`** (예: `기쁨` → `1.3::smiling::, 1.2::happy::`). ※ SD WebUI 의 `(tag:1.3)` 는 NovelAI 에서 동작 안 함. 기본 표정은 LLM 없이 매핑, 커스텀만 번역.
-- 스프라이트엔 `transparent background, white background, simple background`, 배경엔 `scenery, no humans` 자동 부착.
+- 스프라이트엔 `transparent background, white background, simple background`, 배경엔 `scenery, no humans` 자동 부착. 스프라이트는 **전신(`1.4::full body::`, head to toe)** 구도로 고정(`vn_char` 화면 90% 스케일에 맞춤)하고, **다중 컷/캐릭터 시트/콜라주 방지 네거티브**(`multiple views, reference sheet, character sheet, 2girls, split screen, panels …`)를 자동 부착한다.
 - **외형 태그는 캐릭터당 1회만 번역·캐시**해 6표정이 같은 태그를 공유(일관성). 비용 ≈ 장당 $0.0002 (사실상 무시 가능).
 - **입력 언어 토글**(좌측 `🇰🇷 한국어 → 영문 변환` / `🔤 영어 태그 그대로`)로 변환 여부를 직접 고른다.
   - **영어 태그 모드**: GPT 호출 없이 입력 태그를 바로 NovelAI 로 전송(OpenAI 키 불필요). 예: `1girl, solo, silver hair, school uniform`.
@@ -105,13 +104,20 @@ NovelAI(특히 curated)는 **단부루(Danbooru) 영문 태그** 프롬프트에
 - 에셋 화면 캐릭터 카드의 **외형**(예: 갈색 단발, 교복, 푸른 눈)·**성격·역할** 칸에 적는다. 외형은 모든 표정 프롬프트에 공통 주입되어 **동일 인물 유지**, 성격은 **분위기·표정** 참고로 들어간다. (디폴트로 "서브컬쳐 게임 그림체, 전신 풀샷, 투명 배경 PNG"가 자동 적용 — 외형만 적으면 됨.)
 - 재분석/대본 수정 시에도 입력한 외형·성격·내레이션·**의상** 설정은 **보존**된다.
 - **🎨 그림체 참조(선택, 여러 장, 전 캐릭터 공통)** — 에셋 캐릭터 섹션 상단에 마음에 드는 일러스트를 **여러 장** 업로드하면, **기본 입화** 생성 시 그 **화풍·채색만** 참고(NovelAI **vibe transfer**)하고 인물은 외형 설명대로 새로 그린다. **장수가 많을수록 화풍 반영이 정확**해진다. 썸네일마다 `×` 로 제거. 프롬프트에 **URL 링크는 무효**(API가 못 봄) — 반드시 이미지 파일을 올린다. 표정들은 기본 입화를 기준으로 그려져 자동으로 같은 화풍을 따른다.
+  - V4/V4.5 는 참조를 먼저 **`/ai/encode-vibe`** 로 인코딩해야 한다(raw 이미지 직접 전달 불가) — 신규 1장당 **2 Anlas**, 세션 캐시로 같은 참조는 재인코딩하지 않는다. ⚠️ vibe 는 화풍뿐 아니라 **구도 경향까지** 옮기므로, **여러 컷 그리드(캐릭터 시트) 참조는 콜라주를 유발**할 수 있다 — **단일 인물 일러스트 1장**을 권장(콜라주 방지 네거티브가 보조하지만, 참조 선택이 결정적).
 
 ### 캐릭터 일관성 + 비용 절약 워크플로우
 - **① 기본 입화 먼저 1장 생성** → 마음에 들면 **표정 썸네일을 하나씩 클릭**해 그 표정만 생성한다.
-  - **NovelAI**: 같은 캐릭터는 **이름 기반 고정 시드 + 표정 태그**로 동일 인물·다른 표정을 유지(불투명 생성 → 누끼).
-  - **OpenAI**: 저장된 '기본'을 기준(`images/edits`)으로 그려 동일 인물 유지.
+  - 같은 캐릭터는 **이름 기반 고정 시드 + 표정 태그**로 동일 인물·다른 표정을 유지(불투명 생성 → 누끼). 비-기본 표정은 가능하면 **Emotion Director**(기본 입화에서 표정만 변경)로 구도·의상까지 보존한다.
   - "전체 생성" 버튼은 표정 세트 일괄 옵션. 의상 탭에서는 그 **의상의** 표정 세트를 생성한다.
 - 키 없으면 Canvas 폴백.
+
+### 무료 farming → 업스케일 (디자인 탐색)
+무료 조건으로 입화를 잔뜩 뽑아 디자인을 고른 뒤, 당첨작만 고해상도화하는 워크플로우.
+- 좌측 **🎲 랜덤 미소녀 생성 ▶** — DB 태그를 무작위 조합해 **멈출 때까지 1장씩 무료**로 전신 입화를 생성(≤1MP·28step·브라우저 누끼 = Anlas 0). 결과는 세션 메모리 + 보관 폴더 `random/` 에 쌓인다.
+- 각 썸네일 hover: **📋**(프롬프트+시드 복사) · **⬆ 업스케일 4×**.
+- **업스케일**은 NovelAI `/ai/upscale`(Primary 호스트 `api.novelai.net`)로 **같은 그림 그대로 4배**(832×1216 → 3328×4864, **~7 Anlas**). 같은 시드로 큰 해상도 **재생성**하면 다른 그림이 나오므로(해상도 변경 시 결과 변동 — NovelAI 기술 특성), **재생성이 아니라 업스케일이 정석**. 결과는 다운로드 + `random/upscaled/` 저장.
+- 당첨 디자인은 표정 썸네일 **↥ 업로드**로 캐릭터 입화에 적용하거나, 복사한 프롬프트를 캐릭터 외형에 넣어 시드 기반으로 재현한다.
 
 ### 미세 수정 (refine) — 마음에 드는 결과를 버리지 않고 조금만 손보기
 - 배경(미리보기 **✏️ 수정**) · 캐릭터 입화(썸네일 **✏️** = 그 표정만)에서 지시문을 입력하면 **그 이미지를 기준으로 부분만 편집**(예: "노을을 더 붉게", "머리를 더 짧게")한다. 키 필요.
@@ -126,7 +132,7 @@ NovelAI(특히 curated)는 **단부루(Danbooru) 영문 태그** 프롬프트에
 
 ### 캐릭터 참조 CG (🎭) — 인물을 닮은 CG
 CG 컷 행에서 **참조 인물**을 고르고 **🎭** 를 누르면, 텍스트만으로 새로 그리지 않고
-**그 캐릭터의 기본 입화를 소스**(NovelAI=img2img / OpenAI=`images/edits`)로 줘서
+**그 캐릭터의 기본 입화를 소스**(NovelAI img2img)로 줘서
 **인물 정체성을 최대한 유지한 CG** 를 만든다(기본 입화가 있는 캐릭터만 목록에 뜸). 배경은 텍스트 묘사로 반영.
 - 일반 **생성**(텍스트만)은 이름만 보고 그려 캐릭터와 안 닮을 수 있으니, 등장인물 CG 는 🎭 를 권장.
 - 입화는 정면·단일 인물이라 **큰 포즈·구도 변화**는 한계가 있다(정체성은 잘 유지, 포즈는 근사치). 변화 폭이 작을수록 잘 나오고, 이후 **✏️ 수정**으로 다듬을 수 있다.
@@ -193,21 +199,13 @@ Chrome/Edge 데스크톱에서 **Ren'Py 탭 → "⚡ 폴더에 쓰기"** 로 **�
 | **무료** | ≤1MP (832×1216 · 1216×832 · 1024×1024), 28스텝 | **Opus 구독 무제한 무료** |
 | **고품질** | Large (1024×1536 · 1536×1024 · 1472×1472), 28스텝 | 장당 **Anlas** 소모(더 선명·디테일) |
 
-- **무료**로 구성·일관성을 확인하고, 마음에 드는 최종본만 **고품질**로 재생성하면 Anlas 를 아낀다.
-- **스프라이트 누끼**(Director Tools `bg-removal`)는 Director 도구라 **소량 Anlas** 가 들 수 있다.
-- 품질의 핵심은 모드보다 **모델(V4.5) + 프롬프트 + 네거티브**다.
+- **무료**로 구성·일관성을 확인하고, 마음에 드는 최종본만 **고품질**(또는 업스케일)로 올리면 Anlas 를 아낀다.
+- **스프라이트 누끼**: **브라우저 flood-fill / AI 세그멘테이션(MODNet)** 은 Anlas 0(권장), **NovelAI Director `bg-removal`** 만 소량 Anlas. 좌측에서 방식 선택.
+- **표정 변경(Emotion Director)**: 기본 입화에서 **표정만** 바꾸는 Director 툴 — 구도·의상·인물 보존, 웹과 동일 조건으로 무료.
+- **업스케일**(`/ai/upscale`, Primary 호스트 `api.novelai.net`): **4배 고정**(예: 832×1216 → 3328×4864) · **~7 Anlas**. 무료 farming 당첨작을 같은 그림 그대로 고해상도화(재생성 아님).
+- 품질의 핵심은 모드보다 **모델(V4.5) + 프롬프트 + 네거티브**다. 이미지 생성은 **NovelAI 단일**(OpenAI 이미지 경로 제거).
 
-**OpenAI(`gpt-image-1`, provider 전환 시)** — 품질이 곧 단가:
-
-| 품질 | 캐릭터(1024×1536) | 배경/CG(1536×1024) | 용도 |
-|---|---|---|---|
-| **초안** low | ~$0.016 | ~$0.016 | 구도·일관성 확인 |
-| **표준** medium | ~$0.06 | ~$0.06 | 일반 |
-| **고품질** high | ~$0.25 | ~$0.25 | 최종본 |
-
-권장: **초안으로 전체 구성 확인 → 마음에 드는 것만 고품질로 재생성**.
-
-> **해상도 참고**: 프로젝트 캔버스는 **1920×1080(16:9)** 지만, 실제 출력 픽셀은 모델 격자에 맞춰진다 — NovelAI 는 **832×1216**(세로/스프라이트)·**1216×832**(가로/배경·CG)·**1024×1024**, gpt-image-1 은 **1024×1536**·**1536×1024**. Ren'Py 가 1920×1080 화면에 맞춰 스케일하므로 결과는 16:9 로 보인다(정확히 1920×1080 출력은 불가).
+> **해상도 참고**: 프로젝트 캔버스는 **1920×1080(16:9)** 지만, 실제 출력 픽셀은 모델 격자에 맞춰진다 — NovelAI 무료는 **832×1216**(세로/스프라이트)·**1216×832**(가로/배경·CG)·**1024×1024**, 고품질은 **1024×1536**·**1536×1024**·**1472×1472**. Ren'Py 가 1920×1080 화면에 맞춰 스케일하므로 결과는 16:9 로 보인다(정확히 1920×1080 출력은 불가).
 
 ### 인게임 GUI — 대사창·폰트 (좌측 AI 테마 스튜디오)
 - **창 색·불투명도**: 대사창/선택지 배경색(기본 검정)과 불투명도(권장 10~20%) 조절 — 스크린샷처럼 반투명 검정 박스.
@@ -277,7 +275,7 @@ A열 = 화자 이름, B열 = 대사 · 지문 · 태그.
 ## 보안 / 라이선스 메모
 
 - **100% 클라이언트 사이드**(백엔드 0). BYO 키 모델 — 키는 localStorage 에만 있고 이미지 provider 호스트(`image.novelai.net` 또는 `api.openai.com`)로만 HTTPS 전송. 생성 프로젝트·`.npproj.zip` 에 **키가 들어가지 않는다**. XSS 싱크 없음(React 자동 이스케이프, `dangerouslySetInnerHTML`/`eval` 미사용).
-- **NovelAI 는 개발 서버의 `/nai` 프록시 경유**(CORS). 정적 배포로 NovelAI 를 쓰려면 별도 프록시가 필요(키는 여전히 클라이언트에만 — 공개 호스팅 시 프록시가 키를 대신 들고 있지 않도록 설계 주의).
+- **NovelAI 는 개발 서버의 프록시 경유**(CORS): 생성·증강·encode-vibe 는 **`/nai`**(`image.novelai.net`), **업스케일은 `/nai-api`**(`api.novelai.net` Primary 호스트). 정적 배포로 NovelAI 를 쓰려면 별도 프록시가 필요(키는 여전히 클라이언트에만 — 공개 호스팅 시 프록시가 키를 대신 들고 있지 않도록 설계 주의).
 - **xlsx(SheetJS)** 는 npm 0.18.5(Prototype Pollution·ReDoS) 대신 **SheetJS 공식 CDN 패치판(0.20.3)** 사용.
 - 의존성 라이선스: React/zustand MIT, xlsx Apache-2.0, jszip MIT(듀얼) — 모두 상업적 사용 가능.
 - ⚠️ 향후 **당신의 키를 제공하는 호스팅 모델**로 바꾸면 키를 절대 클라이언트에 두지 말 것(백엔드 프록시 필요).
@@ -288,18 +286,18 @@ A열 = 화자 이름, B열 = 대사 · 지문 · 태그.
 |---|---|
 | 파싱 | `src/parser/` — 텍스트/엑셀 → 공통 `Scene[]` (`sceneBuilder` 공유, 자동 분할·합동 화자·주인공 플래그·`#복장`) |
 | 표정 | `src/generators/emotion/` — 대사→표정 추론(오프라인 휴리스틱, LLM seam). 표정 세트는 `project.expressions` 로 편집 |
-| 이미지 | `src/generators/image/` — provider 어댑터(**NovelAI**/OpenAI/Canvas) + 스프라이트 일관성(시드/reference-edit) + 다중 vibe + bg-removal 누끼 + 메뉴 아트 |
+| 이미지 | `src/generators/image/` — **NovelAI**(+Canvas 폴백) + 스프라이트 일관성(이름 기반 시드, 전신) + 다중 vibe(`encode-vibe`) + bg-removal 누끼 + **업스케일(4×)** + 메뉴 아트 |
 | 오디오 | `src/generators/audio/` — Web Audio 무드 합성 → WAV |
 | GUI 테마 | `src/renpy/gui/` — `GuiTheme` → `gui.rpy`/`screens.rpy` 컴파일러(프리셋 5종, zero-PNG, 크레딧 화면) |
 | AI 테마 | `src/generators/theme/` — 색·대비(WCAG)·빌더·OpenAI JSON·오케스트레이터 |
-| AI 설정 | `src/config/aiConfig.ts` — provider 스위치·모델·사이즈·품질·네거티브·vibe·엔드포인트 단일 소스 |
+| AI 설정 | `src/config/aiConfig.ts` — 모델·사이즈·품질·네거티브·vibe·엔드포인트(생성/증강/업스케일/encode-vibe)·호스트 단일 소스 |
 | Ren'Py | `src/renpy/generate.ts` — 승인 장면 → `.rpy` 집합(label/menu/jump·표정·**의상**·위치·build.classify·credits; 속성 `<의상> <표정>`) |
 | ZIP | `src/zip/buildZip.ts` — JSZip, 미생성 에셋 폴백 자동 채움(업로드본 우선) |
 | 저장 | `src/storage/` — 메타=localStorage, 바이너리=IndexedDB |
 | 이동/폴더 | `src/project/transfer.ts`(`.npproj.zip`) · `folderSync.ts`(폴더 직접 쓰기) |
 | 상태 | `src/store.ts` — zustand |
 
-> AI 호출은 provider 어댑터로 추상화 — `aiConfig.provider` 로 **NovelAI ↔ OpenAI** 를 바꾸거나 추후 백엔드 프록시로 교체해도 UI·파싱·ZIP 로직 불변.
+> AI 호출은 provider 어댑터로 추상화 — 이미지는 **NovelAI**(키 없으면 Canvas 폴백), 텍스트는 **OpenAI chat**(선택). 추후 백엔드 프록시로 교체해도 UI·파싱·ZIP 로직 불변.
 
 ## 검증
 
@@ -317,11 +315,12 @@ npm run build       # 타입체크 + 프로덕션 빌드
 - [x] 표정 자동 추론 + 줄별 수동 선택 + 인앱 미리보기 플레이어
 - [x] 주인공(내레이션 전용)·캐릭터 자동 배치·합동 대사
 - [x] AI 설정 중앙화 + 스프라이트 일관성(시드/reference-edit) seam
-- [x] **NovelAI V4.5 provider** 전환(provider 스위치, ZIP·bg-removal 누끼·dev 프록시) + OpenAI 잔존
-- [x] **그림체 참조 다중**(vibe transfer) · **표정 세트 편집**(추가/이름변경/삭제) · **캐릭터 의상**(`#복장` 장면별)
+- [x] **이미지 = NovelAI V4.5 단일**(ZIP·bg-removal 누끼·dev 프록시, OpenAI 이미지 경로 제거 — chat 만 텍스트용 잔존)
+- [x] **그림체 참조 다중**(vibe transfer, `encode-vibe` 인코딩+캐시) · **표정 세트 편집**(추가/이름변경/삭제) · **캐릭터 의상**(`#복장` 장면별)
+- [x] **전신 입화 통일**(`1.4::full body::`) + **콜라주 방지 네거티브** + **무료 farming → 업스케일(4×)** 워크플로우(프롬프트·시드 보존)
 - [x] 배포 빌드 개발 파일 제외(build.classify) + 게임 내 크레딧/라이선스 화면
 - [x] xlsx 보안 패치(0.20.3)
-- [ ] **NovelAI 실호출 검증**(V4.5 request body·bg-removal 응답·CORS) — 토큰 확보 후
+- [x] **NovelAI 실호출 검증**(persistent token, dev) — 생성·vibe(`encode-vibe`)·업스케일(`/ai/upscale` Primary 호스트·4×) 동작 확인
 - [ ] 에셋 생성 시 프롬프트 개입 창 (최종 프롬프트 편집)
 - [ ] 대사→표정 LLM 분류기 연결 (현재 휴리스틱 / 어댑터 자리 확보됨)
 - [ ] AI 음악 provider 연결 (현재 합성기만 / 어댑터 자리 확보됨)

@@ -14,3 +14,6 @@ e2e-shots/
 # 비밀: 서비스 계정 키·시트 백업 (절대 커밋 금지)
 .secrets/
 *.iam.gserviceaccount.com.json
+
+# 로컬 참고 자료(레포에 안 올림 — 예: NovelAI API PDF). 필요하면 개별 보관.
+docs/

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, projectExpressions, effectiveExpressions } from './types';
 import { parseText, parseWorkbook } from './parser';
-import { generateImage, generateSprite, generateExpression, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, type BgRemoval } from './generators/image';
+import { generateImage, generateSprite, generateExpression, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, upscaleImage, type BgRemoval } from './generators/image';
 import { compileSpritePrompt, compileScenePrompt, compileCgPrompt } from './generators/image/promptCompiler';
 import { ALL_TAGS } from './generators/image/tagDictionary';
 import { seedFromString } from './generators/image/novelaiProvider';
@@ -41,6 +41,18 @@ import {
 } from './project/imageArchive';
 
 export type Tab = 'scenes' | 'assets' | 'renpy';
+
+/**
+ * 랜덤 배치 생성 결과 1건. 썸네일 URL 과 함께 그 이미지를 만든 프롬프트·시드를 보존해,
+ * 마음에 든 디자인을 (같은 해상도) 재현하거나 /ai/upscale 로 고해상도화할 수 있게 한다.
+ * (NovelAI 기술 명세 §7.3: 같은 시드라도 해상도를 바꾸면 결과가 달라지므로, 고해상도 최종본은
+ *  재생성이 아니라 이 원본 이미지를 업스케일하는 것이 정석이다.)
+ */
+export interface BatchResult {
+  url: string;
+  prompt: string;
+  seed: number;
+}
 
 let assetCounter = 0;
 function assetId(): string {
@@ -81,11 +93,16 @@ interface State {
   aiThemeBusy: boolean;
   /** 랜덤 배치 생성 진행 중 여부. */
   batchRunning: boolean;
-  /** 배치로 만든 결과 썸네일(object URL, 최신순, 세션 메모리). */
-  batchResults: string[];
+  /** 배치로 만든 결과(썸네일 URL + 프롬프트 + 시드, 최신순, 세션 메모리). */
+  batchResults: BatchResult[];
   /** DB 태그 랜덤 조합으로 미소녀 입화를 멈출 때까지 1장씩(무료) 계속 생성. */
   startBatchGen: () => Promise<void>;
   stopBatchGen: () => void;
+  /**
+   * 무료 farming 당첨 배치 결과를 scale 배로 업스케일해 다운로드 + 보관(Anlas 소모).
+   * 같은 그림을 그대로 키워 디자인을 보존한다(재생성 아님). 키 필요.
+   */
+  upscaleResult: (result: BatchResult, scale: number) => Promise<void>;
   generateAiTheme: () => Promise<void>;
   clearAiTheme: () => void;
 
@@ -314,11 +331,21 @@ const moodFor = (expr: string): string | undefined => KO_EMOTION_MOOD[expr.trim(
 export const useStore = create<State>((set, get) => {
   // 디바운스 자동저장
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  // 같은 저장 실패 메시지를 매 디바운스마다 반복해서 띄우지 않도록 1회만 알린다.
+  let warnedSaveQuota = false;
   const autoSave = () => {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       const { project, assets } = get();
-      saveProject(project, assets);
+      try {
+        saveProject(project, assets);
+        warnedSaveQuota = false;
+      } catch (e) {
+        if (!warnedSaveQuota) {
+          warnedSaveQuota = true;
+          flash((e as Error).message, 'error');
+        }
+      }
     }, 600);
   };
 
@@ -333,7 +360,7 @@ export const useStore = create<State>((set, get) => {
       ? type
       : /실패|없습니다|확인하세요|찾지 못/.test(msg)
         ? 'error'
-        : /완료|했습니다|생성/.test(msg)
+        : /완료|했습니다|생성했|적용했/.test(msg)
           ? 'success'
           : 'info';
     set({ toast: msg, toastType: inferred });
@@ -511,12 +538,16 @@ export const useStore = create<State>((set, get) => {
       let warnedArchive = false;
       while (get().batchRunning) {
         try {
+          // 프롬프트·시드를 명시적으로 만들어 결과와 함께 보존(나중에 재현/업스케일 추적용).
+          const prompt = randomBishoujoPrompt();
+          const seed = Math.floor(Math.random() * 4_294_967_295);
           const { blob } = await generateSprite({
             name: `rand-${Date.now()}`,
             expression: '기본',
             color: '#88aaff',
             apiKey,
-            promptOverride: randomBishoujoPrompt(),
+            promptOverride: prompt,
+            seed,
             // 흑백·만화풍 + 상반신 컷(전신 강제) 차단(배치 한정).
             negative: `${aiConfig.image.novelai.negativePrompt}, monochrome, greyscale, sketch, lineart, manga, cowboy shot, upper body, portrait, close-up, cropped`,
             bgRemoval: get().bgRemovalMethod, // 좌측에서 고른 누끼 방식(AI/브라우저/…)을 그대로 사용
@@ -524,8 +555,8 @@ export const useStore = create<State>((set, get) => {
           if (!get().batchRunning) break; // 생성 도중 멈춤 반영
           const url = URL.createObjectURL(blob);
           set((s) => {
-            const next = [url, ...s.batchResults];
-            next.slice(60).forEach((u) => URL.revokeObjectURL(u)); // 60장 초과분 URL 정리
+            const next: BatchResult[] = [{ url, prompt, seed }, ...s.batchResults];
+            next.slice(60).forEach((r) => URL.revokeObjectURL(r.url)); // 60장 초과분 URL 정리
             return { batchResults: next.slice(0, 60) };
           });
           const ok = await archiveImage(blob, `random/미소녀_${timestamp()}.png`);
@@ -542,6 +573,31 @@ export const useStore = create<State>((set, get) => {
         await new Promise((r) => setTimeout(r, 1200)); // 무료 "한 번에 하나" + 레이트리밋 배려
       }
       flash(`랜덤 생성 종료 (총 ${n}장).`);
+    },
+
+    upscaleResult: async (result, scale) => {
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('업스케일은 NovelAI 토큰이 필요합니다.');
+      const busyKey = `upscale:${result.seed}`;
+      if (get().busy[busyKey]) return;
+      set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      try {
+        // 썸네일 object URL 에서 원본 blob 복구(같은 그림을 그대로 업스케일).
+        const src = await (await fetch(result.url)).blob();
+        flash(`${scale}배 업스케일 중… (Anlas 소모)`, 'info');
+        const { blob } = await upscaleImage({ blob: src, scale, apiKey });
+        const fname = `미소녀_업스케일_x${scale}_${timestamp()}.png`;
+        downloadBlob(blob, fname);
+        void archiveImage(blob, `random/upscaled/${fname}`);
+        flash(
+          `업스케일 완료(${scale}배) — ${fname} 저장. 캐릭터 표정칸 '↥ 업로드'로 입화에 적용할 수 있어요.`,
+          'success',
+        );
+      } catch (e) {
+        flash(`업스케일 실패: ${(e as Error).message}`, 'error');
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
+      }
     },
 
     generateCharacterSprite: async (name, expr, _reference, outfit = '기본', seed) => {
@@ -630,16 +686,7 @@ export const useStore = create<State>((set, get) => {
           assets: { ...s.assets, [id]: meta },
           project: {
             ...s.project,
-            characters: s.project.characters.map((c) => {
-              if (c.name !== name) return c;
-              if (outfit === '기본') return { ...c, expressions: { ...c.expressions, [expr]: id } };
-              return {
-                ...c,
-                outfits: (c.outfits ?? []).map((o) =>
-                  o.name === outfit ? { ...o, expressions: { ...o.expressions, [expr]: id } } : o,
-                ),
-              };
-            }),
+            characters: withSpriteAsset(s.project.characters, name, outfit, expr, id),
           },
         }));
         if (prev) await deleteAsset(prev).catch(() => {});
@@ -722,16 +769,7 @@ export const useStore = create<State>((set, get) => {
           assets: { ...s.assets, [id]: meta },
           project: {
             ...s.project,
-            characters: s.project.characters.map((c) => {
-              if (c.name !== name) return c;
-              if (outfit === '기본') return { ...c, expressions: { ...c.expressions, [expr]: id } };
-              return {
-                ...c,
-                outfits: (c.outfits ?? []).map((o) =>
-                  o.name === outfit ? { ...o, expressions: { ...o.expressions, [expr]: id } } : o,
-                ),
-              };
-            }),
+            characters: withSpriteAsset(s.project.characters, name, outfit, expr, id),
           },
         }));
         await deleteAsset(curId).catch(() => {});
@@ -795,16 +833,7 @@ export const useStore = create<State>((set, get) => {
           assets: { ...s.assets, [id]: meta },
           project: {
             ...s.project,
-            characters: s.project.characters.map((c) => {
-              if (c.name !== name) return c;
-              if (outfit === '기본') return { ...c, expressions: { ...c.expressions, [expr]: id } };
-              return {
-                ...c,
-                outfits: (c.outfits ?? []).map((o) =>
-                  o.name === outfit ? { ...o, expressions: { ...o.expressions, [expr]: id } } : o,
-                ),
-              };
-            }),
+            characters: withSpriteAsset(s.project.characters, name, outfit, expr, id),
           },
         }));
         await deleteAsset(curId).catch(() => {});
@@ -1097,25 +1126,14 @@ export const useStore = create<State>((set, get) => {
           void archiveImage(blob, `backgrounds/${safeFileName(scene.background || scene.title)}_${timestamp()}.png`);
         }
         // 같은 배경 이름을 쓰는 모든 장면에 함께 적용(생성 1회 = 일관성 + 비용 절감).
-        const key = backgroundKey(scene);
-        const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === key);
-        const prevs = new Set(
-          targets.map((t) => t.backgroundAssetId).filter((x): x is string => !!x && x !== id),
-        );
-        set((s) => ({
-          assets: { ...s.assets, [id]: meta },
-          project: {
-            ...s.project,
-            scenes: s.project.scenes.map((sc) =>
-              backgroundKey(sc) === key ? { ...sc, backgroundAssetId: id } : sc,
-            ),
-          },
-        }));
+        const bkey = backgroundKey(scene);
+        const { scenes, prevs, count } = applyBackgroundToGroup(get().project.scenes, bkey, id);
+        set((s) => ({ assets: { ...s.assets, [id]: meta }, project: { ...s.project, scenes } }));
         autoSave();
         for (const p of prevs) await deleteAsset(p).catch(() => {});
         flash(
-          targets.length > 1
-            ? `'${key}' 배경을 ${targets.length}개 장면에 적용했습니다.`
+          count > 1
+            ? `'${bkey}' 배경을 ${count}개 장면에 적용했습니다.`
             : source !== 'canvas'
               ? 'AI 배경을 생성했습니다.'
               : '임시 배경(Canvas)을 생성했습니다.',
@@ -1158,22 +1176,11 @@ export const useStore = create<State>((set, get) => {
         };
         void archiveImage(blob, `backgrounds/${safeFileName(scene.background || scene.title)}_수정_${timestamp()}.png`);
         const bkey = backgroundKey(scene);
-        const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === bkey);
-        const prevs = new Set(
-          targets.map((t) => t.backgroundAssetId).filter((x): x is string => !!x && x !== id),
-        );
-        set((s) => ({
-          assets: { ...s.assets, [id]: meta },
-          project: {
-            ...s.project,
-            scenes: s.project.scenes.map((sc) =>
-              backgroundKey(sc) === bkey ? { ...sc, backgroundAssetId: id } : sc,
-            ),
-          },
-        }));
+        const { scenes, prevs, count } = applyBackgroundToGroup(get().project.scenes, bkey, id);
+        set((s) => ({ assets: { ...s.assets, [id]: meta }, project: { ...s.project, scenes } }));
         autoSave();
         for (const p of prevs) await deleteAsset(p).catch(() => {});
-        flash(targets.length > 1 ? `수정한 배경을 ${targets.length}개 장면에 적용했습니다.` : '배경을 수정했습니다.');
+        flash(count > 1 ? `수정한 배경을 ${count}개 장면에 적용했습니다.` : '배경을 수정했습니다.');
       } catch (e) {
         flash(`배경 수정 실패: ${(e as Error).message}`);
       } finally {
@@ -1287,24 +1294,14 @@ export const useStore = create<State>((set, get) => {
       if (!scene) return;
       try {
         const id = await uploadAsset(file, 'background', `bg_${sceneId}.png`);
-        const key = backgroundKey(scene);
-        const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === key);
-        const prevs = new Set(
-          targets.map((t) => t.backgroundAssetId).filter((x): x is string => !!x && x !== id),
-        );
-        set((s) => ({
-          project: {
-            ...s.project,
-            scenes: s.project.scenes.map((sc) =>
-              backgroundKey(sc) === key ? { ...sc, backgroundAssetId: id } : sc,
-            ),
-          },
-        }));
+        const bkey = backgroundKey(scene);
+        const { scenes, prevs, count } = applyBackgroundToGroup(get().project.scenes, bkey, id);
+        set((s) => ({ project: { ...s.project, scenes } }));
         autoSave();
         for (const p of prevs) await deleteAsset(p).catch(() => {});
         flash(
-          targets.length > 1
-            ? `업로드한 배경을 ${targets.length}개 장면에 적용했습니다.`
+          count > 1
+            ? `업로드한 배경을 ${count}개 장면에 적용했습니다.`
             : '업로드한 배경을 적용했습니다.',
         );
       } catch (e) {
@@ -1325,16 +1322,7 @@ export const useStore = create<State>((set, get) => {
         set((s) => ({
           project: {
             ...s.project,
-            characters: s.project.characters.map((c) => {
-              if (c.name !== name) return c;
-              if (outfit === '기본') return { ...c, expressions: { ...c.expressions, [expr]: id } };
-              return {
-                ...c,
-                outfits: (c.outfits ?? []).map((o) =>
-                  o.name === outfit ? { ...o, expressions: { ...o.expressions, [expr]: id } } : o,
-                ),
-              };
-            }),
+            characters: withSpriteAsset(s.project.characters, name, outfit, expr, id),
           },
         }));
         if (prev) await deleteAsset(prev).catch(() => {});
@@ -1379,24 +1367,8 @@ export const useStore = create<State>((set, get) => {
         // 비용 들인 AI CG 도 보관 폴더에 사본 저장(재생성해도 원본 보존).
         if (source !== 'canvas') void archiveImage(blob, `cg/${safeFileName(key)}_${timestamp()}.png`);
         // 같은 설명(컷)을 쓰는 모든 장면의 해당 인덱스에 적용.
-        const prevs = new Set<string>();
-        set((s) => ({
-          assets: { ...s.assets, [id]: meta },
-          project: {
-            ...s.project,
-            scenes: s.project.scenes.map((sc) => {
-              if (!sc.cg.some((d) => d.trim() === key)) return sc;
-              const arr = [...(sc.cgAssetIds ?? [])];
-              sc.cg.forEach((d, i) => {
-                if (d.trim() !== key) return;
-                while (arr.length <= i) arr.push('');
-                if (arr[i] && arr[i] !== id) prevs.add(arr[i]);
-                arr[i] = id;
-              });
-              return { ...sc, cgAssetIds: arr };
-            }),
-          },
-        }));
+        const { scenes, prevs } = applyCgToGroup(get().project.scenes, key, id);
+        set((s) => ({ assets: { ...s.assets, [id]: meta }, project: { ...s.project, scenes } }));
         autoSave();
         for (const p of prevs) await deleteAsset(p).catch(() => {});
         flash(source !== 'canvas' ? 'CG 컷을 생성했습니다.' : '임시 CG(Canvas)를 생성했습니다.');
@@ -1445,24 +1417,8 @@ export const useStore = create<State>((set, get) => {
         };
         if (source !== 'canvas')
           void archiveImage(blob, `cg/${safeFileName(key)}_${safeFileName(characterName)}_${timestamp()}.png`);
-        const prevs = new Set<string>();
-        set((s) => ({
-          assets: { ...s.assets, [id]: meta },
-          project: {
-            ...s.project,
-            scenes: s.project.scenes.map((sc) => {
-              if (!sc.cg.some((d) => d.trim() === key)) return sc;
-              const arr = [...(sc.cgAssetIds ?? [])];
-              sc.cg.forEach((d, i) => {
-                if (d.trim() !== key) return;
-                while (arr.length <= i) arr.push('');
-                if (arr[i] && arr[i] !== id) prevs.add(arr[i]);
-                arr[i] = id;
-              });
-              return { ...sc, cgAssetIds: arr };
-            }),
-          },
-        }));
+        const { scenes, prevs } = applyCgToGroup(get().project.scenes, key, id);
+        set((s) => ({ assets: { ...s.assets, [id]: meta }, project: { ...s.project, scenes } }));
         autoSave();
         for (const p of prevs) await deleteAsset(p).catch(() => {});
         flash(`${characterName}${bgBlob ? '·배경' : ''} 참조 CG 를 생성했습니다.`);
@@ -1513,24 +1469,8 @@ export const useStore = create<State>((set, get) => {
           createdAt: Date.now(),
         };
         void archiveImage(blob, `cg/${safeFileName(key)}_수정_${timestamp()}.png`);
-        const prevs = new Set<string>();
-        set((s) => ({
-          assets: { ...s.assets, [id]: meta },
-          project: {
-            ...s.project,
-            scenes: s.project.scenes.map((sc) => {
-              if (!sc.cg.some((d) => d.trim() === key)) return sc;
-              const arr = [...(sc.cgAssetIds ?? [])];
-              sc.cg.forEach((d, i) => {
-                if (d.trim() !== key) return;
-                while (arr.length <= i) arr.push('');
-                if (arr[i] && arr[i] !== id) prevs.add(arr[i]);
-                arr[i] = id;
-              });
-              return { ...sc, cgAssetIds: arr };
-            }),
-          },
-        }));
+        const { scenes, prevs } = applyCgToGroup(get().project.scenes, key, id);
+        set((s) => ({ assets: { ...s.assets, [id]: meta }, project: { ...s.project, scenes } }));
         autoSave();
         for (const p of prevs) await deleteAsset(p).catch(() => {});
         flash('CG 를 수정했습니다.');
@@ -1638,19 +1578,8 @@ export const useStore = create<State>((set, get) => {
         if (source !== 'canvas')
           void archiveImage(blob, `backgrounds/${safeFileName(scene.background || scene.title)}_참조_${timestamp()}.png`);
         const bkey = backgroundKey(scene);
-        const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === bkey);
-        const prevs = new Set(
-          targets.map((t) => t.backgroundAssetId).filter((x): x is string => !!x && x !== id),
-        );
-        set((s) => ({
-          assets: { ...s.assets, [id]: meta },
-          project: {
-            ...s.project,
-            scenes: s.project.scenes.map((sc) =>
-              backgroundKey(sc) === bkey ? { ...sc, backgroundAssetId: id } : sc,
-            ),
-          },
-        }));
+        const { scenes, prevs } = applyBackgroundToGroup(get().project.scenes, bkey, id);
+        set((s) => ({ assets: { ...s.assets, [id]: meta }, project: { ...s.project, scenes } }));
         autoSave();
         for (const p of prevs) await deleteAsset(p).catch(() => {});
         flash(`'${refKey}' 기준으로 일관된 배경을 생성했습니다.`);
@@ -1684,23 +1613,8 @@ export const useStore = create<State>((set, get) => {
       const key = desc.trim();
       try {
         const id = await uploadAsset(file, 'cg', `cg_${Date.now().toString(36)}.png`);
-        const prevs = new Set<string>();
-        set((s) => ({
-          project: {
-            ...s.project,
-            scenes: s.project.scenes.map((sc) => {
-              if (!sc.cg.some((d) => d.trim() === key)) return sc;
-              const arr = [...(sc.cgAssetIds ?? [])];
-              sc.cg.forEach((d, i) => {
-                if (d.trim() !== key) return;
-                while (arr.length <= i) arr.push('');
-                if (arr[i] && arr[i] !== id) prevs.add(arr[i]);
-                arr[i] = id;
-              });
-              return { ...sc, cgAssetIds: arr };
-            }),
-          },
-        }));
+        const { scenes, prevs } = applyCgToGroup(get().project.scenes, key, id);
+        set((s) => ({ project: { ...s.project, scenes } }));
         autoSave();
         for (const p of prevs) await deleteAsset(p).catch(() => {});
         flash('업로드한 CG를 같은 컷의 모든 장면에 적용했습니다.');
@@ -1864,8 +1778,12 @@ export const useStore = create<State>((set, get) => {
 
     save: () => {
       const { project, assets } = get();
-      saveProject(project, assets);
-      flash('현재 작업을 저장했습니다.');
+      try {
+        saveProject(project, assets);
+        flash('현재 작업을 저장했습니다.');
+      } catch (e) {
+        flash((e as Error).message, 'error');
+      }
     },
 
     hydrate: () => {
@@ -1925,7 +1843,9 @@ export const useStore = create<State>((set, get) => {
     resetAll: () => {
       clearProject();
       clearAssets().catch(() => {});
-      set({ project: emptyProject(), assets: {}, selectedSceneId: null, activeTab: 'scenes' });
+      // 배치 썸네일 object URL 정리(세션 메모리 누수 방지).
+      get().batchResults.forEach((r) => URL.revokeObjectURL(r.url));
+      set({ project: emptyProject(), assets: {}, selectedSceneId: null, activeTab: 'scenes', batchResults: [] });
       flash('초기화했습니다.');
     },
 
@@ -1998,14 +1918,22 @@ export const useStore = create<State>((set, get) => {
     importProject: async (file) => {
       try {
         flash('프로젝트 파일을 불러오는 중…');
+        const oldIds = Object.keys(get().assets);
         const { project, assets, assetCount } = await importProjectFile(file);
+        // 새로 복원된 에셋과 겹치지 않는 이전 프로젝트 에셋은 고아가 되므로 IndexedDB 에서 제거.
+        const newIds = new Set(Object.keys(assets));
+        for (const id of oldIds) if (!newIds.has(id)) await deleteAsset(id).catch(() => {});
         set({
           project,
           assets,
           selectedSceneId: project.scenes[0]?.id ?? null,
           activeTab: 'scenes',
         });
-        saveProject(project, assets);
+        try {
+          saveProject(project, assets);
+        } catch (e) {
+          flash((e as Error).message, 'error');
+        }
         flash(`프로젝트를 불러왔습니다: 장면 ${project.scenes.length}개 · 에셋 ${assetCount}개 복원.`);
       } catch (e) {
         flash(`가져오기 실패: ${(e as Error).message}`);
@@ -2088,6 +2016,76 @@ export const useStore = create<State>((set, get) => {
     },
   };
 });
+
+/**
+ * 캐릭터의 (의상, 표정) 슬롯에 스프라이트 assetId 를 박은 새 characters 배열을 돌려준다.
+ * '기본' 의상은 Character.expressions, 그 외는 해당 Outfit.expressions 에 기록한다.
+ * (generate/refine/import 스프라이트 경로가 공유.)
+ */
+function withSpriteAsset(
+  characters: Character[],
+  name: string,
+  outfit: string,
+  expr: Expression,
+  id: string,
+): Character[] {
+  return characters.map((c) => {
+    if (c.name !== name) return c;
+    if (outfit === '기본') return { ...c, expressions: { ...c.expressions, [expr]: id } };
+    return {
+      ...c,
+      outfits: (c.outfits ?? []).map((o) =>
+        o.name === outfit ? { ...o, expressions: { ...o.expressions, [expr]: id } } : o,
+      ),
+    };
+  });
+}
+
+/**
+ * 같은 배경 키(backgroundKey)를 쓰는 모든 장면에 배경 assetId 를 적용한 새 scenes 와,
+ * 그 과정에서 교체된 이전 assetId 집합(삭제 대상)을 함께 돌려준다.
+ * (generate/refine/import/참조 배경 경로가 공유 — 생성 1회 = 같은 이름 전 장면 일관 적용.)
+ */
+function applyBackgroundToGroup(
+  scenes: Scene[],
+  bkey: string,
+  id: string,
+): { scenes: Scene[]; prevs: Set<string>; count: number } {
+  const prevs = new Set<string>();
+  let count = 0;
+  const next = scenes.map((sc) => {
+    if (backgroundKey(sc) !== bkey) return sc;
+    count++;
+    if (sc.backgroundAssetId && sc.backgroundAssetId !== id) prevs.add(sc.backgroundAssetId);
+    return { ...sc, backgroundAssetId: id };
+  });
+  return { scenes: next, prevs, count };
+}
+
+/**
+ * 같은 CG 설명(key)을 쓰는 모든 장면의 해당 인덱스에 CG assetId 를 적용한 새 scenes 와,
+ * 교체된 이전 assetId 집합(삭제 대상)을 함께 돌려준다.
+ * (generate/참조/refine/import CG 경로가 공유.)
+ */
+function applyCgToGroup(
+  scenes: Scene[],
+  key: string,
+  id: string,
+): { scenes: Scene[]; prevs: Set<string> } {
+  const prevs = new Set<string>();
+  const next = scenes.map((sc) => {
+    if (!sc.cg.some((d) => d.trim() === key)) return sc;
+    const arr = [...(sc.cgAssetIds ?? [])];
+    sc.cg.forEach((d, i) => {
+      if (d.trim() !== key) return;
+      while (arr.length <= i) arr.push('');
+      if (arr[i] && arr[i] !== id) prevs.add(arr[i]);
+      arr[i] = id;
+    });
+    return { ...sc, cgAssetIds: arr };
+  });
+  return { scenes: next, prevs };
+}
 
 /** 기존 캐릭터의 표정/색 설정을 유지하면서 새 분석 결과와 병합. */
 function mergeChars(prev: Character[], next: Character[]): Character[] {
