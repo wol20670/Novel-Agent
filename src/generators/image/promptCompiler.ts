@@ -86,10 +86,10 @@ const EMOTION_TAGS: Record<string, string> = {
 
 /** 캐릭터 단독 입화 구조 태그(배경 제거) · 배경 단독 구조 태그(인물 제외). */
 const SPRITE_TAIL = 'transparent background, white background, simple background';
-// 입화 프레이밍 — 표정 6종을 같은 구도로 고정(공식 가이드: 구도/앵글 태그를 앞쪽 배치).
-// VN 대화용 반신(허벅지 위)+정면. 전신이 필요하면 'full body' 로 바꾼다.
-const SPRITE_FRAMING = 'cowboy shot, looking at viewer';
-// 얼굴 품질 보강 — 반신 구도라 얼굴이 작게 잡혀 흐려지는 걸 막는다(눈동자·얼굴 디테일).
+// 입화 프레이밍 — 표정 세트를 같은 구도로 고정(공식 가이드: 구도/앵글 태그를 앞쪽 + 가중치로 배치).
+// VN 스프라이트는 전신(발끝까지). 끝에 두면 무릎 위로 잘리므로 1.4 가중치로 강하게 건다(배치 생성과 동일).
+const SPRITE_FRAMING = '1.4::full body::, full body shot, standing, head to toe, looking at viewer';
+// 얼굴 품질 보강 — 전신이라 얼굴이 더 작게 잡혀 흐려지기 쉬워, 눈동자·얼굴 디테일을 명시해 보강한다.
 const SPRITE_FACE = 'beautiful detailed eyes, detailed face';
 const SCENE_HEAD = 'scenery, no humans';
 

@@ -54,12 +54,18 @@ export interface AiConfig {
     };
     /** NovelAI(image.novelai.net) 설정. provider==='novelai' 일 때 사용. */
     novelai: {
-      /** API 호스트. 개발(Vite)에선 CORS 우회를 위해 '/nai' 프록시로 대체된다(provider 코드에서 판단). */
+      /** 이미지 API 호스트(생성/증강/encode-vibe). 개발(Vite)에선 '/nai' 프록시로 대체된다. */
       host: string;
+      /** Primary API 호스트(계정·업스케일 등). 개발에선 '/nai-api' 프록시로 대체된다. */
+      apiHost: string;
       /** 이미지 생성 경로(generate / img2img 공용). */
       generatePath: string;
       /** Director Tools(배경 제거 등) 경로. */
       augmentPath: string;
+      /** 업스케일(1.5~4배) 경로. 무료 farming 당첨작을 고해상도화할 때. Anlas 소모. */
+      upscalePath: string;
+      /** Vibe(그림체 참조) 인코딩 경로. V4/V4.5 는 참조 이미지를 먼저 인코딩해야 한다(이미지당 2 Anlas). */
+      encodeVibePath: string;
       /** 모델. 2026 기준 최신 = nai-diffusion-4-5-full. */
       model: string;
       /** 선택 가능한 모델 목록(참고/추후 UI 용). */
@@ -127,8 +133,11 @@ export const aiConfig: AiConfig = {
     },
     novelai: {
       host: 'https://image.novelai.net',
+      apiHost: 'https://api.novelai.net',
       generatePath: '/ai/generate-image',
       augmentPath: '/ai/augment-image',
+      upscalePath: '/ai/upscale',
+      encodeVibePath: '/ai/encode-vibe',
       // 정통 서브컬처 미소녀 게임 화풍 최적화. (API id 는 하이픈 4-5, 점 4.5 아님)
       model: 'nai-diffusion-4-5-curated',
       models: ['nai-diffusion-4-5-curated', 'nai-diffusion-4-5-full', 'nai-diffusion-4-full', 'nai-diffusion-3'],
@@ -161,7 +170,8 @@ export const aiConfig: AiConfig = {
       // V4.5 품질 태그는 프롬프트 "맨 끝"에 붙인다(모델별 권장값). 기본=Curated 권장.
       // V4.5 Full 이면 'location, very aesthetic, masterpiece, no text' 로 바꾼다.
       // qualityToggle(서버 자동부착)에 의존하지 않고 직접 부착해 결정적으로 동작시킨다.
-      qualityTags: 'very aesthetic, best quality, amazing quality, masterpiece, absurdres, no text, -0.8::feet::, rating:general',
+      // (참고: 과거 '-0.8::feet::' 로 발을 억제했으나, 전신 입화(head to toe)와 충돌해 제거함.)
+      qualityTags: 'very aesthetic, best quality, amazing quality, masterpiece, absurdres, no text, rating:general',
       img2imgStrength: 0.6,
       // 그림체 참조(vibe transfer) 기본 강도/정보추출량(여러 장 업로드 시 각 이미지에 공통 적용).
       vibeStrength: 0.6,

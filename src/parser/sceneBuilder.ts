@@ -21,7 +21,7 @@ function uid(prefix: string): string {
  * 합동 화자 분해: "한지수, 강민주" / "한지수 & 강민주" → ["한지수","강민주"].
  * 구분자(, & / · 、)가 없어 한 명이면 빈 배열을 돌려준다(= 일반 단일 화자).
  */
-function splitJointSpeaker(raw: string): string[] {
+export function splitJointSpeaker(raw: string): string[] {
   const parts = raw
     .split(/\s*[,&/·、＆]\s*/)
     .map((p) => p.replace(/\s*[(（].*$/, '').trim()) // 끝의 (표정) 태그 제거

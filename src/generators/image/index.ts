@@ -8,6 +8,7 @@ import {
   novelaiImg2img,
   novelaiRemoveBackground,
   novelaiEmotion,
+  novelaiUpscale,
   seedFromString,
 } from './novelaiProvider';
 import { browserRemoveBackground } from './bgRemoveLocal';
@@ -176,6 +177,19 @@ export async function generateExpression(
   return { blob, source: 'novelai' };
 }
 
+/**
+ * 업스케일 — 무료 farming 당첨 입화를 scale 배로 고해상도화(Anlas 소모). 키 필수.
+ * 같은 그림을 그대로 키우므로(재생성 아님) 디자인이 보존된다.
+ */
+export async function upscaleImage(opts: {
+  blob: Blob;
+  scale: number;
+  apiKey: string;
+}): Promise<ImageResult> {
+  const blob = await novelaiUpscale(opts.blob, opts.scale, { apiKey: opts.apiKey.trim() });
+  return { blob, source: 'novelai' };
+}
+
 export interface SpriteRequest {
   name: string;
   expression: Expression;
@@ -197,6 +211,19 @@ export interface SpriteRequest {
   bgRemoval?: BgRemoval;
 }
 
+/**
+ * 단일 인물 입화용 기본 네거티브 — base 네거티브 + "다중 컷/캐릭터 시트/콜라주" 억제 + 전신 강화.
+ * 특히 vibe(그림체 참조)가 6분할 그리드 같은 다중 컷 이미지일 때 구도가 전이되어 콜라주로
+ * 나오는 것을 막는다. (배치 생성기는 자체 네거티브를 쓰므로 영향 없음.)
+ */
+function spriteNegative(): string {
+  return (
+    `${aiConfig.image.novelai.negativePrompt}, ` +
+    'multiple views, reference sheet, character sheet, multiple girls, 2girls, ' +
+    'split screen, panels, collage, cropped, close-up, upper body, cowboy shot, portrait'
+  );
+}
+
 /** 스프라이트 생성 프롬프트(외형 설명 공유로 일관성↑). 번역 폴백용(컴파일 프롬프트 없을 때). */
 function spritePrompt(req: SpriteRequest): string {
   return [
@@ -204,8 +231,8 @@ function spritePrompt(req: SpriteRequest): string {
     req.appearance,
     req.personality && `성격·분위기 참고: ${req.personality}`,
     `표정: ${req.expression}`,
-    // 표정 6종을 같은 구도로 고정(허벅지 위 반신 + 정면).
-    'cowboy shot, 정면(looking at viewer)',
+    // 표정 세트를 같은 구도로 고정(전신·발끝까지 + 정면). vn_char transform(화면 90% 높이)에 맞춘다.
+    '전신(full body), 발끝까지(head to toe), 서있는 자세(standing), 정면(looking at viewer)',
     // NovelAI 는 생성 단계에서 투명배경을 못 만들어, 깔끔한 단색 배경으로 뽑고 bg-removal 로 누끼.
     '흰색 단순 배경(plain white background), 단일 인물',
     '정교한 음영과 하이라이트, 깔끔한 라인아트, 고품질 서브컬쳐 게임 일러스트',
@@ -230,7 +257,7 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
       steps: naiActiveSteps(),
       seed,
       styleReferences: req.styleReferences,
-      negative: req.negative,
+      negative: req.negative ?? spriteNegative(),
     });
     blob = await applyBgRemoval(blob, req.bgRemoval ?? 'browser', apiKey);
     return { blob, source: 'novelai' };
