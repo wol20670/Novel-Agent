@@ -21,10 +21,11 @@ export function generateGuiFiles(
   width: number,
   height: number,
   outline?: { enabled: boolean; color: string },
+  dialogueGradient?: boolean,
 ): RenpyFile[] {
   return [
     { path: 'game/guisupport.rpy', content: GUISUPPORT_RPY },
-    { path: 'game/gui.rpy', content: guiRpy(theme, width, height, outline) },
+    { path: 'game/gui.rpy', content: guiRpy(theme, width, height, outline, dialogueGradient) },
     { path: 'game/screens.rpy', content: screensRpy() },
   ];
 }

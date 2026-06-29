@@ -129,7 +129,7 @@ style window:
     xfill True
     yalign gui.textbox_yalign
     ysize gui.textbox_height
-    background Solid(gui.dialogue_box_color)
+    background gui.dialogue_background
 
 style namebox:
     xpos gui.name_xpos

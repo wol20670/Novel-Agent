@@ -102,6 +102,11 @@ export interface AiConfig {
       vibeStrength: number;
       /** 그림체 참조 정보 추출량(0~1, 1=화풍 강하게 반영). */
       vibeInfoExtracted: number;
+      /**
+       * 표정(Emotion Director) 적용 강도 = defry(0~5). 웹 Director 의 Normal/Slightly Weak/… 와 동일.
+       * 0=Normal(가장 강하게 적용 → 눈색·머리 등 드리프트↑), 클수록 약하게 적용 → 원본 보존↑(표정 변화는 약해짐).
+       */
+      emotionDefry: number;
     };
   };
   chat: {
@@ -176,6 +181,8 @@ export const aiConfig: AiConfig = {
       // 그림체 참조(vibe transfer) 기본 강도/정보추출량(여러 장 업로드 시 각 이미지에 공통 적용).
       vibeStrength: 0.6,
       vibeInfoExtracted: 1.0,
+      // 표정 강도 기본값: 1=Slightly Weak(약간 약하게 → 눈색 등 보존). 0 이면 가장 강하게(드리프트↑).
+      emotionDefry: 1,
     },
   },
   chat: {

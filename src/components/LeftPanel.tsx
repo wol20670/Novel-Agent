@@ -687,6 +687,7 @@ function DialogueGuiControls() {
   const nameColor = ov.nameColor ?? theme.nameText;
   const outline = ov.outline ?? false;
   const outlineColor = ov.outlineColor ?? '#000000';
+  const gradient = ov.dialogueGradient ?? false;
 
   return (
     <div className="flex flex-col gap-2 pt-1 border-t border-edge/50">
@@ -704,6 +705,15 @@ function DialogueGuiControls() {
           className="flex-1"
         />
         <span className="w-9 text-right">{Math.round(opacity * 100)}%</span>
+      </label>
+      <label className="flex items-center gap-1.5 text-[11px] text-gray-400">
+        <input
+          type="checkbox"
+          checked={gradient}
+          onChange={(e) => setOv({ dialogueGradient: e.target.checked })}
+        />
+        대사창 그라데이션 (투명 · 위로 사라짐)
+        <span className="text-[10px] text-gray-500">— 단색 박스 대신 시네마틱. 위 불투명도가 하단 진하기.</span>
       </label>
       <div className="flex items-center gap-3 text-[11px] text-gray-400">
         <label className="flex items-center gap-1.5">

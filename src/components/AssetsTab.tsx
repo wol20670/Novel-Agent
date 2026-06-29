@@ -335,12 +335,24 @@ function ExpressionChip({
   );
 }
 
+// 표정(Emotion Director) 강도 = defry(0~5). 약할수록(숫자↑) 원본 보존↑·표정 변화↓.
+const EMOTION_DEFRY_OPTS = [
+  { v: 0, label: 'Normal (강함)' },
+  { v: 1, label: 'Slightly Weak' },
+  { v: 2, label: 'Weak' },
+  { v: 3, label: 'Even Weaker' },
+  { v: 4, label: 'Very Weak' },
+  { v: 5, label: 'Weakest (가장 약함)' },
+] as const;
+
 /** 표정 세트 편집 — 추가/이름변경/삭제('기본'은 고정). 전 캐릭터 공통. */
 function ExpressionEditor() {
   const exprs = effectiveExpressions(useStore((s) => s.project.expressions));
   const addExpression = useStore((s) => s.addExpression);
   const renameExpression = useStore((s) => s.renameExpression);
   const removeExpression = useStore((s) => s.removeExpression);
+  const emotionDefry = useStore((s) => s.emotionDefry);
+  const setEmotionDefry = useStore((s) => s.setEmotionDefry);
   const [adding, setAdding] = useState('');
   const submit = () => {
     if (adding.trim()) {
@@ -385,6 +397,26 @@ function ExpressionEditor() {
           ＋ 추가
         </button>
       </div>
+      {/* 표정 변경 강도(Emotion Director) — 표정 생성 시 원본 얼굴을 얼마나 보존할지. 전 캐릭터 공통. */}
+      <div className="flex items-center gap-2 mt-2 pt-2 border-t border-edge/50">
+        <span className="text-[11px] text-gray-300 shrink-0">표정 강도</span>
+        <select
+          className="field text-[11px] py-1 flex-1"
+          value={emotionDefry}
+          onChange={(e) => setEmotionDefry(Number(e.target.value))}
+          title="표정 변경(Emotion Director)을 얼마나 강하게 적용할지. 약하게(숫자↑)일수록 눈색·머리 등 원본이 더 보존됩니다(표정 변화는 약해짐)."
+        >
+          {EMOTION_DEFRY_OPTS.map((o) => (
+            <option key={o.v} value={o.v}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <p className="text-[10px] text-gray-500 leading-snug mt-1">
+        약하게(숫자↑)일수록 <b className="text-gray-400">눈색·머리 등 원본 보존↑</b>, 표정 변화는 약해집니다. 표정 바꿀 때 눈색이
+        자꾸 튀면 한 단계 약하게. (NovelAI 웹 Director 의 Normal/Slightly Weak/… 와 동일)
+      </p>
     </div>
   );
 }
@@ -401,6 +433,7 @@ function CharacterCard({ name }: { name: string }) {
   const clearAll = useStore((s) => s.clearCharacterSprites);
   const addOutfit = useStore((s) => s.addOutfit);
   const setOutfitAppearance = useStore((s) => s.setOutfitAppearance);
+  const setOutfitExclude = useStore((s) => s.setOutfitExclude);
   const removeOutfit = useStore((s) => s.removeOutfit);
   const busy = useStore((s) => s.busy[`sprite:${name}`]);
   const exprList = effectiveExpressions(useStore((s) => s.project.expressions));
@@ -484,26 +517,35 @@ function CharacterCard({ name }: { name: string }) {
         </button>
       </div>
       {outfit !== '기본' && (
-        <div className="flex items-center gap-1.5 mb-1.5">
+        <div className="flex flex-col gap-1.5 mb-1.5">
+          <div className="flex items-center gap-1.5">
+            <input
+              className="field text-xs flex-1"
+              placeholder={`'${outfit}' 복장 묘사 (예: 흰 비키니 수영복, 맨발) — 생성에 반영`}
+              value={activeOutfit?.appearance ?? ''}
+              onChange={(e) => setOutfitAppearance(name, outfit, e.target.value)}
+              title="기본 외형에 이 의상 묘사를 덧붙여 생성합니다(같은 인물, 다른 옷)."
+            />
+            <button
+              className="text-[10px] text-gray-500 hover:text-rose-600 shrink-0"
+              title="이 의상과 그 입화를 삭제"
+              onClick={() => {
+                if (window.confirm(`'${name}'의 '${outfit}' 의상을 삭제할까요? 이 의상의 입화도 함께 삭제됩니다.`)) {
+                  removeOutfit(name, outfit);
+                  setOutfit('기본');
+                }
+              }}
+            >
+              의상 삭제
+            </button>
+          </div>
           <input
             className="field text-xs flex-1"
-            placeholder={`'${outfit}' 복장 묘사 (예: 흰 비키니 수영복, 맨발) — 생성에 반영`}
-            value={activeOutfit?.appearance ?? ''}
-            onChange={(e) => setOutfitAppearance(name, outfit, e.target.value)}
-            title="기본 외형에 이 의상 묘사를 덧붙여 생성합니다(같은 인물, 다른 옷)."
+            placeholder={`제외 (예: 재킷, 가방) — 기본 외형의 옷이 이 의상에 따라붙는 것 차단`}
+            value={activeOutfit?.exclude ?? ''}
+            onChange={(e) => setOutfitExclude(name, outfit, e.target.value)}
+            title="기본 외형(예: '교복, 재킷')에 박힌 옷·소품이 이 의상까지 남는 것을 막습니다. 긍정에서 빼고 네거티브로도 억제."
           />
-          <button
-            className="text-[10px] text-gray-500 hover:text-rose-600 shrink-0"
-            title="이 의상과 그 입화를 삭제"
-            onClick={() => {
-              if (window.confirm(`'${name}'의 '${outfit}' 의상을 삭제할까요? 이 의상의 입화도 함께 삭제됩니다.`)) {
-                removeOutfit(name, outfit);
-                setOutfit('기본');
-              }
-            }}
-          >
-            의상 삭제
-          </button>
         </div>
       )}
 

@@ -7,7 +7,7 @@ import { generateRenpyFiles } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
-import { canvasMenuArt, solidPng, buttonBgAssets } from '../generators/image/canvasMenu';
+import { canvasMenuArt, solidPng, buttonBgAssets, textboxGradientPng } from '../generators/image/canvasMenu';
 import { synthBgm } from '../generators/audio/synthProvider';
 import { resolveTheme } from '../renpy/gui';
 
@@ -144,6 +144,13 @@ export async function collectProjectFiles(
   // 버튼 배경 PNG(gui.button_properties 요구) — 제네릭 prefix 세트.
   for (const b of buttonBgAssets(theme)) {
     out.push({ path: `game/gui/button/${b.name}`, data: await solidPng(b.color) });
+  }
+
+  // 대사창 그라데이션(투명) 켜짐 → 세로 그라데이션 텍스트박스 PNG 생성(색·불투명도는 사용자 조정값).
+  if (project.guiOverrides?.dialogueGradient) {
+    const boxColor = project.guiOverrides.dialogueBoxColor ?? '#000000';
+    const maxAlpha = project.guiOverrides.dialogueOpacity ?? 0.45;
+    out.push({ path: 'game/gui/textbox.png', data: await textboxGradientPng(boxColor, maxAlpha) });
   }
 
   // 한글 폰트(나눔고딕, OFL) — Ren'Py 기본 폰트는 한글 글리프가 없다.

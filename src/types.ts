@@ -72,6 +72,11 @@ export interface Outfit {
   name: string;
   /** 이 의상의 복장/외형 묘사. 기본 외형(appearance)에 덧붙여 생성에 반영된다. */
   appearance?: string;
+  /**
+   * 이 의상에서 "빠져야 할" 것(예: 수영복의 '재킷, 가방'). 기본 외형(appearance)에 박힌 옷·소품이
+   * 이 의상까지 따라붙는 누수를 막는다 — 긍정 프롬프트에서 해당 태그를 빼고 네거티브로도 억제한다.
+   */
+  exclude?: string;
   /** 표정 → assetId (이 의상의 스프라이트 세트). */
   expressions: Partial<Record<Expression, string>>;
 }
@@ -157,6 +162,7 @@ export interface Project {
    * - dialogueOpacity: 대사창 검정 배경 불투명도(0~1, 권장 0.1~0.2)
    * - textColor: 본문 글자색 / nameColor: 화자 이름색
    * - outline: 글자 외곽선 사용 / outlineColor: 외곽선색
+   * - dialogueGradient: 대사창을 단색 대신 세로 그라데이션(위로 투명)으로 — 시네마틱·고투명
    */
   guiOverrides?: {
     dialogueBoxColor?: string;
@@ -165,6 +171,7 @@ export interface Project {
     nameColor?: string;
     outline?: boolean;
     outlineColor?: string;
+    dialogueGradient?: boolean;
   };
 }
 
