@@ -217,6 +217,12 @@ export interface GuiOverrides {
   nameColor?: string;
   outline?: boolean;
   outlineColor?: string;
+  /**
+   * 대사창을 단색 박스 대신 "세로 그라데이션"(위로 투명하게 사라지는)으로 렌더한다.
+   * 켜면 buildZip 이 gui/textbox.png 를 생성하고 screens 의 window 배경이 그 이미지를 쓴다.
+   * 매우 투명한 시네마틱 대사창에 적합. dialogueOpacity 가 그라데이션 하단의 최대 진하기.
+   */
+  dialogueGradient?: boolean;
 }
 
 /** 테마 위에 사용자 GUI 조정(대사창 색·불투명도·글자색·이름색)을 덮어쓴 새 테마. */

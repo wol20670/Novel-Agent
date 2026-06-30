@@ -10,11 +10,17 @@ export function guiRpy(
   width: number,
   height: number,
   outline?: { enabled: boolean; color: string },
+  dialogueGradient?: boolean,
 ): string {
   // 글자 외곽선(가독성) — 켜면 본문·이름에 동일 외곽선, 끄면 빈 리스트.
   const outlineList = outline?.enabled
     ? `[ (absolute(2), "${outline.color}", absolute(0), absolute(0)) ]`
     : '[]';
+  // 대사창 배경: 그라데이션이면 buildZip 이 만든 gui/textbox.png 를 Frame(0,0)으로 늘려 쓰고(위로 투명),
+  // 아니면 기존 단색 Solid. screens.rpy 의 window 가 이 변수만 참조한다(테마 표면적 최소화).
+  const dialogueBg = dialogueGradient
+    ? 'Frame("gui/textbox.png", 0, 0, tile=False)'
+    : 'Solid(gui.dialogue_box_color)';
   return `# 자동 생성: GUI 변수 (테마: ${theme.label})
 # 색/폰트/전환만 테마로 주입되고 레이아웃은 Ren'Py 8.5.3 기본값을 따른다.
 
@@ -40,6 +46,8 @@ define gui.interface_text_color = "${theme.interfaceText}"
 
 ## 인게임/인터페이스 보조색 (커스텀 — screens.rpy 의 Solid 배경이 참조)
 define gui.dialogue_box_color = "${theme.dialogueBox}"
+## 대사창 배경 displayable (단색 또는 투명 그라데이션) — screens.rpy 의 window 가 참조.
+define gui.dialogue_background = ${dialogueBg}
 define gui.dialogue_name_color = "${theme.nameText}"
 define gui.menu_overlay_color = "${theme.menuOverlay}"
 define gui.frame_bg_color = "${theme.frameBg}"

@@ -375,7 +375,7 @@ export async function novelaiEmotion(
     height,
     image,
     prompt: `${mood};;${opts.prompt ?? ''}`,
-    defry: opts.defry ?? 0,
+    defry: opts.defry ?? cfg.emotionDefry,
   };
   console.info(`%c[NovelAI] emotion Director (표정만 변경)`, 'color:#60a5fa', { mood, width, height });
   return postAndUnzip(apiBase() + cfg.augmentPath, body, opts.apiKey, '표정 변경');

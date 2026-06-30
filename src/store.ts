@@ -3,7 +3,7 @@ import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, projectExpressions, effectiveExpressions } from './types';
 import { parseText, parseWorkbook } from './parser';
 import { generateImage, generateSprite, generateExpression, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, upscaleImage, type BgRemoval } from './generators/image';
-import { compileSpritePrompt, compileScenePrompt, compileCgPrompt } from './generators/image/promptCompiler';
+import { compileSpritePrompt, compileScenePrompt, compileCgPrompt, compileTags } from './generators/image/promptCompiler';
 import { ALL_TAGS } from './generators/image/tagDictionary';
 import { seedFromString } from './generators/image/novelaiProvider';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
@@ -120,6 +120,8 @@ interface State {
   // 캐릭터 의상(복장) — 의상마다 표정 세트를 따로 가진다. #복장 태그로 장면별 지정.
   addOutfit: (charName: string, name: string, appearance?: string) => void;
   setOutfitAppearance: (charName: string, name: string, appearance: string) => void;
+  /** 이 의상에서 빠져야 할 것(예: '재킷, 가방') — 기본 외형의 옷 누수 차단용. */
+  setOutfitExclude: (charName: string, name: string, exclude: string) => void;
   removeOutfit: (charName: string, name: string) => Promise<void>;
   /**
    * 캐릭터 디자인(기본 입화)을 지시문대로 수정하고, 이미 만들어둔 다른 표정도
@@ -204,6 +206,9 @@ interface State {
   /** 스프라이트 누끼 방식 — browser(무료·브라우저) / novelai(Director·Anlas) / none(흰 배경). 기본 browser. */
   bgRemovalMethod: BgRemoval;
   setBgRemovalMethod: (m: BgRemoval) => void;
+  /** 표정(Emotion Director) 적용 강도 = defry(0~5). 0=강하게(눈색 등 드리프트↑)·클수록 약하게(원본 보존↑). */
+  emotionDefry: number;
+  setEmotionDefry: (n: number) => void;
   save: () => void;
   hydrate: () => void;
   resetAll: () => void;
@@ -328,6 +333,27 @@ const KO_EMOTION_MOOD: Record<string, string> = {
 };
 const moodFor = (expr: string): string | undefined => KO_EMOTION_MOOD[expr.trim()];
 
+// ── 스프라이트 일관성 헬퍼 ───────────────────────────────────────────────
+/** 컴파일된 태그 CSV 에서 "1girl/solo" 등 주체(피사체) 태그를 제거 — 의상 '제외'를 네거티브로 쓸 때 인물을 지우지 않게. */
+function stripSubjectTags(tags: string): string {
+  return tags
+    .split(',')
+    .map((t) => t.trim())
+    .filter((t) => t && !/^(1girl|1boy|solo|\d+girls?|\d+boys?|multiple girls|multiple boys)$/i.test(t))
+    .join(', ');
+}
+
+/** 긍정 프롬프트(CSV)에서 제외 태그를 포함하는 토큰을 빼낸다(부분일치 — 'track jacket' 도 'jacket' 으로 제거). */
+function removeMatchingTags(positive: string, excludeCsv: string): string {
+  const ex = excludeCsv.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (!ex.length) return positive;
+  return positive
+    .split(',')
+    .map((t) => t.trim())
+    .filter((t) => t && !ex.some((e) => t.toLowerCase().includes(e)))
+    .join(', ');
+}
+
 export const useStore = create<State>((set, get) => {
   // 디바운스 자동저장
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -419,6 +445,7 @@ export const useStore = create<State>((set, get) => {
     archiveReady: false,
     naiMode: 'free',
     bgRemovalMethod: 'browser',
+    emotionDefry: aiConfig.image.novelai.emotionDefry,
 
     setRawInput: (text) => {
       set((s) => ({ project: { ...s.project, rawInput: text } }));
@@ -627,9 +654,18 @@ export const useStore = create<State>((set, get) => {
           ? [char.appearance, `복장/의상: ${outfitDesc}`].filter(Boolean).join(', ')
           : char.appearance;
         const tag = outfit === '기본' ? '' : `${outfit} `;
-        const promptOverride = await naiCompile(() =>
+        let promptOverride = await naiCompile(() =>
           compileSpritePrompt({ appearance, emotion: expr, apiKey: translateKey() }),
         );
+        // ① 의상 '제외' — 기본 외형에 박힌 옷·소품(예: 재킷, 가방)이 이 의상까지 따라붙는 누수 차단.
+        //    제외 태그를 긍정에서 빼고(요청 안 함) + 네거티브로도 억제(positive↔negative 충돌 방지).
+        let excludeTags = '';
+        if (outfitObj?.exclude?.trim()) {
+          excludeTags = stripSubjectTags(
+            (await naiCompile(() => compileTags(outfitObj.exclude!.trim(), 'character', translateKey()))) ?? '',
+          );
+          if (excludeTags && promptOverride) promptOverride = removeMatchingTags(promptOverride, excludeTags);
+        }
         // 표정(비-기본)이고 기본 입화가 있으며 mood 가 매핑되면 → Emotion Director 툴로 "표정만" 변경
         // (구도·복장·인물 완벽 보존, 웹 Director 툴과 동일·무료 조건). 실패 시 일반 생성으로 폴백.
         let result: { blob: Blob; source: 'novelai' | 'canvas' } | undefined;
@@ -639,9 +675,12 @@ export const useStore = create<State>((set, get) => {
           const baseBlob = await getAsset(baseId);
           if (baseBlob) {
             try {
+              // 표정만 변경 — Director 에 추가 프롬프트(앵커)를 주면 오히려 머리 등을 재해석해 바꿔버려,
+              //    앵커 없이 base 이미지 + mood 만으로 호출한다(웹 Director 와 동일·표정만 변경).
               result = await generateExpression(baseBlob, mood, {
                 apiKey: get().apiKey,
                 bgRemoval: get().bgRemovalMethod,
+                defry: get().emotionDefry,
               });
             } catch {
               /* Emotion 툴 실패 → 아래 일반 생성으로 폴백 */
@@ -649,8 +688,9 @@ export const useStore = create<State>((set, get) => {
           }
         }
         if (!result) {
-          // 의상은 의상별 고정 시드(이름+의상)로 → 기본 구도와 충돌 않고 깔끔한 의상(불필요한 백팩 등 미생성).
-          const effSeed = seed ?? (outfit !== '기본' ? seedFromString(`${name}·${outfit}`) : undefined);
+          // ② 일관성 — 의상이 달라도 캐릭터 공통 시드로 고정 → 얼굴·포즈 유지, 옷만 변경.
+          //    (옷 누수는 ① 의상 '제외'로 차단하므로 의상별 시드 분리가 더는 필요 없다.)
+          const effSeed = seed ?? seedFromString(name);
           result = await generateSprite({
             name,
             expression: expr,
@@ -662,6 +702,7 @@ export const useStore = create<State>((set, get) => {
             promptOverride,
             seed: effSeed,
             bgRemoval: get().bgRemovalMethod,
+            extraNegative: excludeTags || undefined,
           });
         }
         const { blob, source } = result;
@@ -1053,6 +1094,26 @@ export const useStore = create<State>((set, get) => {
                   // 입력 중에는 원본 그대로 저장(여기서 trim 하면 단어 사이 띄어쓰기를 못 침). trim 은 생성 시.
                   outfits: (c.outfits ?? []).map((o) =>
                     o.name === name ? { ...o, appearance } : o,
+                  ),
+                }
+              : c,
+          ),
+        },
+      }));
+      autoSave();
+    },
+
+    setOutfitExclude: (charName, name, exclude) => {
+      set((s) => ({
+        project: {
+          ...s.project,
+          characters: s.project.characters.map((c) =>
+            c.name === charName
+              ? {
+                  ...c,
+                  // 입력 중에는 원본 그대로 저장(trim 은 생성 시).
+                  outfits: (c.outfits ?? []).map((o) =>
+                    o.name === name ? { ...o, exclude } : o,
                   ),
                 }
               : c,
@@ -1776,6 +1837,16 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    setEmotionDefry: (n) => {
+      const v = Math.max(0, Math.min(5, Math.round(n)));
+      set({ emotionDefry: v });
+      try {
+        localStorage.setItem('na_emotion_defry', String(v));
+      } catch {
+        /* ignore */
+      }
+    },
+
     save: () => {
       const { project, assets } = get();
       try {
@@ -1815,6 +1886,12 @@ export const useStore = create<State>((set, get) => {
       try {
         const m = localStorage.getItem('na_bg_method');
         if (m === 'browser' || m === 'ai' || m === 'novelai' || m === 'none') set({ bgRemovalMethod: m });
+      } catch {
+        /* ignore */
+      }
+      try {
+        const d = localStorage.getItem('na_emotion_defry');
+        if (d !== null && /^[0-5]$/.test(d)) set({ emotionDefry: Number(d) });
       } catch {
         /* ignore */
       }

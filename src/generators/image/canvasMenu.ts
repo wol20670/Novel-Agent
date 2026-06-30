@@ -149,6 +149,37 @@ export function canvasMenuArt(
   });
 }
 
+/** '#rgb'·'#rrggbb' → {r,g,b} (앞 6자리만, 알파는 무시). */
+function rgbOf(hex: string): { r: number; g: number; b: number } {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  h = h.slice(0, 6).padEnd(6, '0');
+  return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
+}
+
+/**
+ * 대사창용 세로 그라데이션 PNG — 위는 완전 투명, 아래로 갈수록 color 가 maxAlpha 까지 진해진다.
+ * (상단이 장면으로 자연스럽게 사라지는 시네마틱 대사창. screens 의 window 가 Frame 으로 늘려 쓴다.)
+ * 세로 변화만 있어 가로는 좁아도 되므로 16×256 작은 이미지로 만든다(Frame 0,0 으로 가로 stretch).
+ */
+export function textboxGradientPng(color: string, maxAlpha: number, w = 16, h = 256): Promise<Blob> {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, w, h);
+  const { r, g, b } = rgbOf(color);
+  const a = Math.max(0, Math.min(1, maxAlpha));
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  // 상단 투명 → 32% 지점에서 최대 진하기 도달 → 하단까지 유지(글자 영역 가독성 확보).
+  grad.addColorStop(0, `rgba(${r},${g},${b},0)`);
+  grad.addColorStop(0.32, `rgba(${r},${g},${b},${a})`);
+  grad.addColorStop(1, `rgba(${r},${g},${b},${a})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  return new Promise((resolve) => canvas.toBlob((bl) => resolve(bl!), 'image/png'));
+}
+
 /** 단색(또는 투명) PNG — 버튼 배경 Frame 용. 'transparent' 면 완전 투명. */
 export function solidPng(color: string, w = 24, h = 24): Promise<Blob> {
   const canvas = document.createElement('canvas');

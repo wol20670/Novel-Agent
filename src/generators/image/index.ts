@@ -170,9 +170,9 @@ export async function generateCgFromReference(opts: {
 export async function generateExpression(
   base: Blob,
   mood: string,
-  opts: { apiKey: string; bgRemoval?: BgRemoval; prompt?: string },
+  opts: { apiKey: string; bgRemoval?: BgRemoval; prompt?: string; defry?: number },
 ): Promise<ImageResult> {
-  let blob = await novelaiEmotion(base, mood, { apiKey: opts.apiKey, prompt: opts.prompt });
+  let blob = await novelaiEmotion(base, mood, { apiKey: opts.apiKey, prompt: opts.prompt, defry: opts.defry });
   blob = await applyBgRemoval(blob, opts.bgRemoval ?? 'browser', opts.apiKey);
   return { blob, source: 'novelai' };
 }
@@ -205,6 +205,8 @@ export interface SpriteRequest {
   promptOverride?: string;
   /** 네거티브 프롬프트 오버라이드(미지정 시 config 기본값). */
   negative?: string;
+  /** 기본 네거티브에 "덧붙일" 추가 억제 태그(예: 의상별 '제외'). negative 오버라이드와 달리 기본값을 유지한다. */
+  extraNegative?: string;
   /** 시드 오버라이드(미지정 시 이름 기반 고정). 디자인 리롤 시 새 시드를 넘긴다. */
   seed?: number;
   /** 누끼 방식. 미지정 시 browser(무료). */
@@ -257,7 +259,7 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
       steps: naiActiveSteps(),
       seed,
       styleReferences: req.styleReferences,
-      negative: req.negative ?? spriteNegative(),
+      negative: [req.negative ?? spriteNegative(), req.extraNegative].filter(Boolean).join(', '),
     });
     blob = await applyBgRemoval(blob, req.bgRemoval ?? 'browser', apiKey);
     return { blob, source: 'novelai' };

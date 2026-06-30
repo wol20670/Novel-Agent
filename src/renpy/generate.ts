@@ -587,10 +587,16 @@ export function generateRenpyFiles(project: Project): {
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
     { path: 'game/credits.rpy', content: creditsRpy(project) },
-    ...generateGuiFiles(theme, project.width, project.height, {
-      enabled: project.guiOverrides?.outline ?? false,
-      color: project.guiOverrides?.outlineColor || '#000000',
-    }),
+    ...generateGuiFiles(
+      theme,
+      project.width,
+      project.height,
+      {
+        enabled: project.guiOverrides?.outline ?? false,
+        color: project.guiOverrides?.outlineColor || '#000000',
+      },
+      project.guiOverrides?.dialogueGradient ?? false,
+    ),
     { path: 'README.md', content: readme(theme) },
   ];
   return { files, refs, sprites, characters: project.characters };
