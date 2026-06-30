@@ -260,6 +260,8 @@ export default function LeftPanel() {
 
       <BatchGen />
 
+      <BgBatchGen />
+
       {/* 이미지 보관 폴더 */}
       {folderSupported && (
         <section className="flex flex-col gap-2">
@@ -437,6 +439,79 @@ function BatchGen() {
                       title="4배 업스케일 (같은 그림 그대로 고해상도 · Anlas 소모)"
                       disabled={up}
                       onClick={() => upscale(r, 4)}
+                      className="flex-1 text-[9px] py-0.5 bg-black/65 text-amber-300 hover:bg-black/85 disabled:opacity-50"
+                    >
+                      {up ? '업스케일 중…' : '⬆ 업스케일 4×'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function BgBatchGen() {
+  const running = useStore((s) => s.bgBatchRunning);
+  const results = useStore((s) => s.bgBatchResults);
+  const start = useStore((s) => s.startBgBatchGen);
+  const stop = useStore((s) => s.stopBgBatchGen);
+  const upscale = useStore((s) => s.upscaleResult);
+  const busy = useStore((s) => s.busy);
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="section-title">🏞️ 랜덤 배경 생성</h2>
+      <p className="text-[11px] text-gray-500 leading-snug">
+        DB 장소 태그를 무작위 조합해 <b className="text-gray-400">인물 없는 배경</b>을 멈출 때까지 1장씩
+        무료로 계속 생성합니다(가로 1216×832 · Anlas 0). 결과는 아래 + 소스 보관 폴더(
+        <code className="text-accent">random-bg/</code>)에 저장돼요.
+      </p>
+      <button
+        onClick={() => (running ? stop() : start())}
+        className={`text-xs py-1.5 rounded border font-medium transition-colors ${
+          running
+            ? 'border-red-500 text-red-400 bg-red-500/10 hover:bg-red-500/20'
+            : 'border-accent text-accent bg-accent/10 hover:bg-accent/20'
+        }`}
+      >
+        {running ? `■ 멈춤 (생성됨 ${results.length})` : '▶ 시작'}
+      </button>
+      {results.length > 0 && (
+        <>
+          <p className="text-[10px] text-gray-600 leading-snug">
+            마음에 드는 배경은 <b className="text-gray-500">⬆4×</b>로 같은 그림 그대로 고해상도화(4배 · Anlas
+            소모)해 최종 배경으로 쓰세요. <b className="text-gray-500">📋</b>는 레시피(프롬프트+시드) 복사.
+          </p>
+          <div className="grid grid-cols-2 gap-1">
+            {results.map((r, i) => {
+              const up = !!busy[`upscale:${r.seed}`];
+              return (
+                <div
+                  key={i}
+                  className="relative group aspect-video overflow-hidden rounded border border-edge bg-black/20"
+                >
+                  <a href={r.url} target="_blank" rel="noreferrer" className="block w-full h-full">
+                    <img src={r.url} alt="" className="w-full h-full object-cover" />
+                  </a>
+                  <div className="absolute bottom-0 inset-x-0 flex opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      title={`프롬프트+시드 복사 (seed ${r.seed})\n${r.prompt}`}
+                      onClick={() =>
+                        navigator.clipboard?.writeText(`seed: ${r.seed}\n${r.prompt}`).catch(() => {})
+                      }
+                      className="flex-1 text-[9px] py-0.5 bg-black/65 text-gray-200 hover:bg-black/85"
+                    >
+                      📋
+                    </button>
+                    <button
+                      type="button"
+                      title="4배 업스케일 (같은 그림 그대로 고해상도 · Anlas 소모)"
+                      disabled={up}
+                      onClick={() => upscale(r, 4, 'background')}
                       className="flex-1 text-[9px] py-0.5 bg-black/65 text-amber-300 hover:bg-black/85 disabled:opacity-50"
                     >
                       {up ? '업스케일 중…' : '⬆ 업스케일 4×'}
