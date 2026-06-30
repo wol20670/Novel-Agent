@@ -19,6 +19,7 @@
  * NovelAI 출력 사이즈.
  * - Normal(≤1MP): Opus 무료 무제한. 832×1216(세로) / 1216×832(가로) / 1024×1024(정방).
  * - Large(>1MP): 더 선명·디테일하지만 Anlas 소모. 1024×1536 / 1536×1024 / 1472×1472.
+ * (NovelAI 웹 공식 프리셋과 동일. 모델이 이 비율로 학습돼 구도·품질이 가장 안정적이다.)
  */
 export type NaiSize =
   | '832x1216'
@@ -34,7 +35,7 @@ export type NaiMode = 'free' | 'high';
 export interface AiConfig {
   image: {
     /** 배경/CG: 가로·세로 비율 → 실제 출력 사이즈 매핑 임계값. */
-    landscapeRatio: number; // 이 값보다 가로가 길면 1536x1024
+    landscapeRatio: number; // 이 값보다 가로가 길면 1216x832 (high: 1536x1024)
     portraitRatio: number; //  이 값보다 세로가 길면 1024x1536
     /**
      * 모든 이미지(배경·CG·스프라이트)에 공통으로 붙는 "그림체" 지시.

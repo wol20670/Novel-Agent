@@ -370,6 +370,14 @@ function scriptBody(
   out.push(`${indent(1)}xanchor 0.5 yanchor 1.0`);
   out.push(`${indent(1)}xpos (xpct / 100.0) ypos 1.0`);
   out.push('');
+  // 배경: 화면 전체를 채우도록 fit cover(레터박스 0). NovelAI 가로 출력은 1216×832(3:2)라
+  // 16:9 게임에선 위아래가 다소 잘리지만(비율 유지·왜곡 없음), 검은 띠·여백 없이 꽉 찬다.
+  out.push('# 배경: 어떤 해상도/비율 이미지든 화면을 꽉 채움(fit cover, 비율 유지·가장자리 크롭)');
+  out.push('transform vn_bg:');
+  out.push(`${indent(1)}fit "cover"`);
+  out.push(`${indent(1)}xysize (config.screen_width, config.screen_height)`);
+  out.push(`${indent(1)}align (0.5, 0.5)`);
+  out.push('');
   out.push('label start:');
   if (refs.length > 0) out.push(`    jump ${refs[0].label}`);
   else out.push('    "승인된 장면이 없습니다."', '    return');
@@ -380,7 +388,7 @@ function scriptBody(
     const pos = scenePositions(s, ids, shown);
     out.push(`# ── ${s.title} ──`);
     out.push(`label ${r.label}:`);
-    out.push(`${indent(1)}scene ${r.bgTag} with ${transition}`);
+    out.push(`${indent(1)}scene ${r.bgTag} at vn_bg with ${transition}`);
     if (r.bgmFile) out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
     // CG 컷
     r.cgTags.forEach((tag) => out.push(`${indent(1)}show ${tag} with dissolve`));

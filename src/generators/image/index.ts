@@ -43,6 +43,10 @@ export interface ImageRequest {
   apiKey?: string;
   /** NovelAI 용으로 미리 컴파일된 프롬프트(단부루 태그). 있으면 이걸 그대로 쓴다. */
   promptOverride?: string;
+  /** 시드 오버라이드(미지정 시 매번 무작위). 배치 결과를 업스케일로 재현·추적할 때 명시한다. */
+  seed?: number;
+  /** 네거티브 프롬프트 오버라이드(미지정 시 config 기본값). 배경 배치는 "인물 없음" 등을 덧댄다. */
+  negative?: string;
 }
 
 export interface ImageResult {
@@ -57,6 +61,8 @@ export async function generateImage(req: ImageRequest): Promise<ImageResult> {
       apiKey,
       size: naiSize(req.width, req.height),
       steps: naiActiveSteps(),
+      seed: req.seed,
+      negative: req.negative,
     });
     return { blob, source: 'novelai' };
   }

@@ -98,11 +98,19 @@ interface State {
   /** DB 태그 랜덤 조합으로 미소녀 입화를 멈출 때까지 1장씩(무료) 계속 생성. */
   startBatchGen: () => Promise<void>;
   stopBatchGen: () => void;
+  /** 랜덤 배경 배치 생성 진행 중 여부(미소녀 배치와 독립). */
+  bgBatchRunning: boolean;
+  /** 랜덤 배경 배치 결과(가로 썸네일 URL + 프롬프트 + 시드, 최신순, 세션 메모리). */
+  bgBatchResults: BatchResult[];
+  /** DB Scene 태그 랜덤 조합으로 "인물 없는" 배경을 멈출 때까지 1장씩(무료) 계속 생성. */
+  startBgBatchGen: () => Promise<void>;
+  stopBgBatchGen: () => void;
   /**
    * 무료 farming 당첨 배치 결과를 scale 배로 업스케일해 다운로드 + 보관(Anlas 소모).
    * 같은 그림을 그대로 키워 디자인을 보존한다(재생성 아님). 키 필요.
+   * kind 는 파일명·보관 경로 분류용(미소녀 / 배경).
    */
-  upscaleResult: (result: BatchResult, scale: number) => Promise<void>;
+  upscaleResult: (result: BatchResult, scale: number, kind?: 'bishoujo' | 'background') => Promise<void>;
   generateAiTheme: () => Promise<void>;
   clearAiTheme: () => void;
 
@@ -300,6 +308,44 @@ function randomBishoujoPrompt(): string {
     // 작아지는 얼굴 보강(구도는 앞쪽 full body 가 담당).
     'looking at viewer, detailed face, beautiful detailed eyes',
     'white background, simple background',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+// ── 랜덤 배경 생성용 ─────────────────────────────────────────────────────
+// 시간대·날씨는 DB 가 아니라 여기서 큐레이션해, 장소(Scene) 하나에 무작위로 입혀 분위기를 다양화한다.
+const TIME_OF_DAY = [
+  'daytime', 'morning', 'early morning', 'midday', 'golden hour',
+  'sunset', 'dusk', 'twilight', 'blue hour', 'night', 'late night',
+];
+const WEATHER = [
+  'clear sky', 'cloudy', 'overcast', 'light rain', 'after the rain',
+  'snow', 'snowy', 'foggy', 'misty', 'sunny', 'storm clouds', 'starry sky',
+];
+// LightFX 사전엔 조합에 부적합한 템플릿/플레이스홀더 토큰(`[word]`, `BREAK`, `*_effect`,
+// `*_swirling_around_the_character` 등)이 섞여 있어 배경 조합에서 제외한다.
+const JUNK_TAG = /^[[{*]|^BREAK$|word/i;
+const cleanLightFx = (): string[] => ensByCat('LightFX').filter((e) => e && !JUNK_TAG.test(e));
+
+/**
+ * DB 의 Scene(장소) 태그 1개를 핵심으로, 시간대·날씨·조명·톤을 무작위로 입혀 "인물 없는"
+ * 비주얼노벨 배경 프롬프트를 만든다. 가로(landscape) 구도 + 하단을 단순하게(대사 UI 공간).
+ * (미소녀 배치와 동일하게 영문 단부루 태그로 만들어 번역 단계를 건너뛴다.)
+ */
+function randomBackgroundPrompt(): string {
+  const scene = pickOne(ensByCat('Scene')) ?? 'fantasy landscape';
+  const light = cleanLightFx();
+  return [
+    // 핵심 장소는 앞쪽 + 약한 가중치로 확실히 먹게(끝에 두면 다른 태그에 묻힌다).
+    `1.2::${scene}::`,
+    'scenery, landscape, no humans, wide shot, establishing shot, eye-level view',
+    pickOne(TIME_OF_DAY),
+    maybe(0.6) ? pickOne(WEATHER) : undefined,
+    maybe(0.85) ? pickOne(light) : undefined,
+    maybe(0.35) ? pickOne(light) : undefined,
+    maybe(0.7) ? pickOne(PALETTE_TONES) : undefined,
+    'detailed background, intricate details, depth of field, atmospheric',
   ]
     .filter(Boolean)
     .join(', ');
@@ -602,22 +648,78 @@ export const useStore = create<State>((set, get) => {
       flash(`랜덤 생성 종료 (총 ${n}장).`);
     },
 
-    upscaleResult: async (result, scale) => {
+    bgBatchRunning: false,
+    bgBatchResults: [],
+    stopBgBatchGen: () => set({ bgBatchRunning: false }),
+    startBgBatchGen: async () => {
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('먼저 NovelAI 토큰을 입력하세요.');
+      if (get().bgBatchRunning) return;
+      set({ bgBatchRunning: true });
+      flash('랜덤 배경 생성 시작 — 멈출 때까지 1장씩 무료로 생성합니다.');
+      // 인물/글자/UI 가 끼어들지 않게 강하게 억제(배경 한정).
+      const bgNegative =
+        `${aiConfig.image.novelai.negativePrompt}, ` +
+        '1girl, 1boy, multiple girls, multiple boys, person, people, human, character, ' +
+        'portrait, close-up, upper body, watermark, signature, ui, hud';
+      let n = 0;
+      let warnedArchive = false;
+      while (get().bgBatchRunning) {
+        try {
+          const prompt = randomBackgroundPrompt();
+          const seed = Math.floor(Math.random() * 4_294_967_295);
+          const { blob } = await generateImage({
+            prompt,
+            label: '배경',
+            width: 1216, // 가로 비율 → naiSize 가 공식 landscape(무료 1216×832) 선택
+            height: 832,
+            apiKey,
+            seed,
+            negative: bgNegative,
+          });
+          if (!get().bgBatchRunning) break; // 생성 도중 멈춤 반영
+          const url = URL.createObjectURL(blob);
+          set((s) => {
+            const next: BatchResult[] = [{ url, prompt, seed }, ...s.bgBatchResults];
+            next.slice(60).forEach((r) => URL.revokeObjectURL(r.url)); // 60장 초과분 URL 정리
+            return { bgBatchResults: next.slice(0, 60) };
+          });
+          const ok = await archiveImage(blob, `random-bg/배경_${timestamp()}.png`);
+          if (!ok && !warnedArchive) {
+            warnedArchive = true;
+            flash('팁: 소스 보관 폴더를 연결하면 PNG 파일로도 저장됩니다.');
+          }
+          n++;
+        } catch (e) {
+          flash(`배경 배치 중단: ${(e as Error).message}`);
+          set({ bgBatchRunning: false });
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 1200)); // 무료 "한 번에 하나" + 레이트리밋 배려
+      }
+      flash(`랜덤 배경 생성 종료 (총 ${n}장).`);
+    },
+
+    upscaleResult: async (result, scale, kind = 'bishoujo') => {
       const apiKey = get().apiKey?.trim();
       if (!apiKey) return flash('업스케일은 NovelAI 토큰이 필요합니다.');
       const busyKey = `upscale:${result.seed}`;
       if (get().busy[busyKey]) return;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      const tag = kind === 'background' ? '배경' : '미소녀';
+      const dir = kind === 'background' ? 'random-bg' : 'random';
       try {
         // 썸네일 object URL 에서 원본 blob 복구(같은 그림을 그대로 업스케일).
         const src = await (await fetch(result.url)).blob();
         flash(`${scale}배 업스케일 중… (Anlas 소모)`, 'info');
         const { blob } = await upscaleImage({ blob: src, scale, apiKey });
-        const fname = `미소녀_업스케일_x${scale}_${timestamp()}.png`;
+        const fname = `${tag}_업스케일_x${scale}_${timestamp()}.png`;
         downloadBlob(blob, fname);
-        void archiveImage(blob, `random/upscaled/${fname}`);
+        void archiveImage(blob, `${dir}/upscaled/${fname}`);
         flash(
-          `업스케일 완료(${scale}배) — ${fname} 저장. 캐릭터 표정칸 '↥ 업로드'로 입화에 적용할 수 있어요.`,
+          kind === 'background'
+            ? `업스케일 완료(${scale}배) — ${fname} 저장. 배경 칸 '↥ 업로드'로 장면에 적용할 수 있어요.`
+            : `업스케일 완료(${scale}배) — ${fname} 저장. 캐릭터 표정칸 '↥ 업로드'로 입화에 적용할 수 있어요.`,
           'success',
         );
       } catch (e) {
@@ -1922,7 +2024,15 @@ export const useStore = create<State>((set, get) => {
       clearAssets().catch(() => {});
       // 배치 썸네일 object URL 정리(세션 메모리 누수 방지).
       get().batchResults.forEach((r) => URL.revokeObjectURL(r.url));
-      set({ project: emptyProject(), assets: {}, selectedSceneId: null, activeTab: 'scenes', batchResults: [] });
+      get().bgBatchResults.forEach((r) => URL.revokeObjectURL(r.url));
+      set({
+        project: emptyProject(),
+        assets: {},
+        selectedSceneId: null,
+        activeTab: 'scenes',
+        batchResults: [],
+        bgBatchResults: [],
+      });
       flash('초기화했습니다.');
     },
 
