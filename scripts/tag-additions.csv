@@ -1,1 +1,9 @@
 # ko,en,cat — 여기에 추가할 매핑을 적고 `npm run push:tags` 하면 시트에 반영됩니다.
+# ── foxcg NovelAI 가이드에서 스테이징(2026-07-01). PC에서 push:tags 전에 검토/수정하세요. ──
+체적 조명,volumetric lighting,LightFX
+반투명 산란,subsurface scattering,LightFX
+더치 앵글,dutch angle,Camera
+얼굴 클로즈업,face focus,Camera
+뒤돌아보기,looking back,Pose
+완벽한 해부학,perfect anatomy,Quality
+옥테인 렌더,octane render,Style
