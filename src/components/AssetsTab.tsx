@@ -460,6 +460,13 @@ function CharacterCard({ name }: { name: string }) {
         <span className="font-semibold text-sm flex-1 truncate" style={{ color: c.color }}>
           {name}
         </span>
+        {/* 생성 대신 내가 가진 이미지 파일(랜덤 farming 저장본 등)을 골라 기본 입화로 바로 넣기. */}
+        <UploadButton
+          onFile={(f) => importSprite(name, '기본' as Expression, f, outfit)}
+          label="🖼 파일에서"
+          className="btn-ghost !px-2 !py-1 text-xs shrink-0"
+          title={`기존 이미지 파일을 골라 ${outfit === '기본' ? '' : outfit + ' '}기본 입화로 넣기 (생성 대신)`}
+        />
         {busy ? (
           <span className="!px-2 !py-1"><Spinner /></span>
         ) : hasBase ? (
@@ -632,6 +639,7 @@ function ExpressionThumb({
     return ch.outfits?.find((o) => o.name === outfit)?.expressions[expr];
   });
   const url = useAssetUrl(assetId);
+  const [zoom, setZoom] = useState(false);
   return (
     <div className="relative aspect-[3/4] rounded-lg border border-edge bg-ink overflow-hidden group">
       <button
@@ -647,6 +655,15 @@ function ExpressionThumb({
         )}
       </button>
       <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        {url && (
+          <button
+            onClick={() => setZoom(true)}
+            className="bg-black/55 text-white text-[10px] rounded px-1 py-0.5 hover:bg-black/75"
+            title="🔍 크게 보기 (미리보기 확대)"
+          >
+            🔍
+          </button>
+        )}
         {url && (
           <button
             onClick={onRefine}
@@ -667,6 +684,25 @@ function ExpressionThumb({
       <span className="absolute bottom-0 inset-x-0 bg-black/45 text-white text-[9px] py-0.5 text-center pointer-events-none">
         {expr}
       </span>
+      {/* 확대 미리보기(라이트박스) — 아무 데나 클릭하면 닫힘. */}
+      {zoom && url && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setZoom(false)}
+        >
+          <img src={url} className="max-w-[90vw] max-h-[90vh] object-contain" />
+          <button
+            className="absolute top-4 right-5 text-white/80 hover:text-white text-3xl leading-none"
+            onClick={() => setZoom(false)}
+            title="닫기"
+          >
+            ×
+          </button>
+          <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/85 text-xs bg-black/55 px-2.5 py-1 rounded-full">
+            {name} · {expr}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
