@@ -1331,9 +1331,12 @@ export const useStore = create<State>((set, get) => {
       const key = `${sceneId}:bg`;
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
+        // 지시문을 영문 단부루 태그로 변환(NovelAI 는 한글을 못 알아듣는다 — 좌측 '한국어→영문' 설정).
+        const instrEn =
+          (await naiCompile(() => compileTags(instruction, 'scene', translateKey()))) ?? instruction;
         const { blob, source } = await editImage({
           blob: src,
-          instruction,
+          instruction: instrEn,
           apiKey,
           kind: 'background',
           // 화풍 드리프트 최소화: 기본 0.5 → 0.4(원본 더 보존, 미세 수정 위주).
@@ -1575,12 +1578,18 @@ export const useStore = create<State>((set, get) => {
       const busyKey = `cg:${key}`;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
       try {
+        // 장면 설명·연출을 영문 태그로 변환(NovelAI 는 한글을 못 읽는다 — 좌측 '한국어→영문' 설정).
+        const promptOverride = await naiCompile(() =>
+          compileCgPrompt({ text: [key, ...using[0].direction].filter(Boolean).join(', '), apiKey: translateKey() }),
+        );
         const { blob, source } = await generateCgFromReference({
           description: key,
           directions: using[0].direction,
           character: charBlob,
           background: bgBlob,
-          apiKey,        });
+          apiKey,
+          promptOverride,
+        });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -1628,9 +1637,12 @@ export const useStore = create<State>((set, get) => {
       const busyKey = `cg:${key}`;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
       try {
+        // 지시문을 영문 단부루 태그로 변환(NovelAI 는 한글을 못 알아듣는다 — 좌측 '한국어→영문' 설정).
+        const instrEn =
+          (await naiCompile(() => compileTags(instruction, 'cg', translateKey()))) ?? instruction;
         const { blob, source } = await editImage({
           blob: src,
-          instruction,
+          instruction: instrEn,
           apiKey,
           kind: 'background',
         });
@@ -1735,12 +1747,19 @@ export const useStore = create<State>((set, get) => {
         const { project } = get();
         const detail = project.backgroundPrompts?.[backgroundKey(scene)]?.trim();
         const want = detail || scene.background || scene.title;
-        const instruction = `이 배경과 같은 장소·구도·화풍을 유지하면서 다음으로 바꿔줘: ${want}. ${scene.direction.join(', ')}`;
+        // 바꿀 장면을 영문 태그로 변환(NovelAI 는 한글 문장을 못 알아듣는다). 장소·구도·화풍 유지는
+        // base 이미지가 담당하므로, 지시문엔 "목표 장면"만 영문 태그로 준다.
+        const wantText = [want, ...scene.direction].filter(Boolean).join(', ');
+        const promptEn =
+          (await naiCompile(() => compileScenePrompt({ text: wantText, apiKey: translateKey() }))) ??
+          buildBackgroundPrompt(want, scene.title, scene.direction);
         const { blob, source } = await editImage({
           blob: refBlob,
-          instruction,
+          instruction: promptEn,
           apiKey,
-          kind: 'background',        });
+          kind: 'background',
+          strength: 0.6, // 참조(장소·화풍)는 유지하되 시간대·조명 변경이 실제로 걸리게(0.5→0.6)
+        });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -1857,6 +1876,10 @@ export const useStore = create<State>((set, get) => {
           if (sc?.backgroundAssetId) bgBlob = (await getAsset(sc.backgroundAssetId)) ?? undefined;
         }
         const prompt = buildMenuArtPrompt(project.title, theme.label, project.mood, which);
+        // 장르·무드를 영문 태그로 변환(NovelAI 는 한글을 못 읽는다 — 좌측 '한국어→영문' 설정).
+        const promptOverride = await naiCompile(() =>
+          compileTags([theme.label, project.mood].filter(Boolean).join(', '), 'scene', translateKey()),
+        );
         const { blob, source } = await generateMenuArtImage({
           which,
           title: project.title,
@@ -1864,7 +1887,9 @@ export const useStore = create<State>((set, get) => {
           mood: project.mood,
           character: charBlob,
           background: bgBlob,
-          apiKey,        });
+          apiKey,
+          promptOverride,
+        });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
