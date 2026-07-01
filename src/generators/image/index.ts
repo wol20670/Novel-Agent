@@ -126,9 +126,17 @@ export async function generateMenuArtImage(opts: {
   character?: Blob;
   background?: Blob;
   apiKey: string;
+  /** 한글→영문 컴파일된 장르·무드 태그(있으면 우선 사용). NovelAI 는 한글을 못 읽는다. */
+  promptOverride?: string;
 }): Promise<ImageResult> {
   const apiKey = opts.apiKey.trim();
-  const base = buildMenuArtPrompt(opts.title, opts.genreLabel, opts.mood, opts.which);
+  const theme = opts.promptOverride?.trim() || [opts.genreLabel, opts.mood].filter(Boolean).join(', ');
+  // 구도·금지(글자/워터마크) 스캐폴딩은 영문으로 고정(NovelAI 는 영문 태그로 동작).
+  const scaffold =
+    opts.which === 'main'
+      ? 'visual novel title screen key art, atmospheric wide background, cinematic composition, space for title logo'
+      : 'visual novel menu background, atmospheric wide background, calm slightly dark tone';
+  const base = [theme, scaffold, 'no text, no logo, no watermark, no ui'].filter(Boolean).join(', ');
   const size = naiActiveSizes().landscape;
   const steps = naiActiveSteps();
   // 캐릭터 참조가 있으면 그 입화를 소스로 img2img(외형 유지), 없으면 텍스트 생성.
@@ -150,15 +158,12 @@ export async function generateCgFromReference(opts: {
   character: Blob;
   background?: Blob;
   apiKey: string;
+  /** 한글→영문 컴파일된 장면 태그(있으면 우선 사용). NovelAI 는 한글을 못 읽어 raw 한글은 폴백일 뿐. */
+  promptOverride?: string;
 }): Promise<ImageResult> {
-  const prompt = [
-    opts.description,
-    ...opts.directions,
-    '같은 인물을 유지한 비주얼노벨 CG 한 장면(감정적 연출, 인물 포함)',
-    aiConfig.image.artStyle,
-  ]
-    .filter(Boolean)
-    .join(', ');
+  const scene =
+    opts.promptOverride?.trim() || [opts.description, ...opts.directions].filter(Boolean).join(', ');
+  const prompt = [scene, 'visual novel cg, emotional scene, same character'].filter(Boolean).join(', ');
   const blob = await novelaiImg2img(prompt, opts.character, {
     apiKey: opts.apiKey.trim(),
     size: naiActiveSizes().landscape,
