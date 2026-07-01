@@ -279,7 +279,8 @@ function randomHair(): string {
   if (maybe(0.3)) {
     let c2 = pickOne(HAIR_COLORS)!;
     for (let i = 0; i < 5 && c2 === c1; i++) c2 = pickOne(HAIR_COLORS)!;
-    return `${c1}, ${c2}, gradient hair, multicolored hair, streaked hair`;
+    // 두 색 + gradient 만(과거 multicolored·streaked 까지 붙여 헤어 태그가 과다 → 제거).
+    return `${c1}, ${c2}, gradient hair`;
   }
   return c1;
 }
@@ -290,20 +291,30 @@ function colorizeClothes(c: string): string {
   return maybe(0.55) ? `${pickOne(OUTFIT_COLORS)} ${c}` : c;
 }
 
+// 미소녀(1girl·solo)와 충돌하는 역할/성별 태그 — 어느 풀에서 뽑히든 제외(예: groom=신랑, 의상으로 오분류).
+const BISHOUJO_BLOCK = /\b(groom|husband|father|old man|1boy|2boys|multiple boys|male focus|multiple girls)\b/i;
+// 표정/감정 단어 — 표정은 Expression 에서 "딱 1개"만 쓰도록, 그 외 풀(Body·Pose·의상 등)에선 제외한다
+// (DB 에 boring face·crying 등이 Body 로 섞여 표정이 2~3개 겹치던 문제 차단).
+const EMOTION_WORD =
+  /\b(smil(e|ing)|smirk|grin(ning)?|laugh(ing)?|cry(ing)?|tears?|teardrop|angry|anger|sad|happy|blush(ing)?|pout(ing)?|frown(ing)?|surprised|scared|afraid|embarrassed|serious|expressionless|bored|boring|wink(ing)?|nervous|worried|annoyed|sleepy|ahegao|yandere|disgust(ed)?)\b/i;
+/** 미소녀 풀 정제: 역할/성별 충돌 태그 제외. keepEmotions=false 면 표정 단어도 제외. */
+const bishoujoPool = (cat: string, keepEmotions = false): string[] =>
+  ensByCat(cat).filter((e) => e && !BISHOUJO_BLOCK.test(e) && (keepEmotions || !EMOTION_WORD.test(e)));
+
 function randomBishoujoPrompt(): string {
-  const acc = ensByCat('Accessory');
-  const pose = ensByCat('Pose');
-  const clothes = pickN(ensByCat('Clothing'), maybe(0.5) ? 2 : 1).map(colorizeClothes);
+  const acc = bishoujoPool('Accessory');
+  const pose = bishoujoPool('Pose');
+  const clothes = pickN(bishoujoPool('Clothing'), maybe(0.5) ? 2 : 1).map(colorizeClothes);
   return [
     // 구도 태그는 "앞쪽 + 가중치"로 둬야 강하게 먹는다(끝에 두면 무릎 위로 잘림).
     '1girl, solo, bishoujo, 1.4::full body::, full body shot, standing, head to toe, anime coloring',
     randomHair(),
     pickOne(EYE_COLORS),
     maybe(0.7) ? pickOne(PALETTE_TONES) : undefined,
-    ...pickN(ensByCat('Body'), 2), // 색 외 신체 특징
+    ...pickN(bishoujoPool('Body'), 2), // 색 외 신체 특징(표정 단어는 제외)
     ...clothes,
     maybe(0.5) ? pickOne(acc) : undefined,
-    pickOne(ensByCat('Expression')),
+    pickOne(bishoujoPool('Expression', true)), // 표정은 여기서 딱 1개만
     maybe(0.4) ? pickOne(pose) : undefined,
     // 작아지는 얼굴 보강(구도는 앞쪽 full body 가 담당).
     'looking at viewer, detailed face, beautiful detailed eyes',
@@ -1325,6 +1336,9 @@ export const useStore = create<State>((set, get) => {
           instruction,
           apiKey,
           kind: 'background',
+          // 화풍 드리프트 최소화: 기본 0.5 → 0.4(원본 더 보존, 미세 수정 위주).
+          // 소형 img2img(≤1MP·≤28스텝·1장)는 Opus 무료라 Anlas 0(실측 확인).
+          strength: 0.4,
         });
         const id = assetId();
         await putAsset(id, blob);
