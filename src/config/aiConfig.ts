@@ -168,16 +168,20 @@ export const aiConfig: AiConfig = {
         },
       },
       ucPreset: 0,
-      // NovelAI 호출의 핵심 디폴트. 인체·인쇄 오류를 원천 차단하는 고정 네거티브.
-      // heterochromia: 공식 가이드 권장 — 의도치 않은 좌우 홍채색 불일치(눈동자 오류) 차단.
+      // NovelAI V4.5 공식 Undesired Content 프리셋 기준(2026-07-01 docs.novelai.net).
+      // = Curated 'Heavy' 프리셋 + Human Focus 의 인체 보호(bad anatomy·bad hands).
+      //   (앱은 배경/CG/스프라이트에 단일 네거티브를 공용하므로 캐릭터 안전 태그를 함께 둔다.)
       negativePrompt:
-        'lowres, bad anatomy, bad hands, text, error, missing fingers, ' +
-        'extra digit, fewer digits, cropped, worst quality, low quality, heterochromia',
-      // V4.5 품질 태그는 프롬프트 "맨 끝"에 붙인다(모델별 권장값). 기본=Curated 권장.
-      // V4.5 Full 이면 'location, very aesthetic, masterpiece, no text' 로 바꾼다.
+        'blurry, lowres, upscaled, artistic error, film grain, scan artifacts, ' +
+        'worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, ' +
+        'halftone, multiple views, logo, too many watermarks, negative space, blank page, ' +
+        'bad anatomy, bad hands',
+      // V4.5 품질 태그는 프롬프트 "맨 끝"에 붙인다(모델별 공식 권장값, 2026-07-01 docs.novelai.net).
+      // 현재 모델=Curated → 공식 권장 'location, masterpiece, no text, -0.8::feet::, rating:general'.
+      // 단 '-0.8::feet::' 는 전신 입화(head to toe)와 충돌해 의도적으로 제외한다(재추가 시 발 잘림).
+      // V4.5 Full 이면 'location, very aesthetic, masterpiece, no text'.
       // qualityToggle(서버 자동부착)에 의존하지 않고 직접 부착해 결정적으로 동작시킨다.
-      // (참고: 과거 '-0.8::feet::' 로 발을 억제했으나, 전신 입화(head to toe)와 충돌해 제거함.)
-      qualityTags: 'very aesthetic, best quality, amazing quality, masterpiece, absurdres, no text, rating:general',
+      qualityTags: 'location, masterpiece, no text, rating:general',
       img2imgStrength: 0.6,
       // 그림체 참조(vibe transfer) 기본 강도/정보추출량(여러 장 업로드 시 각 이미지에 공통 적용).
       vibeStrength: 0.6,
