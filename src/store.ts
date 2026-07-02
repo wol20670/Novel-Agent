@@ -1283,7 +1283,8 @@ export const useStore = create<State>((set, get) => {
           label: scene.background || scene.title,
           width: project.width,
           height: project.height,
-          apiKey,        });
+          apiKey,
+        });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -1532,7 +1533,8 @@ export const useStore = create<State>((set, get) => {
           label: key,
           width: project.width,
           height: project.height,
-          apiKey,        });
+          apiKey,
+        });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
