@@ -11,6 +11,9 @@ e2e-shots/
 .romance-build/
 *_renpy.zip
 
+# 브라우저 자동 검증(Playwright MCP) 임시 산출물 — 커밋 금지
+.playwright-mcp/
+
 # 비밀: 서비스 계정 키·시트 백업 (절대 커밋 금지)
 .secrets/
 *.iam.gserviceaccount.com.json

@@ -20,6 +20,8 @@ export default function LeftPanel() {
   const setApiKey = useStore((s) => s.setApiKey);
   const openaiKey = useStore((s) => s.openaiKey);
   const setOpenaiKey = useStore((s) => s.setOpenaiKey);
+  const elevenKey = useStore((s) => s.elevenKey);
+  const setElevenKey = useStore((s) => s.setElevenKey);
   const promptLang = useStore((s) => s.promptLang);
   const setPromptLang = useStore((s) => s.setPromptLang);
   const exportProject = useStore((s) => s.exportProject);
@@ -35,6 +37,7 @@ export default function LeftPanel() {
   const projFileRef = useRef<HTMLInputElement>(null);
   const [showKey, setShowKey] = useState(false);
   const [showOaiKey, setShowOaiKey] = useState(false);
+  const [showElevenKey, setShowElevenKey] = useState(false);
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -256,6 +259,36 @@ export default function LeftPanel() {
         </div>
 
         <NaiModeSelector />
+      </section>
+
+      {/* ElevenLabs 음악(BGM) 토큰 */}
+      <section className="flex flex-col gap-2">
+        <h2 className="section-title">🎵 ElevenLabs 음악(BGM) API · 선택</h2>
+        <p className="text-[11px] text-gray-500 leading-snug">
+          키가 있으면 <code className="text-accent">ElevenLabs Music</code>으로 실제 BGM(instrumental·가사 없음)을
+          생성합니다(오른쪽 장면 미리보기의 <b className="text-gray-400">음악 생성</b> 버튼에 연동). 없으면 오프라인
+          합성(synth)으로 동작합니다. <b className="text-gray-400">라이선스 음원 학습 → 게임 상업 배포 허용(유료
+          플랜)</b>. NovelAI 처럼 브라우저 직접 호출이라 개발 서버(dev)에서만 동작하며, 키는 이 브라우저에만
+          저장됩니다.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type={showElevenKey ? 'text' : 'password'}
+            className="field flex-1"
+            placeholder="ElevenLabs API 키 (xi-api-key)"
+            value={elevenKey}
+            onChange={(e) => setElevenKey(e.target.value)}
+          />
+          <button className="btn-ghost" onClick={() => setShowElevenKey((v) => !v)}>
+            {showElevenKey ? '숨김' : '표시'}
+          </button>
+        </div>
+        <div
+          className={`text-[11px] flex items-center gap-1.5 ${elevenKey ? 'text-emerald-600' : 'text-gray-500'}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${elevenKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
+          {elevenKey ? '키 저장됨 · ElevenLabs BGM 모드' : '키 없음 · 오프라인 합성(synth) 모드'}
+        </div>
       </section>
 
       <BatchGen />

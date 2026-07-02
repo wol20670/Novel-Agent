@@ -110,6 +110,25 @@ export interface AiConfig {
       emotionDefry: number;
     };
   };
+  /**
+   * 음악(BGM) 생성 — ElevenLabs Music(Eleven Music). 토큰이 있으면 실제 BGM, 없으면 오프라인 synth 폴백.
+   * force_instrumental 은 provider 에서 true 고정(가사 없는 게임 BGM). 동기 호출이라 폴링 설정이 없다.
+   * (선정 이유: 공식 API + 라이선스 음원 학습 → 상업/게임 사용 허가 + 요청 1번에 오디오 반환.)
+   */
+  audio: {
+    eleven: {
+      /** 프로덕션 호스트. 개발(Vite)에선 '/eleven' 프록시로 대체된다(CORS 우회, dev 한정). */
+      host: string;
+      /** 음악 생성(compose) 경로. */
+      composePath: string;
+      /** 모델 식별자('music_v1' 안정 · 'music_v2' 최신). */
+      model: string;
+      /** 생성 길이(ms, 3,000~600,000). BGM 기본값. */
+      lengthMs: number;
+      /** 출력 포맷(query). mp3 → WAV 트랜스코드해 기존 파이프라인에 흘려보낸다. */
+      outputFormat: string;
+    };
+  };
   chat: {
     /** Chat Completions 엔드포인트(테마/표정 분류 등 텍스트 추론용). */
     endpoint: string;
@@ -188,6 +207,16 @@ export const aiConfig: AiConfig = {
       vibeInfoExtracted: 1.0,
       // 표정 강도 기본값: 1=Slightly Weak(약간 약하게 → 눈색 등 보존). 0 이면 가장 강하게(드리프트↑).
       emotionDefry: 1,
+    },
+  },
+  audio: {
+    eleven: {
+      // ElevenLabs Music 공식 API. (dev 프록시 target 은 vite.config.ts 의 '/eleven' 와 일치.)
+      host: 'https://api.elevenlabs.io',
+      composePath: '/v1/music',
+      model: 'music_v1',
+      lengthMs: 30000, // 30초 BGM(비용·루프 감안). 필요시 조정.
+      outputFormat: 'mp3_44100_128',
     },
   },
   chat: {
