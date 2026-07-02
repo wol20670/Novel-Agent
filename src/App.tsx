@@ -37,7 +37,7 @@ export default function App() {
               apiKey ? 'border-emerald-500/50 text-emerald-600' : 'border-edge text-gray-400'
             }`}
           >
-            {apiKey ? '● OpenAI 모드' : '○ 오프라인 모드'}
+            {apiKey ? '● NovelAI 모드' : '○ 오프라인 모드'}
           </span>
           <span className="text-gray-400">
             장면 <b className="text-gray-200">{project.scenes.length}</b> · 승인{' '}

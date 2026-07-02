@@ -301,7 +301,7 @@ export async function editImage(opts: {
     apiKey,
     size,
     steps: naiActiveSteps(),
-    strength: opts.strength ?? (isSprite ? 0.5 : 0.5),
+    strength: opts.strength ?? 0.5,
   });
   if (isSprite) blob = await applyBgRemoval(blob, opts.bgRemoval ?? 'browser', apiKey);
   return { blob, source: 'novelai' };
