@@ -82,8 +82,10 @@ export function buildBackgroundPrompt(
   const parts = [
     core || title,
     ...directions,
-    '비주얼노벨 배경(인물 없음), 와이드 구도, 눈높이 카메라, 균형 잡힌 구도',
-    '중앙은 캐릭터가 설 여백을 남기고 하단은 대사 UI 를 위해 단순하게, 16:9',
+    // "16:9"·"widescreen" 등 비율 문구는 NovelAI 가 검은 레터박스 띠로 그려버려 제외한다
+    // (원하는 화면 채움은 해상도 1216×832 + Ren'Py fit cover 로 처리, 프롬프트로 강제하지 않는다).
+    '비주얼노벨 배경(인물 없음), 눈높이 카메라, 균형 잡힌 구도',
+    '중앙은 캐릭터가 설 여백을 남기고 하단은 대사 UI 를 위해 단순하게',
     aiConfig.image.backgroundStyle,
   ].filter(Boolean);
   return parts.join(', ');

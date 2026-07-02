@@ -159,7 +159,7 @@ export interface Project {
   backgroundPrompts?: Record<string, string>;
   /**
    * GUI 대사창·폰트 사용자 조정(테마 위에 덮어씀). 비면 테마 기본값 사용.
-   * - dialogueOpacity: 대사창 검정 배경 불투명도(0~1, 권장 0.1~0.2)
+   * - dialogueOpacity: 대사창 배경 불투명도(0~1, 기본 0.4 · 그라데이션 권장 0.35~0.45)
    * - textColor: 본문 글자색 / nameColor: 화자 이름색
    * - outline: 글자 외곽선 사용 / outlineColor: 외곽선색
    * - dialogueGradient: 대사창을 단색 대신 세로 그라데이션(위로 투명)으로 — 시네마틱·고투명

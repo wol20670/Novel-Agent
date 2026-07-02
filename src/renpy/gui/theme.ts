@@ -191,13 +191,45 @@ export const GENRE_OPTIONS: { id: GenreId; label: string }[] = (
   Object.keys(PRESETS) as GenreId[]
 ).map((id) => ({ id, label: PRESETS[id].label }));
 
+/** '#rrggbb(aa)' 의 RGB 상대 휘도(0~1). 알파는 무시 — 베일 "색"이 밝은지만 본다. */
+function veilLuminance(hex: string): number {
+  const h = hex.replace('#', '').slice(0, 6).padEnd(6, '0');
+  const r = parseInt(h.slice(0, 2), 16) / 255;
+  const g = parseInt(h.slice(2, 4), 16) / 255;
+  const b = parseInt(h.slice(4, 6), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * 메뉴 가독성 보정 — 타이틀/인게임(ESC) 메뉴는 임의의 밝은 배경(장면·업로드 사진) 위에 뜬다.
+ * 테마의 메뉴 베일이 "밝은 색"이면(예: 흰 반투명) 글자가 배경에 묻혀 못 읽으므로, 메뉴만
+ * 어두운 스크림 + 밝은 텍스트로 강제한다(강조색·대사 팔레트는 그대로 → 테마 정체성 유지).
+ * 이미 어두운 베일(호러/SF 등)은 건드리지 않는다. 프리셋·AI 커스텀 테마 모두에 적용된다.
+ */
+export function ensureReadableMenu(theme: GuiTheme): GuiTheme {
+  if (veilLuminance(theme.menuOverlay) < 0.5) return theme; // 어두운 베일이면 손대지 않음
+  // 텍스트를 밝게 하는 것과 짝으로, 텍스트가 얹히는 "불투명 패널"들도 어둡게 바꿔야 겹침(밝은 글자↔밝은 패널)이 없다.
+  //  - frameBg: 확인창(예/아니오)·세이브 슬롯·스킵/알림 상자 배경
+  //  - choiceIdleBg: 인게임 선택지 상자(글자색이 interfaceText 라 함께 어둡게)
+  //  - choiceHoverBg: 세이브 슬롯 hover (인게임 선택지 hover 는 accent 라 무관)
+  return {
+    ...theme,
+    menuOverlay: '#0c0a10d0', // 어두운 스크림(~82%) — 밝은 배경 위에서도 글자 대비 확보
+    frameBg: '#17121ff2', // 확인창·세이브 슬롯·스킵/알림 패널(어둡게)
+    choiceIdleBg: '#15111ce0', // 인게임 선택지 패널(어둡게)
+    choiceHoverBg: '#241d33', // 세이브 슬롯 hover(어둡게)
+    interfaceText: '#f2edf4', // 메뉴/선택지 텍스트(밝게)
+    idle: '#e6dde6', // 비활성 버튼·세이브 슬롯·퀵메뉴 텍스트(밝게)
+  };
+}
+
 /**
  * 적용할 GuiTheme 결정. 커스텀(AI/오프라인 생성) 테마가 있으면 그것을 우선,
- * 없으면 장르 프리셋(미지정 시 기본).
+ * 없으면 장르 프리셋(미지정 시 기본). 마지막에 메뉴 가독성 보정을 항상 통과시킨다.
  */
 export function resolveTheme(genre: GenreId | undefined, custom?: GuiTheme): GuiTheme {
-  if (custom) return custom;
-  return PRESETS[genre ?? DEFAULT_GENRE] ?? PRESETS[DEFAULT_GENRE];
+  const base = custom ?? PRESETS[genre ?? DEFAULT_GENRE] ?? PRESETS[DEFAULT_GENRE];
+  return ensureReadableMenu(base);
 }
 
 /** #rrggbb(또는 #rrggbbaa) + 불투명도(0~1) → #rrggbbaa. */
@@ -230,7 +262,7 @@ export function withGuiOverrides(theme: GuiTheme, ov?: GuiOverrides): GuiTheme {
   if (!ov) return theme;
   const boxOn = ov.dialogueOpacity != null || !!ov.dialogueBoxColor;
   const boxColor = ov.dialogueBoxColor ?? '#000000';
-  const boxAlpha = ov.dialogueOpacity ?? 0.15;
+  const boxAlpha = ov.dialogueOpacity ?? 0.4; // 패널 표시값·buildZip 기본과 일치
   return {
     ...theme,
     dialogueBox: boxOn ? hexWithAlpha(boxColor, boxAlpha) : theme.dialogueBox,

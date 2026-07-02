@@ -125,7 +125,7 @@ export interface AiConfig {
       model: string;
       /** 생성 길이(ms, 3,000~600,000). BGM 기본값. */
       lengthMs: number;
-      /** 출력 포맷(query). mp3 → WAV 트랜스코드해 기존 파이프라인에 흘려보낸다. */
+      /** 출력 포맷(query). 기본 'pcm_44100'(raw PCM)→WAV 헤더만 붙임(무손실·디코딩 없음). mp3_* 로 바꾸면 트랜스코드 폴백. */
       outputFormat: string;
     };
   };
@@ -190,11 +190,14 @@ export const aiConfig: AiConfig = {
       // NovelAI V4.5 공식 Undesired Content 프리셋 기준(2026-07-01 docs.novelai.net).
       // = Curated 'Heavy' 프리셋 + Human Focus 의 인체 보호(bad anatomy·bad hands).
       //   (앱은 배경/CG/스프라이트에 단일 네거티브를 공용하므로 캐릭터 안전 태그를 함께 둔다.)
+      //   + 검은 레터박스/장식 테두리 억제: V4.5 계열이 scenery 배경에 검은 띠·프레임을 구워 넣는
+      //     경향이 있어(danbooru 'letterboxed'/'border' 분포) 배경·CG·스프라이트 공통으로 막는다.
       negativePrompt:
         'blurry, lowres, upscaled, artistic error, film grain, scan artifacts, ' +
         'worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, ' +
         'halftone, multiple views, logo, too many watermarks, negative space, blank page, ' +
-        'bad anatomy, bad hands',
+        'bad anatomy, bad hands, ' +
+        'letterboxed, black bars, border, frame, framed',
       // V4.5 품질 태그는 프롬프트 "맨 끝"에 붙인다(모델별 공식 권장값, 2026-07-01 docs.novelai.net).
       // 현재 모델=Curated → 공식 권장 'location, masterpiece, no text, -0.8::feet::, rating:general'.
       // 단 '-0.8::feet::' 는 전신 입화(head to toe)와 충돌해 의도적으로 제외한다(재추가 시 발 잘림).
@@ -216,7 +219,8 @@ export const aiConfig: AiConfig = {
       composePath: '/v1/music',
       model: 'music_v1',
       lengthMs: 30000, // 30초 BGM(비용·루프 감안). 필요시 조정.
-      outputFormat: 'mp3_44100_128',
+      // raw PCM(무손실 16bit) → provider 가 WAV 헤더만 붙인다(손실 mp3 인코딩·AudioContext 디코딩 회피).
+      outputFormat: 'pcm_44100',
     },
   },
   chat: {
