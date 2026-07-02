@@ -9,7 +9,9 @@
 // 설계 메모
 //  - force_instrumental 은 true 고정(가사 없는 게임 BGM). 인증 헤더는 'xi-api-key'(Bearer 아님).
 //  - CORS: 개발(Vite)에선 '/eleven' 프록시로 우회(배포에선 ElevenLabs 가 CORS 를 허용해야 하며, 아니면 dev 한정).
-//  - BGM 은 앱 전체가 .wav 로 다루므로(renpy/generate·zip), mp3 응답을 받아 WAV 로 트랜스코드해 그대로 흘려보낸다.
+//  - BGM 은 앱 전체가 .wav 로 다루므로(renpy/generate·zip), 응답을 항상 WAV 로 만들어 그대로 흘려보낸다.
+//    기본은 raw PCM(pcm_44100)을 받아 WAV 헤더만 붙인다 → 손실 mp3 인코딩·AudioContext 디코딩을 모두 건너뛴다(음질↑).
+//    (mp3/opus 등 컨테이너 포맷으로 바꾸면 decodeAudioData 폴백으로 트랜스코드한다.)
 
 import { aiConfig } from '../../config/aiConfig';
 import { encodeWav } from './synthProvider';
@@ -42,6 +44,50 @@ async function transcodeToWav(buf: ArrayBuffer): Promise<Blob> {
   } finally {
     void ctx.close();
   }
+}
+
+/** 출력 포맷 문자열('pcm_44100')에서 샘플레이트(Hz)를 뽑는다. 못 읽으면 44100. */
+function pcmSampleRate(fmt: string): number {
+  const m = /^pcm_(\d+)/.exec(fmt);
+  return m ? Number(m[1]) : 44100;
+}
+
+/**
+ * raw PCM 은 헤더가 없어 채널 수(모노/스테레오)를 알 수 없다. 요청 길이·샘플레이트로 "채널당 기대 샘플 수"를
+ * 구해 실제 바이트 길이와 비교해 추정한다 — 모노(≈1배)와 스테레오(≈2배)는 차이가 2배라 길이 오차에 안전하다.
+ * (하드코딩 대신 응답 실측으로 판정 → music 이 스테레오여도 재생 속도/피치가 깨지지 않는다.)
+ */
+function inferPcmChannels(byteLength: number, sampleRate: number, lengthMs: number): number {
+  const totalSamples = byteLength / 2; // 16bit LE
+  const perChannel = sampleRate * (lengthMs / 1000);
+  const ratio = perChannel > 0 ? totalSamples / perChannel : 1;
+  return ratio >= 1.5 ? 2 : 1; // 1.5 임계 → 길이 ±50% 오차까지 오판 없음
+}
+
+/** 헤더 없는 16bit LE PCM(raw) → WAV Blob. 손실 mp3·AudioContext 없이 헤더 44바이트만 붙인다. */
+function pcmToWav(pcm: ArrayBuffer, sampleRate: number, channels: number): Blob {
+  const blockAlign = channels * 2; // 16bit
+  const dataSize = pcm.byteLength;
+  const ab = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(ab);
+  const writeStr = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+  };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, dataSize, true);
+  new Uint8Array(ab, 44).set(new Uint8Array(pcm)); // 이미 16bit 정수라 변환 없이 그대로 복사
+  return new Blob([ab], { type: 'audio/wav' });
 }
 
 export interface ElevenBgmResult {
@@ -105,6 +151,17 @@ export async function elevenGenerateBgm(
   // 동기 응답: 오디오 바이너리가 그대로 온다(작업ID·폴링 없음).
   const audio = await res.arrayBuffer();
   if (audio.byteLength === 0) throw new Error('ElevenLabs 응답 오디오가 비어 있습니다(0바이트).');
-  const blob = await transcodeToWav(audio);
-  return { blob };
+
+  // 기본(pcm_*): raw PCM → WAV 헤더만 붙임(손실/디코딩 없음). 그 외 컨테이너 포맷은 decodeAudioData 폴백.
+  if (cfg.outputFormat.startsWith('pcm_')) {
+    const sr = pcmSampleRate(cfg.outputFormat);
+    const channels = inferPcmChannels(audio.byteLength, sr, lengthMs);
+    console.info('%c[ElevenLabs] PCM→WAV (무손실 랩)', 'color:#a78bfa', {
+      sampleRate: sr,
+      channels,
+      bytes: audio.byteLength,
+    });
+    return { blob: pcmToWav(audio, sr, channels) };
+  }
+  return { blob: await transcodeToWav(audio) };
 }
