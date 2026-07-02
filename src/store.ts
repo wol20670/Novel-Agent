@@ -7,6 +7,7 @@ import { compileSpritePrompt, compileScenePrompt, compileCgPrompt, compileTags }
 import { ALL_TAGS } from './generators/image/tagDictionary';
 import { seedFromString } from './generators/image/novelaiProvider';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
+import { elevenGenerateBgm } from './generators/audio/elevenProvider';
 import { putAsset, getAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
 import { aiConfig, type NaiMode } from './config/aiConfig';
 import {
@@ -205,6 +206,12 @@ interface State {
    */
   openaiKey: string;
   setOpenaiKey: (key: string) => void;
+  /**
+   * ElevenLabs(선택) — 음악(BGM) 생성용 API 키. 있으면 실제 BGM(instrumental), 없으면
+   * 오프라인 synth 로 폴백. NovelAI 처럼 브라우저 직접 호출이라 dev(프록시)에서만 동작.
+   */
+  elevenKey: string;
+  setElevenKey: (key: string) => void;
   /** 프롬프트 입력 언어 — 'ko'(GPT 로 영문 태그 변환) / 'en'(영어 태그 그대로, 변환 스킵). */
   promptLang: 'ko' | 'en';
   setPromptLang: (lang: 'ko' | 'en') => void;
@@ -490,6 +497,7 @@ export const useStore = create<State>((set, get) => {
     assets: {},
     apiKey: '',
     openaiKey: '',
+    elevenKey: '',
     promptLang: 'ko',
     activeTab: 'scenes',
     selectedSceneId: null,
@@ -1376,7 +1384,23 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ busy: { ...s.busy, [key]: true } }));
       try {
         const prompt = [scene.bgm, scene.title, ...scene.direction].filter(Boolean).join(' ');
-        const { blob, moodName } = await synthBgm(prompt, opts);
+        const elevenKey = get().elevenKey.trim();
+        let blob: Blob;
+        let source: string;
+        let doneLabel: string;
+        if (elevenKey) {
+          // ElevenLabs 실제 BGM(instrumental). #BGM·제목·연출을 프롬프트로 전달(영어 서술이 가장 잘 먹는다).
+          flash('ElevenLabs 로 BGM 생성 중… (수~수십 초 · 크레딧 소모)', 'info');
+          const res = await elevenGenerateBgm(prompt, { apiKey: elevenKey });
+          blob = res.blob;
+          source = 'eleven';
+          doneLabel = 'ElevenLabs';
+        } else {
+          const res = await synthBgm(prompt, opts);
+          blob = res.blob;
+          source = 'synth';
+          doneLabel = res.moodName;
+        }
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
@@ -1384,7 +1408,7 @@ export const useStore = create<State>((set, get) => {
           kind: 'bgm',
           prompt,
           mime: 'audio/wav',
-          source: 'synth',
+          source,
           filename: `bgm_${sceneId}.wav`,
           createdAt: Date.now(),
         };
@@ -1412,7 +1436,7 @@ export const useStore = create<State>((set, get) => {
         flash(
           targets.length > 1
             ? `'${key}' BGM을 ${targets.length}개 장면에 적용했습니다.`
-            : `BGM 생성 완료 (${moodName}).`,
+            : `BGM 생성 완료 (${doneLabel}).`,
         );
       } catch (e) {
         flash(`BGM 생성 실패: ${(e as Error).message}`);
@@ -1951,6 +1975,15 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    setElevenKey: (key) => {
+      set({ elevenKey: key });
+      try {
+        localStorage.setItem('na_eleven_key', key);
+      } catch {
+        /* ignore */
+      }
+    },
+
     setPromptLang: (lang) => {
       set({ promptLang: lang });
       try {
@@ -2018,6 +2051,14 @@ export const useStore = create<State>((set, get) => {
         }
       })();
       set({ openaiKey });
+      const elevenKey = (() => {
+        try {
+          return localStorage.getItem('na_eleven_key') ?? '';
+        } catch {
+          return '';
+        }
+      })();
+      set({ elevenKey });
       const savedLang = (() => {
         try {
           return localStorage.getItem('na_prompt_lang');

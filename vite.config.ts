@@ -24,6 +24,14 @@ export default defineConfig({
         secure: true,
         rewrite: (path) => path.replace(/^\/nai/, ''),
       },
+      // ElevenLabs Music(BGM)도 브라우저 직접 호출 시 CORS 가 막힐 수 있어 개발 중엔 이 프록시로 우회한다.
+      // 코드에서 '/eleven/v1/music' 로 부르면 api.elevenlabs.io 로 전달된다(xi-api-key 헤더 보존).
+      '/eleven': {
+        target: 'https://api.elevenlabs.io',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/eleven/, ''),
+      },
     },
   },
 });

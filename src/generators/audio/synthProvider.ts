@@ -78,7 +78,8 @@ function renderMood(ctx: OfflineAudioContext, mood: Mood, opts: Required<SynthOp
   }
 }
 
-function encodeWav(buffer: AudioBuffer): Blob {
+/** AudioBuffer → 16bit PCM WAV Blob. synth 렌더 결과와 ElevenLabs mp3 트랜스코드 결과가 공용으로 쓴다. */
+export function encodeWav(buffer: AudioBuffer): Blob {
   const numCh = buffer.numberOfChannels;
   const sr = buffer.sampleRate;
   const len = buffer.length;

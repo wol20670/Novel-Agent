@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> 🔵 **진행 중 인수인계: [`HANDOFF.md`](./HANDOFF.md) 를 먼저 읽으세요** (노트북→PC 이어받기: ElevenLabs BGM 통합 실측 대기 중). 후속 작업 완료 후 이 줄과 HANDOFF.md 를 삭제할 것.
+
 Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite + React + TS + zustand + Tailwind).
 100% 클라이언트(백엔드 없음), BYO 키. 한국어 코드베이스.
 
