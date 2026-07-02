@@ -137,7 +137,9 @@ style namebox:
     xsize gui.namebox_width
     ypos gui.name_ypos
     ysize gui.namebox_height
-    background Frame(Solid(gui.frame_bg_color), gui.namebox_borders, tile=gui.namebox_tile)
+    ## 이름 배경 박스·테두리 제거 — 이름은 name_outlines(외곽선)로만 가독성 확보(대사 본문과 동일).
+    ## (기존: Frame(Solid(gui.frame_bg_color), ...) 로 하늘색 박스가 그려져 거슬렸음.)
+    background None
     padding gui.namebox_borders.padding
 
 style say_label:

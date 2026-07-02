@@ -149,7 +149,8 @@ export async function collectProjectFiles(
   // 대사창 그라데이션(투명) 켜짐 → 세로 그라데이션 텍스트박스 PNG 생성(색·불투명도는 사용자 조정값).
   if (project.guiOverrides?.dialogueGradient) {
     const boxColor = project.guiOverrides.dialogueBoxColor ?? '#000000';
-    const maxAlpha = project.guiOverrides.dialogueOpacity ?? 0.45;
+    // 기본 0.40 — 그라데이션 하단이 이 정도는 진해야 배경 위 글자 대비가 확보된다(패널 표시값과 일치).
+    const maxAlpha = project.guiOverrides.dialogueOpacity ?? 0.4;
     out.push({ path: 'game/gui/textbox.png', data: await textboxGradientPng(boxColor, maxAlpha) });
   }
 

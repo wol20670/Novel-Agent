@@ -790,7 +790,7 @@ function DialogueGuiControls() {
     update({ guiOverrides: { ...(project.guiOverrides ?? {}), ...patch } });
 
   const boxColor = ov.dialogueBoxColor ?? '#000000';
-  const opacity = ov.dialogueOpacity ?? 0.15;
+  const opacity = ov.dialogueOpacity ?? 0.4; // 내보내기(buildZip) 기본값과 일치시킴
   const textColor = ov.textColor ?? theme.dialogueText;
   const nameColor = ov.nameColor ?? theme.nameText;
   const outline = ov.outline ?? false;
@@ -851,7 +851,8 @@ function DialogueGuiControls() {
         )}
       </div>
       <p className="text-[10px] text-gray-500 leading-snug">
-        흰 글자 + 검정 외곽선 + 낮은 불투명도(10~20%)면 배경 위에서 잘 읽혀요. 빌드/내보내기에 반영됩니다.
+        흰 글자 + 검정 외곽선이 배경 위에서 잘 읽혀요. 그라데이션 대사창은 <b className="text-gray-400">35~45%</b>가
+        대비 좋고(단색 박스면 더 낮아도 OK). 빌드/내보내기에 반영됩니다.
       </p>
     </div>
   );
