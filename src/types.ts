@@ -252,11 +252,28 @@ export function baseLocaleOf(p: Project): Locale {
   return p.baseLocale ?? 'ko';
 }
 
-/** 유효 자막 로케일(base 를 항상 맨 앞에 포함, 중복 제거). 2개 이상일 때만 번역 파일·선택 UI 가 의미 있다. */
+/**
+ * 유효 자막 로케일(base 를 항상 맨 앞에 포함, 중복 제거). 2개 이상일 때만 번역 파일·선택 UI 가 의미 있다.
+ * 목록 = 두 소스의 합집합:
+ *   1) 명시적 지정(#설정_글언어 태그) — p.textLocales
+ *   2) 자동감지 — 대사/지문에 번역(i18n)이 하나라도 있는 언어. 엑셀 C열=en·D열=ja 에 번역만
+ *      채우면 태그 없이도 그 언어로 인게임 전환이 켜진다(번역=출력 의사로 간주).
+ * base 원문에 번역만 있는(다국어 미사용) 프로젝트는 그대로 [base] 하나 → 하위호환.
+ */
 export function effectiveTextLocales(p: Project): Locale[] {
   const base = baseLocaleOf(p);
-  const list = p.textLocales?.length ? p.textLocales : [base];
-  return [base, ...list.filter((l) => l !== base)];
+  const set = new Set<Locale>();
+  for (const l of p.textLocales ?? []) set.add(l); // ① 태그로 명시 지정한 언어
+  for (const sc of p.scenes) {
+    // ② 번역(i18n)이 실제로 들어 있는 언어를 자동 포함
+    for (const line of sc.lines) {
+      if (!line.i18n) continue;
+      for (const [loc, v] of Object.entries(line.i18n) as [Locale, string | undefined][]) {
+        if (v && v.trim()) set.add(loc);
+      }
+    }
+  }
+  return [base, ...[...set].filter((l) => l !== base)];
 }
 
 /** 유효 음성 로케일(base 를 앞에 포함, 중복 제거). 비어 있으면 음성 미사용([]) — base 만이면 단일 음성. */
