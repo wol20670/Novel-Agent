@@ -123,5 +123,5 @@ export const UI_STRINGS: UiTr[] = [
   { ko: '보조 {a=https://www.renpy.org/l/voicing}셀프 보이싱{/a}을 토글합니다.', en: 'Toggles assistive {a=https://www.renpy.org/l/voicing}self-voicing{/a}.', ja: '補助{a=https://www.renpy.org/l/voicing}セルフボイシング{/a}を切り替えます。' },
   // 정보(about) 크레딧 블록
   { ko: '{b}엔진{/b}\nMade with {a=https://www.renpy.org/}Ren\'Py{/a} [renpy.version_only].\n[renpy.license!t]\n', en: '{b}Engine{/b}\nMade with {a=https://www.renpy.org/}Ren\'Py{/a} [renpy.version_only].\n[renpy.license!t]\n', ja: '{b}エンジン{/b}\nMade with {a=https://www.renpy.org/}Ren\'Py{/a} [renpy.version_only].\n[renpy.license!t]\n' },
-  { ko: '{b}폰트{/b}\n나눔고딕(NanumGothic) — SIL Open Font License 1.1 (상업적 사용 허용).', en: '{b}Font{/b}\nNanumGothic — SIL Open Font License 1.1 (commercial use allowed).', ja: '{b}フォント{/b}\nNanumGothic（ナヌムゴシック） — SIL Open Font License 1.1（商用利用可）。' },
+  { ko: '{b}폰트{/b}\n나눔고딕(NanumGothic), Source Han Sans — 모두 SIL Open Font License 1.1 (상업적 사용 허용).', en: '{b}Font{/b}\nNanumGothic, Source Han Sans — both SIL Open Font License 1.1 (commercial use allowed).', ja: '{b}フォント{/b}\nNanumGothic（ナヌムゴシック）, Source Han Sans（源ノ角ゴシック） — いずれも SIL Open Font License 1.1（商用利用可）。' },
 ];

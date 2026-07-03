@@ -171,16 +171,23 @@ export async function buildRenpyZip(project: Project): Promise<ZipResult> {
   return { blob, filename: `${safeName}_renpy.zip`, placeholders };
 }
 
-/** 앱에 번들된 한글 폰트 파일들. 실패 시 빈 배열(한글이 □ 로 보일 수 있음). */
+/**
+ * 앱에 번들된 폰트 파일들. 실패 시 빈 배열(글자가 □ 로 보일 수 있음).
+ * - NanumGothic: 한글·라틴 본문(Ren'Py 기본 폰트는 한글 글리프 없음).
+ * - SourceHanSansLite: 일본어(かな·한자) 자막/UI 용. gui.rpy 의 FontGroup 이 일본어 범위만 이 폰트로 폴백한다.
+ *   (NanumGothic 은 일본어 글리프가 없어 일본어 자막이 빈칸으로 나오는 문제 대응. 둘 다 SIL OFL 1.1.)
+ */
 async function koreanFontFiles(): Promise<ProjectFile[]> {
   const base = import.meta.env.BASE_URL || '/';
   try {
-    const [font, license] = await Promise.all([
+    const [font, jpFont, license] = await Promise.all([
       fetch(`${base}fonts/NanumGothic.ttf`),
+      fetch(`${base}fonts/SourceHanSansLite.ttf`),
       fetch(`${base}fonts/OFL.txt`),
     ]);
     const files: ProjectFile[] = [];
     if (font.ok) files.push({ path: 'game/fonts/NanumGothic.ttf', data: await font.blob() });
+    if (jpFont.ok) files.push({ path: 'game/fonts/SourceHanSansLite.ttf', data: await jpFont.blob() });
     if (license.ok) files.push({ path: 'game/fonts/OFL.txt', data: await license.text() });
     return files;
   } catch {
