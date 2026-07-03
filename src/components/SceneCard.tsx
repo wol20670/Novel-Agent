@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useStore } from '../store';
-import { SCENE_STATUS_LABEL, effectiveExpressions, emojiFor, type SceneStatus, type Expression, type Line } from '../types';
+import { SCENE_STATUS_LABEL, effectiveExpressions, emojiFor, baseLocaleOf, LOCALE_LABEL, type SceneStatus, type Expression, type Line, type Locale } from '../types';
 import { inferEmotion } from '../generators/emotion';
 import { useAssetUrl } from './useAssetUrl';
 import Spinner from './Spinner';
@@ -118,20 +119,16 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
       {/* 대사/지문 미리보기 */}
       <div className="bg-ink/70 rounded-lg border border-edge p-3 max-h-44 overflow-y-auto text-sm mb-3 space-y-0.5">
         {scene.lines.length === 0 && <span className="text-gray-600 text-xs">대사 없음</span>}
-        {scene.lines.map((l, i) =>
-          l.kind === 'dialogue' ? (
-            <div key={i} className="flex items-center gap-1.5">
-              <p className="flex-1 min-w-0">
-                <b className="text-accent">{l.speaker}</b> <span className="text-gray-200">{l.text}</span>
-              </p>
-              <LineEmotion sceneId={sceneId} index={i} line={l} background={scene.background} direction={scene.direction} />
-            </div>
-          ) : (
-            <p key={i} className="text-gray-400 italic">
-              {l.text}
-            </p>
-          ),
-        )}
+        {scene.lines.map((l, i) => (
+          <LineRow
+            key={i}
+            sceneId={sceneId}
+            index={i}
+            line={l}
+            background={scene.background}
+            direction={scene.direction}
+          />
+        ))}
         {scene.cg.map((c, i) => (
           <p key={`cg${i}`} className="text-pink-600 text-xs">
             🎴 CG: {c}
@@ -169,6 +166,103 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
 }
 
 type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
+
+/**
+ * 대사/지문 한 줄 — 미리보기 + 인라인 편집.
+ * 평소엔 원문(+번역 EN/JA를 회색으로) 표시. ✏️ 를 누르면 원문·번역을 실시간 수정한다.
+ * 표정 셀렉트(대사만)는 오른쪽에, ✏️ 는 그 왼쪽에 둔다.
+ */
+function LineRow({
+  sceneId,
+  index,
+  line,
+  background,
+  direction,
+}: {
+  sceneId: string;
+  index: number;
+  line: Line;
+  background?: string;
+  direction: string[];
+}) {
+  const [editing, setEditing] = useState(false);
+  const setText = useStore((s) => s.setLineText);
+  const setTr = useStore((s) => s.setLineTranslation);
+  const base = useStore((s) => baseLocaleOf(s.project));
+  // 번역 대상 = base 를 제외한 지원 로케일(en·ja) — 엑셀 C/D열과 동일.
+  const targets = (Object.keys(LOCALE_LABEL) as Locale[]).filter((l) => l !== base);
+  const isDlg = line.kind === 'dialogue';
+
+  return (
+    <div className="flex items-start gap-1.5">
+      {editing ? (
+        <div className="flex-1 min-w-0 space-y-1 py-0.5" onClick={(e) => e.stopPropagation()}>
+          {isDlg && <b className="text-accent text-xs">{(line as DialogueLine).speaker}</b>}
+          <textarea
+            className="field w-full text-sm resize-y min-h-[2.2rem] leading-snug"
+            value={line.text}
+            onChange={(e) => setText(sceneId, index, e.target.value)}
+            placeholder="멘트(원문)"
+            autoFocus
+          />
+          {targets.map((loc) => (
+            <div key={loc} className="flex items-center gap-1.5">
+              <span className="text-[10px] text-gray-500 w-7 shrink-0 uppercase">{loc}</span>
+              <input
+                className="field flex-1 text-xs"
+                value={line.i18n?.[loc] ?? ''}
+                onChange={(e) => setTr(sceneId, index, loc, e.target.value)}
+                placeholder={`${LOCALE_LABEL[loc]} 번역`}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex-1 min-w-0">
+          {isDlg ? (
+            <p>
+              <b className="text-accent">{(line as DialogueLine).speaker}</b>{' '}
+              <span className="text-gray-200">{line.text}</span>
+            </p>
+          ) : (
+            <p className="text-gray-400 italic">{line.text}</p>
+          )}
+          {targets.map((loc) =>
+            line.i18n?.[loc] ? (
+              <p key={loc} className="text-[11px] text-gray-500 pl-1">
+                <span className="uppercase text-gray-600 mr-1">{loc}</span>
+                {line.i18n[loc]}
+              </p>
+            ) : null,
+          )}
+        </div>
+      )}
+
+      <button
+        className={`text-[11px] rounded px-1 py-0.5 shrink-0 border outline-none ${
+          editing ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-400 bg-panel2 hover:text-gray-200'
+        }`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setEditing((v) => !v);
+        }}
+        title="멘트·번역 편집"
+      >
+        {editing ? '완료' : '✏️'}
+      </button>
+
+      {isDlg && (
+        <LineEmotion
+          sceneId={sceneId}
+          index={index}
+          line={line as DialogueLine}
+          background={background}
+          direction={direction}
+        />
+      )}
+    </div>
+  );
+}
 
 /** 대사 한 줄의 표정 선택 — 기본 "자동"(대사 분석 결과), 직접 6종 중 지정 가능. */
 function LineEmotion({
