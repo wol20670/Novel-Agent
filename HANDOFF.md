@@ -48,10 +48,26 @@
 - **하위호환:** 로케일 미설정 프로젝트는 다국어 산출물 0(기존 프로젝트 무영향 — 검증됨).
 - 파일: `types.ts`·`parser/*`·`store.ts`·`renpy/generate.ts`·`renpy/gui/{index,screensRpy}.ts`·`config/aiConfig.ts` + provider 신규.
 
+## 1-C. 노트북 세션(2026-07-03) 추가 — GUI·확인창 문구 언어 일관성  *(commit `1ffa554`)*
+- **증상:** 게임 종료/메인메뉴 확인창이 엔진 기본 **영어**로 뜨고(우리 UI 는 한국어라 불일치), 언어를
+  영어로 바꿔도 우리 메뉴 리터럴("예/아니오/설정")은 한국어 고정이었음.
+- **해결:** UI 전체(메뉴·설정·도움말·확인창)를 자막/음성과 함께 **선택 언어(한/영/일)로 일관 표시**.
+  - `src/renpy/gui/uiStrings.ts`(신규) = GUI 문자열 정적 번역표: 엔진 확인창 12종(quit/main menu/삭제/
+    덮어쓰기/스킵 등) + 우리 `screensRpy` 리터럴 ~80종, ko/en/ja.
+  - `generate.ts` → `game/ui_strings.rpy`: 엔진 확인창(`layout.*`·`gui.*`)을 **게임 기본 언어로 재정의**
+    (init 999). **단일 언어 프로젝트에도 항상** 적용 → 한국어 게임의 확인창이 한국어로.
+  - `generate.ts` → `game/tl/<lang>/ui.rpy`: 자막 언어별 `translate strings`(확인창 + 우리 UI 전체).
+  - **원리:** Ren'Py `substitute()` 가 표시되는 모든 문자열을 `translate_string` 으로 런타임 치환
+    (엔진 소스 `substitutions.py`에서 확인). base=한국어 소스 → en/ja 는 tl 로 치환.
+- **주의(추후 UI 문구 추가 시):** `screensRpy.ts` 에 새 `_("한국어")` 리터럴을 넣으면 **`uiStrings.ts`
+  에도 같은 ko/en/ja 항목을 추가**해야 그 문자열이 번역됨(안 넣으면 그 문자열만 한국어로 남음).
+- 파일: `renpy/gui/uiStrings.ts`(신규)·`renpy/generate.ts`.
+
 ## 2. 검증 상태
 - ✅ `npm run typecheck` · `vite build`(OneDrive 밖 경로) 통과.
 - ✅ **인게임 확인 완료(PC)**: 이름 박스 제거 · 대사창 대비 · 게임 메뉴/세이브/설정 가시성 · 스킵 · 자동 · **확인창(예/아니오)** 모두 정상.
 - ✅ **다국어 컴파일단 검증 완료(노트북)**: Ren'Py 8.5.3 SDK `lint` 0에러 + **실게임 전체 플레이**(자막·음성 일본어 런타임 전환, `C:\renpy\renpy-8.5.3-sdk`) 런타임 에러 0. tl/english·tl/japanese·voices.rpy·설정 언어 라디오 모두 동작.
+- ✅ **GUI 언어 일관성 검증 완료(노트북)**: `lint` 0에러 + 런타임 `translate_string` 실측(base/영/일 전 UI 문자열 정확 치환 — 확인창·메뉴·예/아니오 포함) + `screensRpy` 리터럴 커버리지 100%(누락 검출 스크립트).
 - ⚠️ **미검증 ①: ElevenLabs BGM 실제 API 호출(유료 키 필요)** — PCM→WAV 실측(생성·콘솔 채널 로그·재생·`music/` 저장·ZIP 포함). → §3.
 - ⚠️ **미검증 ②: 다국어 음성 TTS 실제 호출 + 음성생성 UI/store(현재 미구현)** → §3-2.
 
