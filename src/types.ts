@@ -2,6 +2,21 @@
 
 import type { GenreId, GuiTheme } from './renpy/gui/theme';
 
+/**
+ * 글로벌 다국어 로케일. 자막(글언어)과 음성(목소리언어)이 각각 독립적으로 이 집합에서 고른다
+ * (예: 자막 한국어 / 음성 일본어 교차 선택). base = 대본 원문(A/B열) 언어.
+ */
+export type Locale = 'ko' | 'en' | 'ja';
+
+/** 로케일 표시 이름(UI·Ren'Py 언어 선택 버튼 공통). */
+export const LOCALE_LABEL: Record<Locale, string> = { ko: '한국어', en: 'English', ja: '日本語' };
+
+/**
+ * 로케일 → Ren'Py config.language 이름. 기본 언어(대본 원문)는 번역 블록이 없어 None 이다.
+ * (Ren'Py 공식 번역 시스템: game/tl/<name>/ 폴더 + Language(name) 액션.)
+ */
+export const RENPY_LANG: Record<Locale, string | null> = { ko: null, en: 'english', ja: 'japanese' };
+
 export type SceneStatus = 'review' | 'approved' | 'needs_fix';
 
 export const SCENE_STATUS_LABEL: Record<SceneStatus, string> = {
@@ -29,16 +44,26 @@ export function emojiFor(name: string): string {
   return EXPR_EMOJI[name] ?? '🎭';
 }
 
+/**
+ * 대사·지문의 번역 검수본(로케일 → 텍스트). base(원문) 언어는 담지 않는다(text 가 원문).
+ * 비어 있는 로케일은 자막에서 원문으로 폴백하고, 음성은 생성하지 않는다.
+ */
+export type I18nText = Partial<Record<Locale, string>>;
+
 export type Line =
   | {
       kind: 'dialogue';
       speaker: string; // 표시 이름표 (합동 대사면 "한지수 & 강민주")
-      text: string;
+      text: string; // base(원문) 언어. 자막 번역은 i18n, Ren'Py 출력은 tl 블록으로 분리된다.
       emotion?: string;
       /** 합동 대사(둘 이상이 동시에) — 등록 캐릭터 이름 배열. 있으면 speaker 는 묶음 라벨이다. */
       members?: string[];
+      /** 로케일별 번역 검수본(엑셀 C/D열 등). 없으면 자막은 원문 폴백. */
+      i18n?: I18nText;
+      /** 이 라인에 성우 음성을 생성할지(opt-in). 크레딧 폭탄 방지로 기본은 미생성. */
+      voiced?: boolean;
     }
-  | { kind: 'narration'; text: string };
+  | { kind: 'narration'; text: string; i18n?: I18nText; voiced?: boolean };
 
 export interface Choice {
   text: string;
@@ -103,9 +128,14 @@ export interface Character {
    * 에셋 창의 스프라이트 관리에서도 제외한다. 대사 이름표·분기에는 정상 참여.
    */
   isProtagonist?: boolean;
+  /**
+   * 언어별 ElevenLabs voice_id — 다국어 성우 매핑. 해당 로케일 id 가 없으면 그 언어 음성은 생성하지 않는다.
+   * (같은 캐릭터라도 언어마다 다른 성우를 배정할 수 있다.)
+   */
+  voiceIds?: Partial<Record<Locale, string>>;
 }
 
-export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm';
+export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice';
 
 export interface AssetMeta {
   id: string;
@@ -127,6 +157,20 @@ export interface Project {
   scenes: Scene[];
   characters: Character[];
   rawInput: string;
+  /**
+   * 대본 원문(A/B열)의 언어. 자막·음성의 base 이자 Ren'Py 기본 언어(config.language=None). 기본 'ko'.
+   */
+  baseLocale?: Locale;
+  /**
+   * 출력할 자막 언어 목록(base 포함). 2개 이상이면 game/tl 번역 파일 + 설정 화면 "자막 언어" 선택이 생긴다.
+   * 비어 있으면 단일 언어(base)로 취급한다(하위호환).
+   */
+  textLocales?: Locale[];
+  /**
+   * 출력할 음성 언어 목록. textLocales 와 완전 독립(교차 선택). 2개 이상이면 설정 화면 "음성 언어" 선택이 생긴다.
+   * 비어 있으면 음성 미사용.
+   */
+  voiceLocales?: Locale[];
   /** GUI 테마(장르 프리셋). 미지정이면 기본 프리셋이 적용된다. */
   genre?: GenreId;
   /** AI/오프라인으로 생성한 커스텀 테마. 있으면 genre 프리셋보다 우선한다. */
@@ -201,6 +245,26 @@ export function spriteAssetId(c: Character, outfit: string | undefined, expr: Ex
     if (id) return id;
   }
   return c.expressions[expr];
+}
+
+/** 프로젝트의 base 로케일(대본 원문 언어). 미지정이면 'ko'. */
+export function baseLocaleOf(p: Project): Locale {
+  return p.baseLocale ?? 'ko';
+}
+
+/** 유효 자막 로케일(base 를 항상 맨 앞에 포함, 중복 제거). 2개 이상일 때만 번역 파일·선택 UI 가 의미 있다. */
+export function effectiveTextLocales(p: Project): Locale[] {
+  const base = baseLocaleOf(p);
+  const list = p.textLocales?.length ? p.textLocales : [base];
+  return [base, ...list.filter((l) => l !== base)];
+}
+
+/** 유효 음성 로케일(base 를 앞에 포함, 중복 제거). 비어 있으면 음성 미사용([]) — base 만이면 단일 음성. */
+export function effectiveVoiceLocales(p: Project): Locale[] {
+  const list = p.voiceLocales ?? [];
+  if (!list.length) return [];
+  const base = baseLocaleOf(p);
+  return list.includes(base) ? [base, ...list.filter((l) => l !== base)] : list.slice();
 }
 
 export function emptyProject(): Project {

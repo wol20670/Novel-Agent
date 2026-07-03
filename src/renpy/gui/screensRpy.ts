@@ -3,9 +3,61 @@
 //   - 모든 이미지 의존(button/bar/frame/overlay/textbox PNG)을 Solid/색으로 대체 → 외부 PNG 0개
 //   - 색·폰트는 전부 gui.rpy 의 define gui.* 참조 → 테마만 바꾸면 전체 룩 전환
 //   - nvl/bubble 화면과 phone 전용(이미지) 스타일은 제외(우리는 ADV 일반 대사)
-// 테마 의존 값이 없으므로 정적이지만, 향후 레이아웃 변형을 위해 함수로 둔다.
+// 테마 의존 값이 없으므로 정적이지만, 다국어 선택 UI 주입을 위해 인자를 받는다.
 
-export function screensRpy(): string {
+import type { Locale } from '../../types';
+import { RENPY_LANG, LOCALE_LABEL } from '../../types';
+import type { GuiLocales } from './index';
+
+/**
+ * 설정 화면 preferences 에 주입할 "자막 언어 / 음성 언어" 선택 블록(Ren'Py).
+ * 자막(config.language)과 음성(persistent.voice_language)은 독립 라디오라 교차 선택이 된다.
+ * 각 목록이 2개 이상일 때만 해당 블록이 나온다. 12칸 들여쓰기(preferences 의 바깥 vbox 기준).
+ */
+function languagePrefsBlock(locales?: GuiLocales): string {
+  if (!locales) return '';
+  const text = locales.text ?? [];
+  const voice = locales.voice ?? [];
+  const showText = text.length > 1;
+  const showVoice = voice.length > 1;
+  if (!showText && !showVoice) return '';
+
+  const base = text[0]; // effectiveTextLocales 는 base 를 맨 앞에 둔다.
+  const I = (n: number) => ' '.repeat(n);
+  const lines: string[] = [];
+  lines.push(`${I(12)}hbox:`);
+  lines.push(`${I(16)}box_wrap True`);
+  lines.push('');
+
+  if (showText) {
+    lines.push(`${I(16)}vbox:`);
+    lines.push(`${I(20)}style_prefix "radio"`);
+    lines.push(`${I(20)}label _("자막 언어")`);
+    for (const loc of text) {
+      // 기본 언어(대본 원문)는 번역 블록이 없어 Language(None).
+      const action = loc === base ? 'Language(None)' : `Language("${RENPY_LANG[loc]}")`;
+      lines.push(`${I(20)}textbutton _("${LOCALE_LABEL[loc]}") action ${action}`);
+    }
+    lines.push('');
+  }
+
+  if (showVoice) {
+    lines.push(`${I(16)}vbox:`);
+    lines.push(`${I(20)}style_prefix "radio"`);
+    lines.push(`${I(20)}label _("음성 언어")`);
+    for (const loc of voice as Locale[]) {
+      lines.push(
+        `${I(20)}textbutton _("${LOCALE_LABEL[loc]}") action SetField(persistent, "voice_language", "${loc}")`,
+      );
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n') + '\n';
+}
+
+export function screensRpy(locales?: GuiLocales): string {
+  const languagePrefs = languagePrefsBlock(locales);
   return String.raw`################################################################################
 ## 자동 생성: 자체 GUI 화면 (zero-PNG, Solid 기반)
 ################################################################################
@@ -702,7 +754,7 @@ screen preferences():
 
             null height (4 * gui.pref_spacing)
 
-            hbox:
+${languagePrefs}            hbox:
                 style_prefix "slider"
                 box_wrap True
 
