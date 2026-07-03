@@ -128,6 +128,26 @@ export interface AiConfig {
       /** 출력 포맷(query). 기본 'pcm_44100'(raw PCM)→WAV 헤더만 붙임(무손실·디코딩 없음). mp3_* 로 바꾸면 트랜스코드 폴백. */
       outputFormat: string;
     };
+    /**
+     * 다국어 성우(TTS) — ElevenLabs Multilingual. BGM(eleven)과 같은 BYO 키(na_eleven_key)·'/eleven'
+     * 프록시·xi-api-key 를 공유한다. 캐릭터별 voice_id 는 코드가 아니라 프로젝트 데이터(Character.voiceIds)에 둔다.
+     * 크레딧은 Music 과 공유되므로 라인 opt-in(Line.voiced)으로만 생성한다(비용 안전장치).
+     */
+    elevenVoice: {
+      /** TTS 경로 접두어. 실제 요청은 `${prefix}/{voice_id}` 로 만든다. */
+      ttsPathPrefix: string;
+      /** 모델('eleven_multilingual_v2' = ko/en/ja 등 29개 언어, 텍스트에서 언어 자동 감지). */
+      model: string;
+      /** 출력 포맷(query). Ren'Py voice 는 mp3 재생 OK → BGM 과 달리 트랜스코드 없이 그대로 쓴다. */
+      outputFormat: string;
+      /** 보이스 세팅(0~1). stability↑=일관, similarity_boost↑=원본 유사, style↑=표현력, speaker_boost=명료도. */
+      voiceSettings: {
+        stability: number;
+        similarity_boost: number;
+        style: number;
+        use_speaker_boost: boolean;
+      };
+    };
   };
   chat: {
     /** Chat Completions 엔드포인트(테마/표정 분류 등 텍스트 추론용). */
@@ -221,6 +241,13 @@ export const aiConfig: AiConfig = {
       lengthMs: 30000, // 30초 BGM(비용·루프 감안). 필요시 조정.
       // raw PCM(무손실 16bit) → provider 가 WAV 헤더만 붙인다(손실 mp3 인코딩·AudioContext 디코딩 회피).
       outputFormat: 'pcm_44100',
+    },
+    elevenVoice: {
+      // ElevenLabs Text-to-Speech(Multilingual). 요청 URL = '/eleven' + '/v1/text-to-speech/{voice_id}'.
+      ttsPathPrefix: '/v1/text-to-speech',
+      model: 'eleven_multilingual_v2',
+      outputFormat: 'mp3_44100_128',
+      voiceSettings: { stability: 0.4, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true },
     },
   },
   chat: {

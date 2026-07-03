@@ -1,7 +1,23 @@
 // 텍스트/엑셀 파서가 공유하는 장면 누적기.
 // 두 파서 모두 (화자, 본문) 형태의 "행"으로 정규화한 뒤 이 빌더에 흘려보낸다.
 
-import type { Scene, Choice, Character, Expression } from '../types';
+import type { Scene, Choice, Character, Expression, Locale, I18nText } from '../types';
+
+/** "ko|en|ja" / "ko, en, ja" / "한국어 영어" → 유효 Locale 배열(중복·오탈자 제거). */
+export function parseLocaleSpec(raw: string): Locale[] {
+  const alias: Record<string, Locale> = {
+    ko: 'ko', kor: 'ko', korean: 'ko', 한국어: 'ko', 한글: 'ko',
+    en: 'en', eng: 'en', english: 'en', 영어: 'en',
+    ja: 'ja', jp: 'ja', jpn: 'ja', japanese: 'ja', 일본어: 'ja', 일어: 'ja',
+  };
+  const out: Locale[] = [];
+  for (const tok of raw.split(/[|,/·、\s]+/)) {
+    const k = tok.trim().toLowerCase();
+    const loc = alias[k];
+    if (loc && !out.includes(loc)) out.push(loc);
+  }
+  return out;
+}
 
 const PALETTE = [
   '#9fd3ff', '#ffb3c7', '#c8ffc8', '#ffe5a3',
@@ -29,21 +45,42 @@ export function splitJointSpeaker(raw: string): string[] {
   return parts.length >= 2 ? parts : [];
 }
 
+/** 번역 검수본 정리 — 각 값 trim, 빈 값 제거. 남는 게 없으면 undefined(라인에 i18n 미부착). */
+function normalizeI18n(i18n?: I18nText): I18nText | undefined {
+  if (!i18n) return undefined;
+  const out: I18nText = {};
+  for (const [loc, v] of Object.entries(i18n) as [Locale, string | undefined][]) {
+    const t = (v ?? '').trim();
+    if (t) out[loc] = t;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** 정규화된 한 행. speaker 가 있으면 대사, 없으면 본문(지문/태그)이다. */
 export interface Row {
   speaker?: string;
   body: string;
 }
 
+/** 대본 메타태그(#설정_*)로 지정된 프로젝트 레벨 다국어 설정. 없는 값은 undefined(프로젝트 기본 유지). */
+export interface ScriptMeta {
+  baseLocale?: Locale;
+  textLocales?: Locale[];
+  voiceLocales?: Locale[];
+}
+
 export interface BuildResult {
   scenes: Scene[];
   characters: Character[];
+  /** #설정_글언어 / #설정_목소리언어 로 지정된 값(있을 때만). store 가 프로젝트에 병합한다. */
+  meta?: ScriptMeta;
 }
 
 export class SceneBuilder {
   private scenes: Scene[] = [];
   private speakers = new Set<string>();
   private current: Scene | null = null;
+  private meta: ScriptMeta = {};
 
   /** #S 가 나오기 전 본문이 들어오면 자동으로 도입 장면을 연다. */
   private ensureScene(): Scene {
@@ -91,8 +128,9 @@ export class SceneBuilder {
     if (carryOutfits) this.current!.outfits = { ...carryOutfits };
   }
 
-  addDialogue(speaker: string, text: string, emotion?: string) {
+  addDialogue(speaker: string, text: string, emotion?: string, i18n?: I18nText) {
     const sc = this.ensureScene();
+    const tr = normalizeI18n(i18n);
 
     // 합동 대사: "한지수, 강민주" / "한지수 & 강민주" 처럼 둘 이상이 동시에 말하는 줄.
     // 멤버(실제 등록 이름) 각각을 캐릭터로 등록하고, 표시 라벨은 " & " 로 묶는다(유령 캐릭터 없음).
@@ -104,6 +142,7 @@ export class SceneBuilder {
         speaker: members.join(' & '),
         text: text.trim(),
         members,
+        i18n: tr,
       });
       return;
     }
@@ -119,12 +158,25 @@ export class SceneBuilder {
     // 표정 이름은 자유 문자열(사용자 커스텀 가능) → 비어있지 않으면 그대로 채택(작가 신뢰).
     const valid: Expression | undefined = emo ? emo : undefined;
     this.speakers.add(name);
-    sc.lines.push({ kind: 'dialogue', speaker: name, text: text.trim(), emotion: valid });
+    sc.lines.push({ kind: 'dialogue', speaker: name, text: text.trim(), emotion: valid, i18n: tr });
   }
 
-  addNarration(text: string) {
+  addNarration(text: string, i18n?: I18nText) {
     const sc = this.ensureScene();
-    sc.lines.push({ kind: 'narration', text: text.trim() });
+    sc.lines.push({ kind: 'narration', text: text.trim(), i18n: normalizeI18n(i18n) });
+  }
+
+  /** #설정_글언어 — 자막 언어 목록. 첫 항목을 base(대본 원문)로 잡는다. */
+  setTextLocales(spec: string) {
+    const locs = parseLocaleSpec(spec);
+    if (!locs.length) return;
+    this.meta.baseLocale = locs[0];
+    this.meta.textLocales = locs;
+  }
+  /** #설정_목소리언어 — 음성 언어 목록(자막과 독립). */
+  setVoiceLocales(spec: string) {
+    const locs = parseLocaleSpec(spec);
+    if (locs.length) this.meta.voiceLocales = locs;
   }
 
   setBackground(name: string) {
@@ -184,7 +236,8 @@ export class SceneBuilder {
       expressions: {},
       isProtagonist: PROTAGONIST_NAMES.has(name),
     }));
-    return { scenes: this.scenes, characters };
+    const meta = Object.keys(this.meta).length ? this.meta : undefined;
+    return { scenes: this.scenes, characters, meta };
   }
 }
 
@@ -196,6 +249,15 @@ export function applyTag(b: SceneBuilder, body: string): boolean {
   const t = body.trim();
   if (t.startsWith('#S ') || t === '#S' || t.startsWith('#장면')) {
     b.startScene(t.replace(/^#S\s*/, '').replace(/^#장면\s*/, ''));
+    return true;
+  }
+  // 프로젝트 레벨 다국어 설정(장면 무관, 대본 어디에 있어도 됨).
+  if (t.startsWith('#설정_글언어')) {
+    b.setTextLocales(t.replace(/^#설정_글언어\s*[:：]?\s*/, ''));
+    return true;
+  }
+  if (t.startsWith('#설정_목소리언어')) {
+    b.setVoiceLocales(t.replace(/^#설정_목소리언어\s*[:：]?\s*/, ''));
     return true;
   }
   if (t.startsWith('#배경')) {

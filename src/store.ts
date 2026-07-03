@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression } from './types';
 import { emptyProject, projectExpressions, effectiveExpressions } from './types';
 import { parseText, parseWorkbook } from './parser';
+import type { ScriptMeta } from './parser';
 import { generateImage, generateSprite, generateExpression, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, upscaleImage, type BgRemoval } from './generators/image';
 import { compileSpritePrompt, compileScenePrompt, compileCgPrompt, compileTags } from './generators/image/promptCompiler';
 import { ALL_TAGS } from './generators/image/tagDictionary';
@@ -522,13 +523,19 @@ export const useStore = create<State>((set, get) => {
     },
 
     analyzeText: (text) => {
-      const { scenes, characters } = parseText(text);
+      const { scenes, characters, meta } = parseText(text);
       if (scenes.length === 0) {
         flash('분석할 장면이 없습니다. 형식을 확인하세요.');
         return;
       }
       set((s) => ({
-        project: { ...s.project, rawInput: text, scenes, characters: mergeChars(s.project.characters, characters) },
+        project: {
+          ...s.project,
+          ...localeMeta(meta),
+          rawInput: text,
+          scenes,
+          characters: mergeChars(s.project.characters, characters),
+        },
         selectedSceneId: scenes[0].id,
         activeTab: 'scenes',
       }));
@@ -537,13 +544,18 @@ export const useStore = create<State>((set, get) => {
     },
 
     analyzeExcel: async (data) => {
-      const { scenes, characters } = await parseWorkbook(data);
+      const { scenes, characters, meta } = await parseWorkbook(data);
       if (scenes.length === 0) {
         flash('엑셀에서 장면을 찾지 못했습니다. A/B열 형식을 확인하세요.');
         return;
       }
       set((s) => ({
-        project: { ...s.project, scenes, characters: mergeChars(s.project.characters, characters) },
+        project: {
+          ...s.project,
+          ...localeMeta(meta),
+          scenes,
+          characters: mergeChars(s.project.characters, characters),
+        },
         selectedSceneId: scenes[0].id,
         activeTab: 'scenes',
       }));
@@ -2285,6 +2297,19 @@ export const useStore = create<State>((set, get) => {
     },
   };
 });
+
+/**
+ * 대본 메타(#설정_글언어/#설정_목소리언어)로 지정된 다국어 설정을 프로젝트에 병합할 부분 패치.
+ * 지정된 값만 덮어쓴다(대본에 없으면 기존 프로젝트 설정 유지).
+ */
+function localeMeta(meta?: ScriptMeta): Partial<Pick<Project, 'baseLocale' | 'textLocales' | 'voiceLocales'>> {
+  if (!meta) return {};
+  const patch: Partial<Pick<Project, 'baseLocale' | 'textLocales' | 'voiceLocales'>> = {};
+  if (meta.baseLocale) patch.baseLocale = meta.baseLocale;
+  if (meta.textLocales) patch.textLocales = meta.textLocales;
+  if (meta.voiceLocales) patch.voiceLocales = meta.voiceLocales;
+  return patch;
+}
 
 /**
  * 캐릭터의 (의상, 표정) 슬롯에 스프라이트 assetId 를 박은 새 characters 배열을 돌려준다.

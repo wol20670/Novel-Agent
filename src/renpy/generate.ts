@@ -2,8 +2,10 @@
 // 파일 본문(텍스트)만 만들고, 바이너리 에셋(PNG/WAV)은 zip 빌더가 채운다.
 
 import type { Project, Scene, Line, Character, Expression } from '../types';
+import { RENPY_LANG, LOCALE_LABEL, baseLocaleOf, effectiveTextLocales, effectiveVoiceLocales } from '../types';
 import { SlugMap } from './slug';
 import { generateGuiFiles, resolveTheme, withGuiOverrides } from './gui';
+import { voiceBaseName } from '../generators/audio/elevenVoiceProvider';
 import { inferEmotion } from '../generators/emotion';
 import { enforceContrast } from '../generators/theme/color';
 
@@ -394,7 +396,8 @@ function scriptBody(
     r.cgTags.forEach((tag) => out.push(`${indent(1)}show ${tag} with dissolve`));
     if (s.direction.length) out.push(`${indent(1)}# 연출: ${s.direction.join(' / ')}`);
 
-    for (const line of s.lines) {
+    for (let lineIdx = 0; lineIdx < s.lines.length; lineIdx++) {
+      const line = s.lines[lineIdx];
       if (line.kind === 'dialogue') {
         const speakerIds = lineSpeakerIds(line, ids);
         const want = attrFor(effectiveEmotion(line, s));
@@ -418,6 +421,12 @@ function scriptBody(
           line.members && line.members.length
             ? joints.get(line.speaker)?.id ?? speakerIds[0] ?? ids.get(line.speaker)
             : ids.get(line.speaker);
+        // 성우 음성(opt-in): 단일 화자 대사에만. vo() 가 persistent.voice_language 로 파일을 고르고
+        // 없으면 무음 폴백하므로, 음성 파일이 아직 없어도 게임은 안전하게 실행된다.
+        const spId = ids.get(line.speaker);
+        if (line.voiced && !(line.members && line.members.length) && spId) {
+          out.push(`${indent(1)}$ vo("${voiceBaseName(spId, r.label, lineIdx)}")`);
+        }
         out.push(`${indent(1)}${voiceId} "${esc(line.text)}"`);
       } else {
         out.push(`${indent(1)}"${esc(line.text)}"`);
@@ -450,12 +459,16 @@ function scriptBody(
 
 function optionsRpy(project: Project): string {
   const t = esc(project.title);
+  // 자막 다국어를 쓰면 기본 언어(base)는 None(번역 블록 없음). 나머지는 tl/<lang> 폴더로 자동 인식된다.
+  const multiText = effectiveTextLocales(project).length > 1;
   return [
     '# 자동 생성: 기본 옵션',
     `define config.name = _("${t}")`,
     `define config.version = "1.0"`,
     `define config.has_sound = True`,
     `define config.has_music = True`,
+    `define config.has_voice = True`,
+    ...(multiText ? ['define config.language = None  # 기본 언어(대본 원문). 설정에서 자막 언어 전환.'] : []),
     `define config.window_title = "${t}"`,
     `define gui.about = _("제작: ${esc(project.author)}")`,
     '',
@@ -582,6 +595,60 @@ function creditsRpy(project: Project): string {
   ].join('\n');
 }
 
+/**
+ * game/voices.rpy — 성우 음성 라우팅. 음성 언어(persistent.voice_language)는 자막(config.language)과
+ * 완전히 독립이라, 자막 KO / 음성 JA 같은 교차 선택이 성립한다. 파일이 없으면 조용히 무음 폴백.
+ */
+function voicesRpy(project: Project): string {
+  const voices = effectiveVoiceLocales(project);
+  // 기본 음성 언어: base 가 음성 목록에 있으면 base, 아니면 첫 음성 언어.
+  const base = baseLocaleOf(project);
+  const def = voices.includes(base) ? base : voices[0];
+  return [
+    '# 자동 생성: 성우 음성 라우팅 (음성 언어 = 자막 언어와 독립)',
+    `default persistent.voice_language = "${def}"`,
+    '',
+    'init python:',
+    '    def vo(base):',
+    '        # base = "c_1_scene_3_002"(언어·확장자 없음). 음성 언어는 persistent 로 자막과 독립 선택.',
+    '        path = "voices/%s/%s.mp3" % (persistent.voice_language, base)',
+    '        if renpy.loadable(path):',
+    '            renpy.voice(path)   # 다음 say 에 음성 부착. 파일 없으면 조용히 스킵(무음).',
+    '',
+  ].join('\n');
+}
+
+/**
+ * game/tl/<lang>/script.rpy — 자막 번역(Ren'Py 공식 번역 시스템). base 를 제외한 각 언어의
+ * i18n 검수본을 `translate <lang> strings:` 의 old/new 로 내보낸다. 번역이 없는 대사는 블록을
+ * 생략 → 런타임에 원문(base)으로 자연 폴백한다. 대사 텍스트는 script.rpy 의 say 와 동일하게 esc.
+ */
+function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] {
+  const base = baseLocaleOf(project);
+  const targets = effectiveTextLocales(project).filter((l) => l !== base);
+  const files: RenpyFile[] = [];
+  for (const loc of targets) {
+    const rl = RENPY_LANG[loc];
+    if (!rl) continue; // base 로케일이 en/ja 인 특수 케이스 방어
+    const seen = new Set<string>(); // 같은 원문 중복 방지(strings 블록은 원문 1개당 1매핑)
+    const body: string[] = [];
+    for (const r of refs) {
+      for (const line of r.scene.lines) {
+        const tr = line.i18n?.[loc];
+        if (!tr) continue;
+        const key = esc(line.text);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        body.push(`    old "${key}"`, `    new "${esc(tr)}"`, '');
+      }
+    }
+    if (!body.length) continue; // 이 언어 번역이 하나도 없으면 파일 생략
+    const content = [`# 자동 생성: ${LOCALE_LABEL[loc]} 자막 번역`, `translate ${rl} strings:`, '', ...body].join('\n');
+    files.push({ path: `game/tl/${rl}/script.rpy`, content: content + '\n' });
+  }
+  return files;
+}
+
 /** Ren'Py 텍스트 파일 전체를 생성한다. */
 export function generateRenpyFiles(project: Project): {
   files: RenpyFile[];
@@ -596,12 +663,18 @@ export function generateRenpyFiles(project: Project): {
   const joints = resolveJointSpeakers(project);
   const theme = withGuiOverrides(resolveTheme(project.genre, project.guiTheme), project.guiOverrides);
 
+  // 다국어: 자막 언어 2개 이상이면 tl 파일·선택 UI, 음성 언어가 있으면 voices.rpy·음성 선택 UI 를 낸다.
+  const textLocales = effectiveTextLocales(project);
+  const voiceLocales = effectiveVoiceLocales(project);
+
   const files: RenpyFile[] = [
     { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height) },
     { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
     { path: 'game/credits.rpy', content: creditsRpy(project) },
+    ...(voiceLocales.length ? [{ path: 'game/voices.rpy', content: voicesRpy(project) }] : []),
+    ...translationFiles(project, refs),
     ...generateGuiFiles(
       theme,
       project.width,
@@ -611,6 +684,7 @@ export function generateRenpyFiles(project: Project): {
         color: project.guiOverrides?.outlineColor || '#000000',
       },
       project.guiOverrides?.dialogueGradient ?? false,
+      { text: textLocales, voice: voiceLocales },
     ),
     { path: 'README.md', content: readme(theme) },
   ];
