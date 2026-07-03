@@ -63,11 +63,30 @@
   에도 같은 ko/en/ja 항목을 추가**해야 그 문자열이 번역됨(안 넣으면 그 문자열만 한국어로 남음).
 - 파일: `renpy/gui/uiStrings.ts`(신규)·`renpy/generate.ts`.
 
+## 1-D. 노트북 세션(2026-07-03) 추가 — 다국어 UX·일본어 폰트  *(commit 별도)*
+- **자막 언어 자동감지**: 엑셀 **C열(en)·D열(ja)에 번역만** 넣으면 `#설정_글언어` 태그 없이도 그 언어가
+  인게임 전환 목록에 자동 포함(`effectiveTextLocales` 가 `line.i18n` 을 스캔 → 태그는 명시 override 로 계속 유효).
+  번역 0개 프로젝트는 그대로 단일 언어(하위호환 검증됨). 파일: `types.ts`.
+  - *왜:* C/D열 규칙을 이미 정한 이상 번역=출력 의사이므로 별도 태그 요구는 불필요한 이중작업이었음.
+- **멘트·번역 실시간 인라인 편집**: 장면 카드 대사 미리보기의 각 줄에 `✏️` 버튼(표정 셀렉트 왼쪽) →
+  원문·EN·JA 를 그 자리에서 수정(자동세이브). 평소엔 번역을 회색으로 표시. 지문(내레이션)도 편집·번역 가능.
+  파일: `store.ts`(`setLineText`/`setLineTranslation`), `components/SceneCard.tsx`(`LineRow`).
+- **일본어 폰트 렌더링(FontGroup)**: NanumGothic 은 **일본어 글리프가 0개** → 일본어 자막/UI 가 빈칸(□)이던 문제.
+  `gui.rpy` 폰트를 Ren'Py `FontGroup` 으로 감싸 **일본어 범위(かな·한자·전각)만 Source Han Sans
+  (SDK 동봉 `SourceHanSansLite.ttf`, SIL OFL)로 폴백**하고 한글·라틴은 NanumGothic 유지. 언어 전환 로직
+  불필요·한/일 혼용 자동. **실제 Ren'Py 8.5.3 렌더링으로 실증**(미니 프로젝트 실행 → 스크린샷: 한국어 유지 +
+  일본어 정상). 파일: `renpy/gui/guiRpy.ts`(`_font_jp` FontGroup), `zip/buildZip.ts`(폰트 zip 포함),
+  `public/fonts/SourceHanSansLite.ttf`(신규), 크레딧 표기(`uiStrings.ts`·`screensRpy.ts`).
+  - **한계/내일 최적화 후보:** ① SourceHanSansLite 는 "Lite" 서브셋 → 아주 드문 한자 누락 가능(풀 Noto Sans JP
+    교체 가능, 경로만 변경). ② 폰트가 export 당 ~2.9MB 추가 — 현재 일본어 미사용 프로젝트에도 포함되므로
+    **"textLocales/voiceLocales 에 ja 있을 때만 번들"** 조건화가 용량 최적화 후보.
+
 ## 2. 검증 상태
 - ✅ `npm run typecheck` · `vite build`(OneDrive 밖 경로) 통과.
 - ✅ **인게임 확인 완료(PC)**: 이름 박스 제거 · 대사창 대비 · 게임 메뉴/세이브/설정 가시성 · 스킵 · 자동 · **확인창(예/아니오)** 모두 정상.
 - ✅ **다국어 컴파일단 검증 완료(노트북)**: Ren'Py 8.5.3 SDK `lint` 0에러 + **실게임 전체 플레이**(자막·음성 일본어 런타임 전환, `C:\renpy\renpy-8.5.3-sdk`) 런타임 에러 0. tl/english·tl/japanese·voices.rpy·설정 언어 라디오 모두 동작.
 - ✅ **GUI 언어 일관성 검증 완료(노트북)**: `lint` 0에러 + 런타임 `translate_string` 실측(base/영/일 전 UI 문자열 정확 치환 — 확인창·메뉴·예/아니오 포함) + `screensRpy` 리터럴 커버리지 100%(누락 검출 스크립트).
+- ✅ **일본어 폰트 렌더링 실증(노트북, 2026-07-03)**: 실제 Ren'Py 8.5.3 로 FontGroup 미니 프로젝트 실행 → 스크린샷 확인. NanumGothic 단독은 일본어가 빈칸, FontGroup 수정본은 `한국어 ABC 日本語 愛してる 字幕言語` 전부 정상. 자동감지(C/D열)·인라인 편집은 `typecheck` + 실제 엑셀 파이프라인(`effectiveTextLocales`=`["ko","en","ja"]`)으로 검증.
 - ⚠️ **미검증 ①: ElevenLabs BGM 실제 API 호출(유료 키 필요)** — PCM→WAV 실측(생성·콘솔 채널 로그·재생·`music/` 저장·ZIP 포함). → §3.
 - ⚠️ **미검증 ②: 다국어 음성 TTS 실제 호출 + 음성생성 UI/store(현재 미구현)** → §3-2.
 

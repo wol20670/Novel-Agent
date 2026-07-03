@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Project, Scene, AssetMeta, Character, Expression } from './types';
+import type { Project, Scene, AssetMeta, Character, Expression, Locale } from './types';
 import { emptyProject, projectExpressions, effectiveExpressions } from './types';
 import { parseText, parseWorkbook } from './parser';
 import type { ScriptMeta } from './parser';
@@ -82,6 +82,10 @@ interface State {
   updateScene: (id: string, patch: Partial<Scene>) => void;
   /** 대사 한 줄의 표정을 수동 지정(undefined = 자동 추론으로 되돌림). */
   setLineEmotion: (sceneId: string, lineIndex: number, emotion: Expression | undefined) => void;
+  /** 대사/지문 한 줄의 원문(base) 텍스트를 실시간 수정한다(대사·지문 공통). */
+  setLineText: (sceneId: string, lineIndex: number, text: string) => void;
+  /** 대사/지문 한 줄의 로케일 번역(i18n)을 수정한다. 빈 값이면 그 로케일을 제거(원문 폴백). */
+  setLineTranslation: (sceneId: string, lineIndex: number, locale: Locale, text: string) => void;
   setSceneStatus: (id: string, status: Scene['status']) => void;
   approveAll: () => void;
   selectScene: (id: string | null) => void;
@@ -574,6 +578,33 @@ export const useStore = create<State>((set, get) => {
           const lines = sc.lines.map((l, i) =>
             i === lineIndex && l.kind === 'dialogue' ? { ...l, emotion } : l,
           );
+          return { ...sc, lines };
+        }),
+      );
+    },
+
+    setLineText: (sceneId, lineIndex, text) => {
+      setScenes(
+        get().project.scenes.map((sc) => {
+          if (sc.id !== sceneId) return sc;
+          const lines = sc.lines.map((l, i) => (i === lineIndex ? { ...l, text } : l));
+          return { ...sc, lines };
+        }),
+      );
+    },
+
+    setLineTranslation: (sceneId, lineIndex, locale, text) => {
+      const v = text.trim();
+      setScenes(
+        get().project.scenes.map((sc) => {
+          if (sc.id !== sceneId) return sc;
+          const lines = sc.lines.map((l, i) => {
+            if (i !== lineIndex) return l;
+            const i18n = { ...(l.i18n ?? {}) };
+            if (v) i18n[locale] = v;
+            else delete i18n[locale];
+            return { ...l, i18n: Object.keys(i18n).length ? i18n : undefined };
+          });
           return { ...sc, lines };
         }),
       );

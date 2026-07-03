@@ -596,7 +596,7 @@ screen credits():
 
             text _("{b}엔진{/b}\nMade with {a=https://www.renpy.org/}Ren'Py{/a} [renpy.version_only].\n[renpy.license!t]\n")
 
-            text _("{b}폰트{/b}\n나눔고딕(NanumGothic) — SIL Open Font License 1.1 (상업적 사용 허용).")
+            text _("{b}폰트{/b}\n나눔고딕(NanumGothic), Source Han Sans — 모두 SIL Open Font License 1.1 (상업적 사용 허용).")
 
 
 ## Load and Save screens #######################################################

@@ -29,6 +29,20 @@ init offset = -2
 init python:
     gui.init(${width}, ${height})
 
+    def _font_jp(base):
+        # 다국어 폰트: 일본어 글자(かな·한자·전각)만 Source Han Sans, 그 외(한글·라틴)는 base 폰트.
+        # NanumGothic 은 일본어 글리프가 없어 자막/UI 일본어가 빈칸(□)으로 나오는 문제를 FontGroup 으로 해결.
+        # FontGroup 은 "먼저 add 한 범위가 우선" → 일본어 범위를 먼저, 기본(base)을 맨 끝(None)으로.
+        fg = FontGroup()
+        fg.add("fonts/SourceHanSansLite.ttf", 0x3000, 0x30ff)  # CJK 기호·구두점 + 히라가나 + 가타카나
+        fg.add("fonts/SourceHanSansLite.ttf", 0x31f0, 0x31ff)  # 가타카나 음성 확장
+        fg.add("fonts/SourceHanSansLite.ttf", 0x3400, 0x4dbf)  # CJK 확장 A
+        fg.add("fonts/SourceHanSansLite.ttf", 0x4e00, 0x9fff)  # CJK 통합 한자
+        fg.add("fonts/SourceHanSansLite.ttf", 0xf900, 0xfaff)  # CJK 호환 한자
+        fg.add("fonts/SourceHanSansLite.ttf", 0xff00, 0xffef)  # 전각/반각 형태
+        fg.add(base, None, None)  # 나머지(한글·라틴 등) 기본 폰트
+        return fg
+
 define config.check_conflicting_properties = True
 
 
@@ -58,9 +72,9 @@ define gui.choice_idle_bg = "${theme.choiceIdleBg}"
 
 
 ## 폰트 (테마) ##################################################################
-define gui.text_font = "${theme.textFont}"
-define gui.name_text_font = "${theme.nameFont}"
-define gui.interface_text_font = "${theme.interfaceFont}"
+define gui.text_font = _font_jp("${theme.textFont}")
+define gui.name_text_font = _font_jp("${theme.nameFont}")
+define gui.interface_text_font = _font_jp("${theme.interfaceFont}")
 
 ## 글자 외곽선 (가독성 — 대사창 위 흰 글자 등). screens.rpy 의 say 스타일이 참조.
 define gui.dialogue_outlines = ${outlineList}
