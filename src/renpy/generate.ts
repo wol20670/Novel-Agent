@@ -6,6 +6,7 @@ import { RENPY_LANG, LOCALE_LABEL, baseLocaleOf, effectiveTextLocales, effective
 import { SlugMap } from './slug';
 import { generateGuiFiles, resolveTheme, withGuiOverrides } from './gui';
 import { voiceBaseName } from '../generators/audio/elevenVoiceProvider';
+import { CONFIRM_STRINGS, UI_STRINGS, uiTr } from './gui/uiStrings';
 import { inferEmotion } from '../generators/emotion';
 import { enforceContrast } from '../generators/theme/color';
 
@@ -649,6 +650,60 @@ function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] 
   return files;
 }
 
+/** Ren'Py 문자열 리터럴 이스케이프 — 태그({…})·보간([…])은 보존하고 따옴표·역슬래시·개행만 처리. */
+function escLit(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n');
+}
+
+/**
+ * game/ui_strings.rpy — 엔진 확인창(quit/main menu 등)의 문구를 게임 기본 언어(base)로 재정의한다.
+ * 액션이 소비하는 layout.* 과 (안전차 gui.*) 를 함께 덮어써, base 언어에서 UI 가 일관되게 뜬다.
+ * (예: 한국어 프로젝트면 "정말 종료하시겠습니까?" — 기존엔 엔진 기본 영어가 떠 불일치했음.)
+ * mono(단일 언어) 프로젝트에도 항상 적용된다(한국어 게임의 확인창을 한국어로).
+ */
+function uiStringsRpy(project: Project): string {
+  const base = baseLocaleOf(project);
+  const lines = [
+    '# 자동 생성: 엔진 UI 문구(확인창 등)를 게임 기본 언어로 재정의 — 언어 일관성',
+    '# layout.* = 액션이 실제로 쓰는 값. gui.* 도 함께 맞춘다. 타 언어는 tl/<lang>/ui.rpy 가 치환.',
+    'init 999 python:',
+  ];
+  for (const { name, tr } of CONFIRM_STRINGS) {
+    const v = `"${escLit(uiTr(tr, base))}"`;
+    lines.push(`    layout.${name} = ${v}`);
+    lines.push(`    gui.${name} = ${v}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * game/tl/<lang>/ui.rpy — 인터페이스 문자열(확인창 + 우리 메뉴/설정/도움말 리터럴)의 언어별 번역.
+ * base 를 제외한 각 자막 언어에 대해 `translate <lang> strings:` old(=base 한국어)/new(=대상)로 낸다.
+ * Ren'Py 는 화면에 표시되는 문자열을 이 표로 런타임 치환하므로, 자막 언어를 바꾸면 UI 도 함께 바뀐다.
+ */
+function uiTranslationFiles(project: Project): RenpyFile[] {
+  const base = baseLocaleOf(project);
+  const targets = effectiveTextLocales(project).filter((l) => l !== base);
+  const files: RenpyFile[] = [];
+  for (const loc of targets) {
+    const rl = RENPY_LANG[loc];
+    if (!rl) continue;
+    const seen = new Set<string>();
+    const body: string[] = [];
+    const add = (koText: string, target: string) => {
+      const key = escLit(koText);
+      if (seen.has(key)) return; // strings 블록은 원문 1개당 1매핑
+      seen.add(key);
+      body.push(`    old "${key}"`, `    new "${escLit(target)}"`, '');
+    };
+    for (const { tr } of CONFIRM_STRINGS) add(uiTr(tr, base), uiTr(tr, loc));
+    for (const tr of UI_STRINGS) add(tr.ko, uiTr(tr, loc));
+    const content = [`# 자동 생성: ${LOCALE_LABEL[loc]} UI 번역`, `translate ${rl} strings:`, '', ...body].join('\n');
+    files.push({ path: `game/tl/${rl}/ui.rpy`, content: content + '\n' });
+  }
+  return files;
+}
+
 /** Ren'Py 텍스트 파일 전체를 생성한다. */
 export function generateRenpyFiles(project: Project): {
   files: RenpyFile[];
@@ -673,8 +728,11 @@ export function generateRenpyFiles(project: Project): {
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
     { path: 'game/credits.rpy', content: creditsRpy(project) },
+    // 엔진 확인창 문구를 기본 언어로 재정의(단일 언어 프로젝트에도 항상) — 언어 일관성.
+    { path: 'game/ui_strings.rpy', content: uiStringsRpy(project) },
     ...(voiceLocales.length ? [{ path: 'game/voices.rpy', content: voicesRpy(project) }] : []),
     ...translationFiles(project, refs),
+    ...uiTranslationFiles(project),
     ...generateGuiFiles(
       theme,
       project.width,
