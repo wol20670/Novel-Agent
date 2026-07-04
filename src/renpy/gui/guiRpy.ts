@@ -11,24 +11,17 @@ export function guiRpy(
   height: number,
   outline?: { enabled: boolean; color: string },
   dialogueGradient?: boolean,
+  japanese?: boolean,
 ): string {
   // 글자 외곽선(가독성) — 켜면 본문·이름에 동일 외곽선, 끄면 빈 리스트.
   const outlineList = outline?.enabled
     ? `[ (absolute(2), "${outline.color}", absolute(0), absolute(0)) ]`
     : '[]';
-  // 대사창 배경: 그라데이션이면 buildZip 이 만든 gui/textbox.png 를 Frame(0,0)으로 늘려 쓰고(위로 투명),
-  // 아니면 기존 단색 Solid. screens.rpy 의 window 가 이 변수만 참조한다(테마 표면적 최소화).
-  const dialogueBg = dialogueGradient
-    ? 'Frame("gui/textbox.png", 0, 0, tile=False)'
-    : 'Solid(gui.dialogue_box_color)';
-  return `# 자동 생성: GUI 변수 (테마: ${theme.label})
-# 색/폰트/전환만 테마로 주입되고 레이아웃은 Ren'Py 8.5.3 기본값을 따른다.
-
-init offset = -2
-
-init python:
-    gui.init(${width}, ${height})
-
+  // 일본어 자막/UI(日本語 라벨·JA 번역)가 하나도 없으면 Source Han Sans(≈2.9MB) 폰트와
+  // FontGroup 래핑을 통째로 생략한다 — KO/EN 전용 프로젝트의 배포 zip 을 그만큼 줄인다.
+  // (buildZip 도 같은 조건으로 폰트 파일 번들을 건너뛴다 — 두 곳이 반드시 함께여야 한다.)
+  const jpDef = japanese
+    ? `
     def _font_jp(base):
         # 다국어 폰트: 일본어 글자(かな·한자·전각)만 Source Han Sans, 그 외(한글·라틴)는 base 폰트.
         # NanumGothic 은 일본어 글리프가 없어 자막/UI 일본어가 빈칸(□)으로 나오는 문제를 FontGroup 으로 해결.
@@ -42,7 +35,23 @@ init python:
         fg.add("fonts/SourceHanSansLite.ttf", 0xff00, 0xffef)  # 전각/반각 형태
         fg.add(base, None, None)  # 나머지(한글·라틴 등) 기본 폰트
         return fg
+`
+    : '';
+  // 폰트 값: 일본어가 있으면 FontGroup(_font_jp)로 감싸고, 없으면 테마 폰트를 그대로 쓴다.
+  const fontVal = (f: string) => (japanese ? `_font_jp("${f}")` : `"${f}"`);
+  // 대사창 배경: 그라데이션이면 buildZip 이 만든 gui/textbox.png 를 Frame(0,0)으로 늘려 쓰고(위로 투명),
+  // 아니면 기존 단색 Solid. screens.rpy 의 window 가 이 변수만 참조한다(테마 표면적 최소화).
+  const dialogueBg = dialogueGradient
+    ? 'Frame("gui/textbox.png", 0, 0, tile=False)'
+    : 'Solid(gui.dialogue_box_color)';
+  return `# 자동 생성: GUI 변수 (테마: ${theme.label})
+# 색/폰트/전환만 테마로 주입되고 레이아웃은 Ren'Py 8.5.3 기본값을 따른다.
 
+init offset = -2
+
+init python:
+    gui.init(${width}, ${height})
+${jpDef}
 define config.check_conflicting_properties = True
 
 
@@ -72,9 +81,9 @@ define gui.choice_idle_bg = "${theme.choiceIdleBg}"
 
 
 ## 폰트 (테마) ##################################################################
-define gui.text_font = _font_jp("${theme.textFont}")
-define gui.name_text_font = _font_jp("${theme.nameFont}")
-define gui.interface_text_font = _font_jp("${theme.interfaceFont}")
+define gui.text_font = ${fontVal(theme.textFont)}
+define gui.name_text_font = ${fontVal(theme.nameFont)}
+define gui.interface_text_font = ${fontVal(theme.interfaceFont)}
 
 ## 글자 외곽선 (가독성 — 대사창 위 흰 글자 등). screens.rpy 의 say 스타일이 참조.
 define gui.dialogue_outlines = ${outlineList}

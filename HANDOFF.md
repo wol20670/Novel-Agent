@@ -77,9 +77,8 @@
   불필요·한/일 혼용 자동. **실제 Ren'Py 8.5.3 렌더링으로 실증**(미니 프로젝트 실행 → 스크린샷: 한국어 유지 +
   일본어 정상). 파일: `renpy/gui/guiRpy.ts`(`_font_jp` FontGroup), `zip/buildZip.ts`(폰트 zip 포함),
   `public/fonts/SourceHanSansLite.ttf`(신규), 크레딧 표기(`uiStrings.ts`·`screensRpy.ts`).
-  - **한계/내일 최적화 후보:** ① SourceHanSansLite 는 "Lite" 서브셋 → 아주 드문 한자 누락 가능(풀 Noto Sans JP
-    교체 가능, 경로만 변경). ② 폰트가 export 당 ~2.9MB 추가 — 현재 일본어 미사용 프로젝트에도 포함되므로
-    **"textLocales/voiceLocales 에 ja 있을 때만 번들"** 조건화가 용량 최적화 후보.
+  - **한계:** SourceHanSansLite 는 "Lite" 서브셋 → 아주 드문 한자 누락 가능(풀 Noto Sans JP 교체 가능, 경로만 변경).
+  - ✅ **조건부 번들링 완료(2026-07-04)**: JP 폰트(~2.9MB)와 `_font_jp` FontGroup 래핑을 **`ja ∈ effectiveTextLocales|effectiveVoiceLocales` 일 때만** 방출/번들(그 외 KO·KO+EN 프로젝트는 평문 폰트, 폰트 fetch 자체 skip). `guiRpy.ts`(japanese 인자)·`gui/index.ts`(조건 계산)·`buildZip.ts`(조건부 fetch) 세 곳이 **동일 규칙**으로 일치. gui.rpy 4개 로케일 조합으로 출력 검증.
 
 ## 2. 검증 상태
 - ✅ `npm run typecheck` · `vite build`(OneDrive 밖 경로) 통과.

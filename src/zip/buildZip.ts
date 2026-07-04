@@ -3,6 +3,7 @@
 // 아직 생성되지 않은 배경/CG/BGM 은 즉석 폴백(Canvas/합성)으로 채워 실행 가능한 ZIP 을 보장한다.
 
 import type { Project } from '../types';
+import { effectiveTextLocales, effectiveVoiceLocales } from '../types';
 import { generateRenpyFiles } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
@@ -155,7 +156,11 @@ export async function collectProjectFiles(
   }
 
   // 한글 폰트(나눔고딕, OFL) — Ren'Py 기본 폰트는 한글 글리프가 없다.
-  for (const f of await koreanFontFiles()) out.push(f);
+  // 일본어(자막·음성 어느 쪽이든) 프로젝트에서만 Source Han Sans(≈2.9MB)를 함께 번들한다.
+  // gui.rpy(guiRpy)의 JP 폰트 참조 조건과 반드시 일치해야 한다(같은 규칙: ja ∈ text|voice).
+  const japanese =
+    effectiveTextLocales(project).includes('ja') || effectiveVoiceLocales(project).includes('ja');
+  for (const f of await koreanFontFiles(japanese)) out.push(f);
 
   return { files: out, placeholders };
 }
@@ -177,17 +182,18 @@ export async function buildRenpyZip(project: Project): Promise<ZipResult> {
  * - SourceHanSansLite: 일본어(かな·한자) 자막/UI 용. gui.rpy 의 FontGroup 이 일본어 범위만 이 폰트로 폴백한다.
  *   (NanumGothic 은 일본어 글리프가 없어 일본어 자막이 빈칸으로 나오는 문제 대응. 둘 다 SIL OFL 1.1.)
  */
-async function koreanFontFiles(): Promise<ProjectFile[]> {
+async function koreanFontFiles(includeJapanese: boolean): Promise<ProjectFile[]> {
   const base = import.meta.env.BASE_URL || '/';
   try {
-    const [font, jpFont, license] = await Promise.all([
+    // JP 폰트는 일본어가 있을 때만 받아온다(없으면 fetch 자체를 건너뛰어 ≈2.9MB 절약).
+    const [font, license, jpFont] = await Promise.all([
       fetch(`${base}fonts/NanumGothic.ttf`),
-      fetch(`${base}fonts/SourceHanSansLite.ttf`),
       fetch(`${base}fonts/OFL.txt`),
+      includeJapanese ? fetch(`${base}fonts/SourceHanSansLite.ttf`) : Promise.resolve(null),
     ]);
     const files: ProjectFile[] = [];
     if (font.ok) files.push({ path: 'game/fonts/NanumGothic.ttf', data: await font.blob() });
-    if (jpFont.ok) files.push({ path: 'game/fonts/SourceHanSansLite.ttf', data: await jpFont.blob() });
+    if (jpFont?.ok) files.push({ path: 'game/fonts/SourceHanSansLite.ttf', data: await jpFont.blob() });
     if (license.ok) files.push({ path: 'game/fonts/OFL.txt', data: await license.text() });
     return files;
   } catch {
