@@ -1,4 +1,5 @@
 import { useStore, type Tab } from '../store';
+import { translateModeOf } from '../types';
 import SceneCard from './SceneCard';
 import AssetsTab from './AssetsTab';
 import RenpyTab from './RenpyTab';
@@ -18,6 +19,9 @@ export default function CenterPanel() {
   const genAllBg = useStore((s) => s.generateAllBackgrounds);
   const genAllBgm = useStore((s) => s.generateAllBgm);
   const batchBusy = useStore((s) => !!(s.busy['batch:bg'] || s.busy['batch:bgm']));
+  const translateMode = useStore((s) => translateModeOf(s.project));
+  const autoTranslate = useStore((s) => s.autoTranslateAll);
+  const translating = useStore((s) => !!s.busy['batch:translate']);
 
   const approved = scenes.filter((s) => s.status === 'approved').length;
   const allApproved = scenes.length > 0 && approved === scenes.length;
@@ -52,6 +56,16 @@ export default function CenterPanel() {
             >
               {batchBusy ? <Spinner /> : '🎨 배경·음악 일괄 생성'}
             </button>
+            {translateMode !== 'off' && (
+              <button
+                className="btn-soft"
+                onClick={autoTranslate}
+                disabled={translating}
+                title="번역이 빈 대사·지문을 영어·일본어로 자동 번역(빈 칸만). 이후 미리보기에서 검수/수정하세요."
+              >
+                {translating ? <Spinner /> : '🌐 전체 자동 번역'}
+              </button>
+            )}
             <button
               className={allApproved ? 'btn-ghost' : 'btn-soft'}
               onClick={approveAll}
