@@ -5,8 +5,8 @@ import { collectUntranslated } from './generators/translate/collect';
 import { translateBatch } from './generators/translate';
 import { parseText, parseWorkbook } from './parser';
 import type { ScriptMeta } from './parser';
-import { generateImage, generateSprite, generateExpression, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, upscaleImage, type BgRemoval } from './generators/image';
-import { compileSpritePrompt, compileScenePrompt, compileCgPrompt, compileTags } from './generators/image/promptCompiler';
+import { generateImage, generateSprite, generateExpression, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, upscaleImage, generateItemImage, type BgRemoval } from './generators/image';
+import { compileSpritePrompt, compileScenePrompt, compileCgPrompt, compileTags, compileItemPrompt } from './generators/image/promptCompiler';
 import { ALL_TAGS } from './generators/image/tagDictionary';
 import { seedFromString } from './generators/image/novelaiProvider';
 import { synthBgm, type SynthOptions } from './generators/audio/synthProvider';
@@ -174,6 +174,10 @@ interface State {
 
   // CG 컷 AI 생성 (같은 설명을 쓰는 모든 장면에 적용 + 보관)
   generateCg: (desc: string) => Promise<void>;
+  /** 아이템(소품) 팝업 이미지 생성 — 이름 기준 공유(project.itemAssetIds). 키 없으면 Canvas 임시. */
+  generateItem: (name: string) => Promise<void>;
+  /** 외부 제작 아이템 이미지를 업로드해 그 이름에 적용(투명 PNG 권장). */
+  uploadItem: (name: string, file: File) => Promise<void>;
   /**
    * 캐릭터의 기본 입화(+해당 컷 장면의 배경)를 소스로 CG 를 생성한다.
    * 캐릭터·배경과 가장 닮은 CG 가 나오게 한다. 키 필요.
@@ -608,7 +612,7 @@ export const useStore = create<State>((set, get) => {
         get().project.scenes.map((sc) => {
           if (sc.id !== sceneId) return sc;
           const lines = sc.lines.map((l, i) => {
-            if (i !== lineIndex) return l;
+            if (i !== lineIndex || l.kind === 'item') return l; // 아이템 라인은 번역 없음
             const i18n = { ...(l.i18n ?? {}) };
             if (hasContent) i18n[locale] = text;
             else delete i18n[locale];
@@ -1690,6 +1694,66 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    generateItem: async (name) => {
+      const key = name.trim();
+      if (!key) return flash('아이템 이름이 비어 있습니다.');
+      const { apiKey } = get();
+      const busyKey = `item:${key}`;
+      set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      try {
+        const promptOverride = await naiCompile(() => compileItemPrompt({ name: key, apiKey: translateKey() }));
+        const prompt = `${key}, 소품, 단일 사물, 단순 배경`;
+        const { blob, source } = await generateItemImage({
+          name: key,
+          prompt,
+          promptOverride,
+          apiKey,
+          bgRemoval: get().bgRemovalMethod,
+        });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'item',
+          prompt,
+          mime: 'image/png',
+          source,
+          filename: `item_${Date.now().toString(36)}.png`,
+          createdAt: Date.now(),
+        };
+        if (source !== 'canvas') void archiveImage(blob, `item/${safeFileName(key)}_${timestamp()}.png`);
+        const prev = get().project.itemAssetIds?.[key];
+        set((s) => ({
+          assets: { ...s.assets, [id]: meta },
+          project: { ...s.project, itemAssetIds: { ...(s.project.itemAssetIds ?? {}), [key]: id } },
+        }));
+        autoSave();
+        if (prev) await deleteAsset(prev).catch(() => {});
+        flash(source !== 'canvas' ? '아이템 이미지를 생성했습니다.' : '임시 아이템(Canvas)을 생성했습니다.');
+      } catch (e) {
+        flash(`아이템 생성 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
+      }
+    },
+
+    uploadItem: async (name, file) => {
+      const key = name.trim();
+      if (!key) return;
+      try {
+        const id = await uploadAsset(file, 'item', `item_${Date.now().toString(36)}.png`);
+        const prev = get().project.itemAssetIds?.[key];
+        set((s) => ({
+          project: { ...s.project, itemAssetIds: { ...(s.project.itemAssetIds ?? {}), [key]: id } },
+        }));
+        autoSave();
+        if (prev) await deleteAsset(prev).catch(() => {});
+        flash('아이템 이미지를 업로드했습니다.');
+      } catch (e) {
+        flash(`업로드 실패: ${(e as Error).message}`);
+      }
+    },
+
     generateCgWithCharacter: async (desc, characterName) => {
       const key = desc.trim();
       if (!key) return flash('CG 설명이 비어 있습니다.');
@@ -2240,6 +2304,7 @@ export const useStore = create<State>((set, get) => {
         Object.values(c.expressions).forEach(add);
         c.outfits?.forEach((o) => Object.values(o.expressions).forEach(add));
       }
+      Object.values(project.itemAssetIds ?? {}).forEach(add);
       add(project.menuArt?.main);
       add(project.menuArt?.game);
       if (ids.size === 0) return flash('비울 생성 이미지가 없습니다.');
@@ -2261,6 +2326,7 @@ export const useStore = create<State>((set, get) => {
             outfits: c.outfits?.map((o) => ({ ...o, expressions: {} })),
           })),
           menuArt: undefined,
+          itemAssetIds: undefined,
         },
       }));
       for (const id of ids) await deleteAsset(id).catch(() => {});

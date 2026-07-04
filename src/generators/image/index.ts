@@ -282,6 +282,33 @@ export async function generateSprite(req: SpriteRequest): Promise<ImageResult> {
 }
 
 /**
+ * 아이템(소품) 이미지 생성 — 스프라이트와 같은 방식(평면 배경 생성 → 누끼 → 투명 컷아웃).
+ * 작은 정사각(≤1MP)이라 무료 조건 안. 키 없으면 Canvas 임시 물건 placeholder.
+ */
+export async function generateItemImage(req: {
+  name: string;
+  prompt: string;
+  promptOverride?: string;
+  apiKey?: string;
+  bgRemoval?: BgRemoval;
+}): Promise<ImageResult> {
+  const apiKey = req.apiKey?.trim();
+  if (apiKey) {
+    let blob = await novelaiGenerate(req.promptOverride?.trim() || req.prompt, {
+      apiKey,
+      size: naiActiveSizes().square,
+      steps: naiActiveSteps(),
+      seed: seedFromString(req.name),
+      negative: `${aiConfig.image.novelai.negativePrompt}, 1girl, 1boy, solo, person, people, character, multiple views, text, watermark`,
+    });
+    blob = await applyBgRemoval(blob, req.bgRemoval ?? 'browser', apiKey);
+    return { blob, source: 'novelai' };
+  }
+  const blob = await canvasImage(req.prompt, req.name, 512, 512);
+  return { blob, source: 'canvas' };
+}
+
+/**
  * 이미 생성된 이미지를 지시문대로 "조금만 수정"한다(NovelAI img2img).
  * 마음에 드는 결과를 버리지 않고 부분만 손볼 때 사용. 키 필수(폴백 없음).
  */

@@ -10,7 +10,7 @@ import {
   ALL_CATEGORIES,
 } from './tagDictionary';
 
-type CompileMode = 'character' | 'scene' | 'cg' | 'emotion';
+type CompileMode = 'character' | 'scene' | 'cg' | 'emotion' | 'item';
 
 const SYS: Record<CompileMode, string> = {
   character:
@@ -40,6 +40,13 @@ const SYS: Record<CompileMode, string> = {
   emotion:
     'You convert a Korean facial expression/emotion word into 1-2 English Danbooru expression tags. ' +
     'Output ONLY lowercase comma-separated tags — no sentences, no quotes, no "1girl", no markdown.',
+  item:
+    'You convert a short Korean object/prop name into comma-separated English Danbooru tags for a SINGLE ' +
+    'object still-life (a small item shown in close-up, NO people). Output ONLY lowercase comma-separated ' +
+    'tags — no sentences, no explanation, no quotes, no markdown. Include the object and its key attributes ' +
+    '(material, color, shape). NEVER output people/character tags (1girl, 1boy, solo), background scenery, ' +
+    'medium words (anime style, illustration), or quality words. Stay faithful; do not invent. ' +
+    'Output plain tags only — never use parentheses or :: weighting syntax.',
 };
 
 // 모드별 사전 주입 분류(표준 11개 카테고리 기준, 규칙으로 자동 분류).
@@ -51,6 +58,7 @@ const CHARACTER_EXCLUDE = new Set(['Scene', 'LightFX', 'Quality']);
 /** 모드별로 System Prompt 에 주입할 카테고리 목록(현재 사전에 존재하는 카테고리에서 선별). */
 function dictCatsFor(mode: CompileMode): string[] {
   if (mode === 'emotion') return ['Expression'];
+  if (mode === 'item') return []; // 사물은 캐릭터 사전 주입 불필요(순수 오브젝트 태그)
   if (mode === 'scene') return ALL_CATEGORIES.filter((c) => SCENE_CATS.has(c));
   if (mode === 'cg') return ALL_CATEGORIES.filter((c) => c !== 'Quality'); // 인물+배경 모두
   return ALL_CATEGORIES.filter((c) => !CHARACTER_EXCLUDE.has(c)); // character
@@ -184,4 +192,10 @@ export async function compileScenePrompt(opts: { text: string; apiKey: string })
 /** CG 컷 프롬프트(인물 포함 장면 태그). 품질 프리픽스는 provider 가 붙인다. */
 export async function compileCgPrompt(opts: { text: string; apiKey: string }): Promise<string> {
   return compileTags(opts.text, 'cg', opts.apiKey);
+}
+
+/** 아이템(소품) 프롬프트 — 인물 없는 단일 사물 정물(투명 컷아웃용 단순 배경). 품질 프리픽스는 provider 가 붙인다. */
+export async function compileItemPrompt(opts: { name: string; apiKey: string }): Promise<string> {
+  const tags = await compileTags(opts.name, 'item', opts.apiKey);
+  return ['no humans, simple background, object focus, still life', tags].filter(Boolean).join(', ');
 }
