@@ -17,6 +17,9 @@ export const LOCALE_LABEL: Record<Locale, string> = { ko: '한국어', en: 'Engl
  */
 export const RENPY_LANG: Record<Locale, string | null> = { ko: null, en: 'english', ja: 'japanese' };
 
+/** 자동 번역 모드 — off(사용 안 함·기본) / fast(gpt-4o-mini) / quality(gpt-4o). */
+export type TranslateMode = 'off' | 'fast' | 'quality';
+
 export type SceneStatus = 'review' | 'approved' | 'needs_fix';
 
 export const SCENE_STATUS_LABEL: Record<SceneStatus, string> = {
@@ -208,6 +211,11 @@ export interface Project {
    * - outline: 글자 외곽선 사용 / outlineColor: 외곽선색
    * - dialogueGradient: 대사창을 단색 대신 세로 그라데이션(위로 투명)으로 — 시네마틱·고투명
    */
+  /**
+   * 자동 번역(GPT) 모드. 미지정/off = 사용 안 함(엑셀 직접 번역만). fast=gpt-4o-mini, quality=gpt-4o.
+   * off 가 아닐 때만 장면 탭에 "전체 자동 번역" 버튼이 노출된다. 프로젝트별로 저장·내보내기된다.
+   */
+  translateMode?: TranslateMode;
   guiOverrides?: {
     dialogueBoxColor?: string;
     dialogueOpacity?: number;
@@ -250,6 +258,18 @@ export function spriteAssetId(c: Character, outfit: string | undefined, expr: Ex
 /** 프로젝트의 base 로케일(대본 원문 언어). 미지정이면 'ko'. */
 export function baseLocaleOf(p: Project): Locale {
   return p.baseLocale ?? 'ko';
+}
+
+/** 프로젝트의 자동 번역 모드(미지정 = off). */
+export function translateModeOf(p: Project): TranslateMode {
+  return p.translateMode ?? 'off';
+}
+
+/** 번역 모드 → OpenAI 모델 이름. off 면 null(번역 비활성). */
+export function translateModelFor(mode: TranslateMode): string | null {
+  if (mode === 'quality') return 'gpt-4o';
+  if (mode === 'fast') return 'gpt-4o-mini';
+  return null;
 }
 
 /**

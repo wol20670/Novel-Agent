@@ -1,6 +1,8 @@
 import { create } from 'zustand';
-import type { Project, Scene, AssetMeta, Character, Expression, Locale } from './types';
-import { emptyProject, projectExpressions, effectiveExpressions } from './types';
+import type { Project, Scene, AssetMeta, Character, Expression, Locale, TranslateMode } from './types';
+import { emptyProject, projectExpressions, effectiveExpressions, baseLocaleOf, translateModeOf, translateModelFor } from './types';
+import { collectUntranslated } from './generators/translate/collect';
+import { translateBatch } from './generators/translate';
 import { parseText, parseWorkbook } from './parser';
 import type { ScriptMeta } from './parser';
 import { generateImage, generateSprite, generateExpression, editImage, buildBackgroundPrompt, buildCgPrompt, buildMenuArtPrompt, generateMenuArtImage, generateCgFromReference, upscaleImage, type BgRemoval } from './generators/image';
@@ -86,6 +88,10 @@ interface State {
   setLineText: (sceneId: string, lineIndex: number, text: string) => void;
   /** 대사/지문 한 줄의 로케일 번역(i18n)을 수정한다. 빈 값이면 그 로케일을 제거(원문 폴백). */
   setLineTranslation: (sceneId: string, lineIndex: number, locale: Locale, text: string) => void;
+  /** 자동 번역 모드 변경(off/fast/quality). off 면 자동 번역 버튼이 숨겨진다. */
+  setTranslateMode: (mode: TranslateMode) => void;
+  /** 번역이 빈 대사·지문을 GPT 로 en·ja 채운다(빈 칸만). off/키없음이면 no-op/에러. */
+  autoTranslateAll: () => Promise<void>;
   setSceneStatus: (id: string, status: Scene['status']) => void;
   approveAll: () => void;
   selectScene: (id: string | null) => void;
@@ -611,6 +617,59 @@ export const useStore = create<State>((set, get) => {
           return { ...sc, lines };
         }),
       );
+    },
+
+    setTranslateMode: (mode) => {
+      set((s) => ({ project: { ...s.project, translateMode: mode } }));
+      autoSave();
+    },
+
+    autoTranslateAll: async () => {
+      const project = get().project;
+      const mode = translateModeOf(project);
+      const model = translateModelFor(mode);
+      if (!model) return; // off — 버튼이 숨겨져 있어 도달 불가(방어)
+      const key = get().openaiKey.trim();
+      if (!key) {
+        flash('OpenAI 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
+        return;
+      }
+      const base = baseLocaleOf(project);
+      const targets = (['en', 'ja'] as Locale[]).filter((l) => l !== base);
+      const batches = collectUntranslated(project, targets);
+      if (!batches.length) {
+        flash('번역할 빈 칸이 없습니다(이미 모두 채워짐).');
+        return;
+      }
+      set((s) => ({ busy: { ...s.busy, 'batch:translate': true } }));
+      let done = 0;
+      let failScenes = 0;
+      try {
+        for (const { sceneId, items } of batches) {
+          try {
+            const result = await translateBatch(items, targets, model, key);
+            for (const it of items) {
+              const tr = result[it.i];
+              if (!tr) continue;
+              for (const loc of targets) {
+                const v = tr[loc];
+                if (v && v.trim()) {
+                  get().setLineTranslation(sceneId, it.i, loc, v);
+                  done++;
+                }
+              }
+            }
+          } catch (e) {
+            failScenes++;
+            console.warn('[자동번역] 장면 실패:', sceneId, e);
+          }
+        }
+      } finally {
+        set((s) => ({ busy: { ...s.busy, 'batch:translate': false } }));
+      }
+      const msg =
+        `자동 번역 완료 — ${done}건 채움` + (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
+      flash(msg, failScenes ? 'error' : 'success');
     },
 
     setSceneStatus: (id, status) => {

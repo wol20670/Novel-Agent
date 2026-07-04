@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { downloadExcelTemplate, downloadTextTemplate } from '../template';
 import { GENRE_OPTIONS, DEFAULT_GENRE, resolveTheme } from '../renpy/gui';
 import type { GenreId, GuiTheme } from '../renpy/gui';
+import { translateModeOf } from '../types';
 import { canvasMenuArt } from '../generators/image/canvasMenu';
 import Spinner from './Spinner';
 import UploadButton from './UploadButton';
@@ -24,6 +25,8 @@ export default function LeftPanel() {
   const setElevenKey = useStore((s) => s.setElevenKey);
   const promptLang = useStore((s) => s.promptLang);
   const setPromptLang = useStore((s) => s.setPromptLang);
+  const translateMode = translateModeOf(project);
+  const setTranslateMode = useStore((s) => s.setTranslateMode);
   const exportProject = useStore((s) => s.exportProject);
   const importProject = useStore((s) => s.importProject);
   const folderSupported = useStore((s) => s.folderSupported);
@@ -255,6 +258,42 @@ export default function LeftPanel() {
                   ? '한국어 → 영문 변환 ON'
                   : '변환 OFF · 한국어 원문 전달 (키 입력 권장)'}
             </div>
+          </div>
+
+          {/* 자동 번역 모드 — off(기본)/fast/quality. off 가 아니면 장면 탭에 "전체 자동 번역" 버튼이 뜬다. */}
+          <div className="flex flex-col gap-1">
+            <span className="label">자동 번역 (대사·지문 → 영어·일본어)</span>
+            <div className="flex gap-1">
+              {(
+                [
+                  ['off', '사용 안 함'],
+                  ['fast', '번역(저품질)'],
+                  ['quality', '번역(고품질)'],
+                ] as const
+              ).map(([m, lbl]) => (
+                <button
+                  key={m}
+                  onClick={() => setTranslateMode(m)}
+                  className={`chip flex-1 ${
+                    translateMode === m
+                      ? 'border-accent text-accent bg-accent/10'
+                      : 'border-edge text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            {translateMode === 'quality' && (
+              <p className="text-[11px] text-amber-600">
+                ⚠️ 고품질(gpt-4o)은 API 비용이 더 큽니다. 필요할 때만 쓰세요.
+              </p>
+            )}
+            {translateMode !== 'off' && (
+              <p className="text-[11px] text-gray-500">
+                장면 탭 상단의 <b>🌐 전체 자동 번역</b> 버튼으로 실행됩니다(빈 칸만 채움, OpenAI 키 필요).
+              </p>
+            )}
           </div>
         </div>
 
