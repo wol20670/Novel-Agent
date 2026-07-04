@@ -4,7 +4,7 @@
 
 import type { Project } from '../types';
 import { effectiveTextLocales, effectiveVoiceLocales } from '../types';
-import { generateRenpyFiles } from '../renpy/generate';
+import { generateRenpyFiles, resolveItems } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
@@ -125,6 +125,14 @@ export async function collectProjectFiles(
     const bgm = await blobForBgm(p.assetId, p.prompt);
     if (!had) placeholders++;
     out.push({ path: `game/audio/${file}`, data: bgm });
+  }
+
+  // 아이템(소품) 팝업 이미지 — 이름 기준 공유. assetId 있으면 그 blob, 없으면 Canvas placeholder.
+  for (const it of resolveItems(project)) {
+    const up = it.assetId ? await getAsset(it.assetId) : null;
+    const blob = up ?? (await canvasImage(it.name, `아이템: ${it.name}`, 512, 512));
+    if (!up) placeholders++;
+    out.push({ path: `game/images/${it.file}`, data: blob });
   }
 
   // 자체 GUI 메뉴 배경(테마별 Canvas 생성) — gui.rpy 가 참조하는 유일한 그림.

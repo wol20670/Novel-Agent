@@ -166,6 +166,11 @@ export class SceneBuilder {
     sc.lines.push({ kind: 'narration', text: text.trim(), i18n: normalizeI18n(i18n) });
   }
 
+  /** #아이템 <이름> = 팝업 표시, #아이템끝 = 빈 이름(hide 마커). 라인 흐름 "그 위치"에 꽂힌다. */
+  addItem(name: string) {
+    this.ensureScene().lines.push({ kind: 'item', name: name.trim() });
+  }
+
   /** #설정_글언어 — 자막 언어 목록. 첫 항목을 base(대본 원문)로 잡는다. */
   setTextLocales(spec: string) {
     const locs = parseLocaleSpec(spec);
@@ -270,6 +275,15 @@ export function applyTag(b: SceneBuilder, body: string): boolean {
   }
   if (t.startsWith('#복장')) {
     b.setOutfit(t.replace(/^#복장\s*/, ''));
+    return true;
+  }
+  // 아이템(소품) 팝업. #아이템끝(닫기)을 #아이템보다 먼저 매칭한다.
+  if (t.startsWith('#아이템끝') || t.startsWith('#소품끝')) {
+    b.addItem('');
+    return true;
+  }
+  if (t.startsWith('#아이템') || t.startsWith('#소품')) {
+    b.addItem(t.replace(/^#(아이템|소품)\s*/, ''));
     return true;
   }
   if (t.startsWith('#연출')) {

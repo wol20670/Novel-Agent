@@ -32,6 +32,12 @@ export function parseText(input: string): BuildResult {
       applyTag(b, line);
       continue;
     }
+
+    // 원시 # 태그(엑셀 B열과 동일 문법 허용) — #아이템/#배경/#CG/#S 등. 알 수 없는 #는 연출로 흡수.
+    if (line.startsWith('#')) {
+      applyTag(b, line);
+      continue;
+    }
     if (/^선택지\s*[:：]?\s*$/.test(line)) {
       inChoiceBlock = true;
       continue;

@@ -191,6 +191,20 @@ function LineRow({
   const base = useStore((s) => baseLocaleOf(s.project));
   // 번역 대상 = base 를 제외한 지원 로케일(en·ja) — 엑셀 C/D열과 동일.
   const targets = (Object.keys(LOCALE_LABEL) as Locale[]).filter((l) => l !== base);
+
+  // 아이템(소품) 팝업 라인 — 편집/번역/표정 없이 칩으로만 표시.
+  if (line.kind === 'item') {
+    return (
+      <div className="flex items-center gap-1.5 py-0.5 text-xs">
+        <span className="rounded px-1.5 py-0.5 border border-pink-500/40 text-pink-500 bg-pink-500/5 shrink-0">🎁 아이템</span>
+        {line.name ? (
+          <span className="text-gray-300">{line.name}</span>
+        ) : (
+          <span className="text-gray-500 italic">팝업 닫기</span>
+        )}
+      </div>
+    );
+  }
   const isDlg = line.kind === 'dialogue';
 
   return (

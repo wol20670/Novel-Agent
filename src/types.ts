@@ -66,7 +66,12 @@ export type Line =
       /** 이 라인에 성우 음성을 생성할지(opt-in). 크레딧 폭탄 방지로 기본은 미생성. */
       voiced?: boolean;
     }
-  | { kind: 'narration'; text: string; i18n?: I18nText; voiced?: boolean };
+  | { kind: 'narration'; text: string; i18n?: I18nText; voiced?: boolean }
+  /**
+   * 아이템(소품) 팝업 인라인 이벤트. 태그 위치(그 순간)에 사물을 라이트박스로 잠깐 띄운다.
+   * name === '' 이면 hide 마커(#아이템끝). 이미지는 프로젝트 공유(Project.itemAssetIds[name]).
+   */
+  | { kind: 'item'; name: string };
 
 export interface Choice {
   text: string;
@@ -138,7 +143,7 @@ export interface Character {
   voiceIds?: Partial<Record<Locale, string>>;
 }
 
-export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice';
+export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice' | 'item';
 
 export interface AssetMeta {
   id: string;
@@ -192,6 +197,11 @@ export interface Project {
   credits?: string;
   /** 외부에서 업로드한 메뉴 배경(자체 GUI 위에 덮어씀). 없으면 Canvas 생성. */
   menuArt?: { main?: string; game?: string };
+  /**
+   * 아이템(소품) 팝업 이미지 — 아이템 이름 → assetId. 같은 이름은 한 이미지를 공유한다.
+   * 대본 `#아이템 <이름>` 태그로 참조되고, "발견한 아이템" 보관함이 이 목록을 갤러리로 보여준다.
+   */
+  itemAssetIds?: Record<string, string>;
   /**
    * 캐릭터 "그림체 참조" 이미지들(선택, 여러 장). 업로드하면 기본 입화 생성 시 이 그림들의
    * 화풍·채색·렌더링만 참고(NovelAI vibe transfer)하고, 인물은 캐릭터 외형 설명대로 새로 그린다
@@ -287,7 +297,7 @@ export function effectiveTextLocales(p: Project): Locale[] {
   for (const sc of p.scenes) {
     // ② 번역(i18n)이 실제로 들어 있는 언어를 자동 포함
     for (const line of sc.lines) {
-      if (!line.i18n) continue;
+      if (line.kind === 'item' || !line.i18n) continue; // 아이템 라인은 번역 대상 아님
       for (const [loc, v] of Object.entries(line.i18n) as [Locale, string | undefined][]) {
         if (v && v.trim()) set.add(loc);
       }

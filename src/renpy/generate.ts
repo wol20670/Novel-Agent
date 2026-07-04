@@ -221,6 +221,31 @@ export function hasBgm(s: Scene): boolean {
   return !!(s.bgm || s.bgmAssetId);
 }
 
+/** 아이템(소품) 팝업 참조 — 이름 기준 공유(같은 이름 = 같은 이미지 1장). */
+export interface ItemRef {
+  name: string;
+  tag: string; // item_1 … (Ren'Py image 이름이자 persistent.item_found 키)
+  file: string; // item_1.png
+  assetId?: string;
+}
+
+/** 승인 장면들의 `#아이템 <이름>` 을 이름 기준으로 유니크 수집(등장 순서). */
+export function resolveItems(project: Project): ItemRef[] {
+  const slugs = new SlugMap('item');
+  const seen = new Map<string, ItemRef>();
+  for (const scene of project.scenes) {
+    if (scene.status !== 'approved') continue;
+    for (const line of scene.lines) {
+      if (line.kind !== 'item') continue;
+      const name = line.name.trim();
+      if (!name || seen.has(name)) continue;
+      const tag = slugs.get(name);
+      seen.set(name, { name, tag, file: `${tag}.png`, assetId: project.itemAssetIds?.[name] });
+    }
+  }
+  return [...seen.values()];
+}
+
 const indent = (n: number) => '    '.repeat(n);
 
 function esc(s: string): string {
@@ -291,7 +316,7 @@ function characterDefs(
   return lines.join('\n') + '\n';
 }
 
-function assetDefs(refs: SceneAssetRef[], sprites: SpriteRef[]): string {
+function assetDefs(refs: SceneAssetRef[], sprites: SpriteRef[], items: ItemRef[]): string {
   const lines = ['# 자동 생성: 이미지·오디오 에셋 정의', ''];
   // 공유 태그는 1회만 정의(같은 이름 배경/CG 가 여러 장면에 쓰여도 image 선언은 하나).
   const seen = new Set<string>();
@@ -311,6 +336,10 @@ function assetDefs(refs: SceneAssetRef[], sprites: SpriteRef[]): string {
     for (const sp of sprites) {
       lines.push(`image ${sp.charId} ${sp.outfitAttr} ${sp.attr} = "images/${sp.file}"`);
     }
+  }
+  if (items.length) {
+    lines.push('', '# 아이템(소품) 팝업 이미지 (투명 컷아웃)');
+    for (const it of items) lines.push(`image ${it.tag} = "images/${it.file}"`);
   }
   return lines.join('\n') + '\n';
 }
@@ -354,8 +383,10 @@ function scriptBody(
   transition: string,
   joints: Map<string, JointSpeaker>,
   screenH: number,
+  items: ItemRef[],
 ): string {
   const resolve = makeResolver(refs);
+  const itemTag = new Map(items.map((it) => [it.name, it.tag]));
   const spritesByChar = new Map<string, SpriteRef[]>();
   for (const sp of sprites) {
     (spritesByChar.get(sp.charId) ?? spritesByChar.set(sp.charId, []).get(sp.charId)!).push(sp);
@@ -397,8 +428,26 @@ function scriptBody(
     r.cgTags.forEach((tag) => out.push(`${indent(1)}show ${tag} with dissolve`));
     if (s.direction.length) out.push(`${indent(1)}# 연출: ${s.direction.join(' / ')}`);
 
+    // 아이템 팝업은 화면(screen)으로 띄운다. 장면을 넘어가면 남지 않도록 장면 끝에서 반드시 닫는다.
+    let itemOpen = false;
     for (let lineIdx = 0; lineIdx < s.lines.length; lineIdx++) {
       const line = s.lines[lineIdx];
+      if (line.kind === 'item') {
+        const name = line.name.trim();
+        if (name) {
+          const tag = itemTag.get(name);
+          if (tag) {
+            // 해금 기록(세이브 무관 영구) → 라이트박스 팝업(딤+중앙+캡션).
+            out.push(`${indent(1)}$ persistent.item_found["${tag}"] = True`);
+            out.push(`${indent(1)}show screen item_popup("${tag}", "${escRpyText(name)}")`);
+            itemOpen = true;
+          }
+        } else if (itemOpen) {
+          out.push(`${indent(1)}hide screen item_popup`); // #아이템끝
+          itemOpen = false;
+        }
+        continue;
+      }
       if (line.kind === 'dialogue') {
         const speakerIds = lineSpeakerIds(line, ids);
         const want = attrFor(effectiveEmotion(line, s));
@@ -433,6 +482,9 @@ function scriptBody(
         out.push(`${indent(1)}"${esc(line.text)}"`);
       }
     }
+
+    // 장면을 넘어가기 전 아이템 팝업을 반드시 닫는다(다음 장면에 남지 않음).
+    if (itemOpen) out.push(`${indent(1)}hide screen item_popup`);
 
     if (s.choices.length) {
       out.push(`${indent(1)}menu:`);
@@ -570,6 +622,20 @@ Ren'Py 런처 → **"Build Distributions"** → 플랫폼(Windows/Mac/Linux/Web)
 `;
 }
 
+/**
+ * game/items.rpy — "발견한 아이템" 보관함 데이터. 팝업이 뜬 아이템을 persistent 로 해금 기록하고,
+ * screens.rpy 의 item_gallery 가 gui.items_all(전체 목록)과 대조해 발견/미발견(？？？)을 그린다.
+ */
+function itemsRpy(items: ItemRef[]): string {
+  const list = items.map((it) => `("${it.tag}", "${escRpyText(it.name)}")`).join(', ');
+  return [
+    '# 자동 생성: 발견한 아이템 보관함 데이터 (screens.rpy 의 item_gallery 화면이 사용)',
+    'default persistent.item_found = dict()',
+    `define gui.items_all = [ ${list} ]`,
+    '',
+  ].join('\n');
+}
+
 /** Ren'Py 텍스트 리터럴용 안전 이스케이프: 따옴표·역슬래시·개행 + 텍스트태그([],{}) 무력화. */
 function escRpyText(s: string): string {
   return s
@@ -635,6 +701,7 @@ function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] 
     const body: string[] = [];
     for (const r of refs) {
       for (const line of r.scene.lines) {
+        if (line.kind === 'item') continue; // 아이템 라인은 자막 없음
         const tr = line.i18n?.[loc];
         if (!tr) continue;
         const key = esc(line.text);
@@ -721,16 +788,19 @@ export function generateRenpyFiles(project: Project): {
   // 다국어: 자막 언어 2개 이상이면 tl 파일·선택 UI, 음성 언어가 있으면 voices.rpy·음성 선택 UI 를 낸다.
   const textLocales = effectiveTextLocales(project);
   const voiceLocales = effectiveVoiceLocales(project);
+  // 아이템(소품) 팝업 + "발견한 아이템" 보관함. 아이템이 하나라도 있으면 items.rpy·갤러리 화면·메뉴 진입을 낸다.
+  const items = resolveItems(project);
 
   const files: RenpyFile[] = [
-    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height) },
+    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items) },
     { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox) },
-    { path: 'game/assets.rpy', content: assetDefs(refs, sprites) },
+    { path: 'game/assets.rpy', content: assetDefs(refs, sprites, items) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
     { path: 'game/credits.rpy', content: creditsRpy(project) },
     // 엔진 확인창 문구를 기본 언어로 재정의(단일 언어 프로젝트에도 항상) — 언어 일관성.
     { path: 'game/ui_strings.rpy', content: uiStringsRpy(project) },
     ...(voiceLocales.length ? [{ path: 'game/voices.rpy', content: voicesRpy(project) }] : []),
+    ...(items.length ? [{ path: 'game/items.rpy', content: itemsRpy(items) }] : []),
     ...translationFiles(project, refs),
     ...uiTranslationFiles(project),
     ...generateGuiFiles(
@@ -743,6 +813,7 @@ export function generateRenpyFiles(project: Project): {
       },
       project.guiOverrides?.dialogueGradient ?? false,
       { text: textLocales, voice: voiceLocales },
+      items.length > 0,
     ),
     { path: 'README.md', content: readme(theme) },
   ];

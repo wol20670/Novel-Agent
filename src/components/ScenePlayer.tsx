@@ -97,6 +97,14 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
   const curNarrOnly = cur?.kind === 'dialogue' && !isJoint && isNarrOnly(cur.speaker);
   const curEmo = cur ? emoOf(cur) : '기본';
   const showEmo = !!cur && !curNarrOnly && curEmo !== '기본';
+  // 아이템 라인은 대사가 없으니 팝업 표시(또는 닫기)를 안내 문구로 보여준다.
+  const curText = !cur
+    ? ''
+    : cur.kind === 'item'
+      ? cur.name
+        ? `🎁 아이템 팝업: ${cur.name}`
+        : '🎁 아이템 닫기'
+      : cur.text;
 
   return (
     <div>
@@ -126,7 +134,7 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
                 )}
               </div>
             )}
-            <div className="text-gray-100 text-sm leading-snug">{cur.text}</div>
+            <div className="text-gray-100 text-sm leading-snug">{curText}</div>
           </div>
         )}
       </div>

@@ -30,6 +30,7 @@ export function generateGuiFiles(
   outline?: { enabled: boolean; color: string },
   dialogueGradient?: boolean,
   locales?: GuiLocales,
+  hasItems?: boolean,
 ): RenpyFile[] {
   // 일본어(자막·음성 어느 쪽이든)가 하나라도 있으면 gui.rpy 가 JP 폰트(FontGroup)를 참조·번들한다.
   // 없으면 생략 → buildZip 의 폰트 번들 조건과 일치해야 한다(같은 규칙: ja ∈ text|voice).
@@ -37,7 +38,7 @@ export function generateGuiFiles(
   return [
     { path: 'game/guisupport.rpy', content: GUISUPPORT_RPY },
     { path: 'game/gui.rpy', content: guiRpy(theme, width, height, outline, dialogueGradient, japanese) },
-    { path: 'game/screens.rpy', content: screensRpy(locales) },
+    { path: 'game/screens.rpy', content: screensRpy(locales, hasItems) },
   ];
 }
 
