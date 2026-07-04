@@ -88,6 +88,15 @@
 - 설계·계획 문서: `docs/superpowers/specs/2026-07-04-auto-translate-design.md`, `docs/superpowers/plans/2026-07-04-auto-translate.md`(둘 다 `docs/` = gitignore·로컬 전용).
 - **한계/후속**: `quality` 정확 단가는 실측 후 튜닝. 장면당 배치 줄 수 상한(현재 무제한) — 초대형 장면에서 토큰 초과 시 청크 분할 필요.
 
+## 1-F. 노트북 세션(2026-07-04) 추가 — 아이템(소품) 팝업 + 발견한 아이템 보관함  *(commit 별도)*
+- **목적**: 대본 진행 중 소품(편지·열쇠 등)을 라이트박스로 잠깐 확대(배경 살짝 딤 + 중앙 컷아웃 + 이름 캡션), 이후 "발견한 아이템" 보관함에서 다시 보기. 이미지 AI = **NovelAI 재사용**(스프라이트식 평면배경→누끼→투명 컷아웃, 작은 정사각이라 무료 조건 안).
+- **표기**: 엑셀 B열(또는 텍스트) **`#아이템 <이름>`** = 팝업, **`#아이템끝`**(=`#소품끝`) = 닫기. 같은 이름은 한 이미지 공유(`Project.itemAssetIds`). 파서상 `Line` 에 `{kind:'item', name}` 인라인 이벤트로 들어가 번역/표정/편집에서 자동 제외.
+- **인게임**: `show screen item_popup(tag, name)` — zorder -5(대사창보다 아래라 글자 안 가림), 딤 0.45, 팝인. 장면 끝/`#아이템끝`에서 반드시 hide(다음 장면에 안 남음). 팝업 시 `persistent.item_found[tag]=True` 해금.
+- **보관함**: 메뉴 내비 `발견한 아이템` → `item_gallery`(발견=썸네일, 미발견=`???`), 클릭 시 `item_lightbox` 로 크게 재보기. 아이템 있을 때만 `items.rpy`·갤러리·내비 노출.
+- **생성 UI**: AssetsTab `🎁 아이템(소품)` 섹션(이름별 생성/업로드). 텍스트 파서도 이제 원시 `#` 태그 허용(엑셀과 동일 문법).
+- 파일: `types.ts`(item kind·AssetKind·itemAssetIds)·`parser/sceneBuilder.ts`·`parser/parseText.ts`·`promptCompiler.ts`(item 모드)·`image/index.ts`(generateItemImage)·`store.ts`(generateItem·uploadItem)·`renpy/generate.ts`(resolveItems·show/hide·items.rpy)·`renpy/gui/{index,screensRpy}.ts`(화면 3종)·`zip/buildZip.ts`·`SceneCard.tsx`·`AssetsTab.tsx`·`ScenePlayer.tsx`.
+- **테스트 인프라 신규**: `vitest` 도입(`npm test`) + `tests/`(parser·generate-items·translate 14케이스). 순수 로직+Ren'Py 생성 파이프라인 커버.
+
 ## 2. 검증 상태
 - ✅ `npm run typecheck` · `vite build`(OneDrive 밖 경로) 통과.
 - ✅ **인게임 확인 완료(PC)**: 이름 박스 제거 · 대사창 대비 · 게임 메뉴/세이브/설정 가시성 · 스킵 · 자동 · **확인창(예/아니오)** 모두 정상.
