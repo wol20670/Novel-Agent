@@ -594,14 +594,17 @@ export const useStore = create<State>((set, get) => {
     },
 
     setLineTranslation: (sceneId, lineIndex, locale, text) => {
-      const v = text.trim();
+      // 원문(공백 포함) 그대로 저장한다 — 매 키 입력마다 trim 하면 단어 사이 공백을 칠 수 없다
+      // (컨트롤드 인풋: 스페이스가 저장 전에 잘려 다음 글자가 붙음). 내용 유무만 trim 으로 판정.
+      // 출력(tl script.rpy)은 generate 의 esc() 가 양끝 공백을 정리하므로 저장은 원문이 안전하다.
+      const hasContent = text.trim().length > 0;
       setScenes(
         get().project.scenes.map((sc) => {
           if (sc.id !== sceneId) return sc;
           const lines = sc.lines.map((l, i) => {
             if (i !== lineIndex) return l;
             const i18n = { ...(l.i18n ?? {}) };
-            if (v) i18n[locale] = v;
+            if (hasContent) i18n[locale] = text;
             else delete i18n[locale];
             return { ...l, i18n: Object.keys(i18n).length ? i18n : undefined };
           });
