@@ -80,12 +80,21 @@
   - **한계:** SourceHanSansLite 는 "Lite" 서브셋 → 아주 드문 한자 누락 가능(풀 Noto Sans JP 교체 가능, 경로만 변경).
   - ✅ **조건부 번들링 완료(2026-07-04)**: JP 폰트(~2.9MB)와 `_font_jp` FontGroup 래핑을 **`ja ∈ effectiveTextLocales|effectiveVoiceLocales` 일 때만** 방출/번들(그 외 KO·KO+EN 프로젝트는 평문 폰트, 폰트 fetch 자체 skip). `guiRpy.ts`(japanese 인자)·`gui/index.ts`(조건 계산)·`buildZip.ts`(조건부 fetch) 세 곳이 **동일 규칙**으로 일치. gui.rpy 4개 로케일 조합으로 출력 검증.
 
+## 1-E. 노트북 세션(2026-07-04) 추가 — 자동 번역(KO→EN/JA)  *(commit 별도)*
+- **목적**: 엑셀 C열(en)·D열(ja)을 손으로 채우는 대신, 원문(ko)만 쓰면 GPT 가 en·ja 번역을 `line.i18n` 에 채우고 기존 인라인 편집기(LineRow)에서 검수·수정.
+- **모드 `Project.translateMode`**: `off`(기본·사용 안 함) / `fast`(gpt-4o-mini) / `quality`(gpt-4o). 왼쪽 패널 OpenAI 키 아래 3단계 chip 셀렉터(`quality` 선택 시 비용 주의 힌트). `off` 가 아니어야 장면 탭에 **🌐 전체 자동 번역** 버튼이 뜬다. 프로젝트별 저장·내보내기됨.
+- **동작**: 버튼 클릭 → `store.autoTranslateAll()` → 장면별로 **빈 칸(번역 없는 dialogue·narration)만** 모아 JSON 배치 1콜(`translate/index.ts`)로 en·ja 받아 병합. **재실행해도 채워진 칸은 skip**, 부분 실패 시 성공분만 저장 + 요약 토스트. `#`태그·연출은 파서상 `line` 이 아니라 **구조적으로 번역 제외**.
+- 파일: `types.ts`(`TranslateMode`·`translateModeOf`·`translateModelFor`·`Project.translateMode`), `generators/translate/index.ts`(provider+`parseTranslateResponse`), `generators/translate/collect.ts`(`collectUntranslated`), `store.ts`(`setTranslateMode`·`autoTranslateAll`), `LeftPanel.tsx`·`CenterPanel.tsx`(UI).
+- 설계·계획 문서: `docs/superpowers/specs/2026-07-04-auto-translate-design.md`, `docs/superpowers/plans/2026-07-04-auto-translate.md`(둘 다 `docs/` = gitignore·로컬 전용).
+- **한계/후속**: `quality` 정확 단가는 실측 후 튜닝. 장면당 배치 줄 수 상한(현재 무제한) — 초대형 장면에서 토큰 초과 시 청크 분할 필요.
+
 ## 2. 검증 상태
 - ✅ `npm run typecheck` · `vite build`(OneDrive 밖 경로) 통과.
 - ✅ **인게임 확인 완료(PC)**: 이름 박스 제거 · 대사창 대비 · 게임 메뉴/세이브/설정 가시성 · 스킵 · 자동 · **확인창(예/아니오)** 모두 정상.
 - ✅ **다국어 컴파일단 검증 완료(노트북)**: Ren'Py 8.5.3 SDK `lint` 0에러 + **실게임 전체 플레이**(자막·음성 일본어 런타임 전환, `C:\renpy\renpy-8.5.3-sdk`) 런타임 에러 0. tl/english·tl/japanese·voices.rpy·설정 언어 라디오 모두 동작.
 - ✅ **GUI 언어 일관성 검증 완료(노트북)**: `lint` 0에러 + 런타임 `translate_string` 실측(base/영/일 전 UI 문자열 정확 치환 — 확인창·메뉴·예/아니오 포함) + `screensRpy` 리터럴 커버리지 100%(누락 검출 스크립트).
 - ✅ **일본어 폰트 렌더링 실증(노트북, 2026-07-03)**: 실제 Ren'Py 8.5.3 로 FontGroup 미니 프로젝트 실행 → 스크린샷 확인. NanumGothic 단독은 일본어가 빈칸, FontGroup 수정본은 `한국어 ABC 日本語 愛してる 字幕言語` 전부 정상. 자동감지(C/D열)·인라인 편집은 `typecheck` + 실제 엑셀 파이프라인(`effectiveTextLocales`=`["ko","en","ja"]`)으로 검증.
+- ✅ **자동 번역 배선 실증(노트북, 2026-07-04)**: `npm run dev` + Playwright — 셀렉터(off/fast/quality) 렌더, fast 전환 시 🌐 버튼 노출·off 시 숨김(양방향), 키 없이 클릭 시 "OpenAI 키가 필요합니다" 토스트, 런타임 에러 0. 순수 로직(`parseTranslateResponse`·`collectUntranslated`)은 esbuild 오프라인 실행으로 검증. **⚠️ 실제 GPT 번역 품질(유료 키 실호출)만 미검증** — 사용자 키로 확인 필요.
 - ⚠️ **미검증 ①: ElevenLabs BGM 실제 API 호출(유료 키 필요)** — PCM→WAV 실측(생성·콘솔 채널 로그·재생·`music/` 저장·ZIP 포함). → §3.
 - ⚠️ **미검증 ②: 다국어 음성 TTS 실제 호출 + 음성생성 UI/store(현재 미구현)** → §3-2.
 
