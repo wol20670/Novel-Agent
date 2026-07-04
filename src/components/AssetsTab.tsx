@@ -186,7 +186,8 @@ function CountBadge({ n }: { n: number }) {
 
 /** 내레이션·대사 전용(주인공 등) 화자 목록 — 스프라이트를 만들지 않는다. 칩 클릭 시 스프라이트 캐릭터로 전환. */
 function NarrationOnlyRow() {
-  const narr = useStore((s) => s.project.characters.filter((c) => c.isProtagonist));
+  // 셀렉터는 안정 ref(characters 배열)만 반환하고 filter 는 렌더에서 — 매 스토어 변경 리렌더 방지.
+  const narr = useStore((s) => s.project.characters).filter((c) => c.isProtagonist);
   const updateChar = useStore((s) => s.updateCharacter);
   if (narr.length === 0) return null;
   return (
@@ -797,8 +798,8 @@ function CgGroupRow({ group }: { group: CgGroup }) {
   const clearCg = useStore((s) => s.clearCgGroup);
   const busy = useStore((s) => s.busy[`cg:${group.desc.trim()}`]);
   const url = useAssetUrl(group.repAssetId);
-  // 기본 입화가 있는 캐릭터만 참조 소스로 쓸 수 있다.
-  const refChars = useStore((s) => s.project.characters.filter((c) => c.expressions['기본']));
+  // 기본 입화가 있는 캐릭터만 참조 소스로 쓸 수 있다. (셀렉터는 안정 ref, filter 는 렌더에서.)
+  const refChars = useStore((s) => s.project.characters).filter((c) => c.expressions['기본']);
   const [refChar, setRefChar] = useState('');
   const [draft, setDraft] = useState(group.desc);
   return (
