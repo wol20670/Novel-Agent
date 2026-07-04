@@ -75,6 +75,7 @@ export default function AssetsTab() {
   const bgs = groupBy(scenes, backgroundKey, (s) => s.background ?? '', (s) => s.backgroundAssetId, () => true);
   const cgs = cgGroups(scenes);
   const bgms = groupBy(scenes, bgmKey, (s) => s.bgm ?? '', (s) => s.bgmAssetId, hasBgm);
+  const items = itemNames(scenes);
   const batchBusy = !!(bgBusy || bgmBusy);
 
   return (
@@ -145,6 +146,23 @@ export default function AssetsTab() {
           <div className="flex flex-col gap-2">
             {cgs.map((g) => (
               <CgGroupRow key={g.desc} group={g} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 className="section-title mb-1">🎁 아이템(소품) <span className="text-gray-500 font-normal text-xs">· {items.length}종</span></h3>
+        <p className="text-xs text-gray-500 mb-3">
+          대본의 <code className="text-accent">#아이템 이름</code> 단위. 같은 이름이면 한 이미지로 공유됩니다. 배경 없는{' '}
+          <b>투명 컷아웃</b>으로 생성돼, 인게임에서 <b>라이트박스 팝업</b> + <b>"발견한 아이템" 보관함</b>에 쓰입니다.
+        </p>
+        {items.length === 0 ? (
+          <p className="text-gray-600 text-sm">아이템 없음 — 대본 B열에 <code className="text-accent">#아이템 편지</code> 처럼 넣어보세요.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {items.map((n) => (
+              <ItemGroupRow key={n} name={n} />
             ))}
           </div>
         )}
@@ -785,6 +803,44 @@ function BgGroupRow({ group, siblings }: { group: Group; siblings: Group[] }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** 대본에서 쓰인 고유 아이템 이름(등장 순서, 빈 이름=닫기 마커 제외). */
+function itemNames(scenes: Scene[]): string[] {
+  const seen = new Set<string>();
+  for (const sc of scenes)
+    for (const l of sc.lines) if (l.kind === 'item' && l.name.trim()) seen.add(l.name.trim());
+  return [...seen];
+}
+
+/** 아이템(소품) 한 종 — 투명 컷아웃 생성/업로드. 이름 기준 공유(project.itemAssetIds). */
+function ItemGroupRow({ name }: { name: string }) {
+  const gen = useStore((s) => s.generateItem);
+  const upload = useStore((s) => s.uploadItem);
+  const busy = useStore((s) => s.busy[`item:${name}`]);
+  const assetId = useStore((s) => s.project.itemAssetIds?.[name]);
+  const url = useAssetUrl(assetId);
+  return (
+    <div className="card border-edge p-3 flex gap-3 items-center">
+      <div className="w-16 h-16 rounded-lg border border-edge overflow-hidden bg-ink shrink-0 flex items-center justify-center text-[10px] text-gray-600">
+        {url ? <img src={url} className="w-full h-full object-contain" /> : '임시'}
+      </div>
+      <div className="flex-1 min-w-0">
+        <span className="text-sm text-gray-200">🎁 {name}</span>
+      </div>
+      <div className="flex flex-col gap-1 shrink-0 w-28">
+        <button
+          className="btn-ghost text-[11px]"
+          disabled={busy}
+          onClick={() => gen(name)}
+          title="투명 컷아웃 아이템 이미지 생성(키 있으면 NovelAI, 없으면 Canvas 임시)"
+        >
+          {busy ? <Spinner /> : url ? '재생성' : '생성'}
+        </button>
+        <UploadButton onFile={(f) => upload(name, f)} label="↥ 업로드" className="btn-ghost text-[11px]" />
+      </div>
     </div>
   );
 }
