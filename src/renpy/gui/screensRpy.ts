@@ -56,8 +56,86 @@ function languagePrefsBlock(locales?: GuiLocales): string {
   return lines.join('\n') + '\n';
 }
 
-export function screensRpy(locales?: GuiLocales): string {
+/** 아이템 팝업(인게임) + 다시보기 라이트박스 + 발견한 아이템 보관함 화면(hasItems 일 때만 방출). */
+const ITEM_SCREENS = String.raw`
+
+################################################################################
+## 아이템(소품) 팝업 + 발견한 아이템 보관함
+################################################################################
+
+## 인게임 팝업 — 배경 살짝 딤 + 중앙 컷아웃 + 이름 캡션.
+## zorder 를 대사창(say=0)보다 낮게 둬서 배경·인물만 어둡게 덮고 대사 글자는 안 가린다.
+screen item_popup(img, caption):
+    zorder -5
+    add Solid("#00000073")
+    add img:
+        fit "contain"
+        ysize int(config.screen_height * 0.45)
+        anchor (0.5, 0.5)
+        pos (0.5, 0.42)
+        alpha 0.0 zoom 0.9
+        easein 0.22 alpha 1.0 zoom 1.0
+    text caption:
+        xalign 0.5
+        ypos 0.72
+        size gui.name_text_size
+        color gui.accent_color
+        outlines [ (absolute(2), "#000000", absolute(0), absolute(0)) ]
+
+## 보관함에서 다시보기 — 모달 라이트박스(닫기/Esc 로 종료). tag 없음 = 갤러리 위에 겹쳐 뜬다.
+screen item_lightbox(img, caption):
+    modal True
+    zorder 100
+    add Solid("#000000cc")
+    add img:
+        fit "contain"
+        ysize int(config.screen_height * 0.6)
+        anchor (0.5, 0.5)
+        pos (0.5, 0.45)
+    text caption:
+        xalign 0.5
+        ypos 0.82
+        size gui.name_text_size
+        color gui.accent_color
+    textbutton _("닫기"):
+        xalign 0.5
+        ypos 0.9
+        action Hide("item_lightbox")
+    key "game_menu" action Hide("item_lightbox")
+
+## 발견한 아이템 보관함 — 발견=썸네일(클릭 시 라이트박스), 미발견=??? 잠김.
+screen item_gallery():
+    tag menu
+    use game_menu(_("발견한 아이템"), scroll="viewport"):
+        vpgrid:
+            cols 4
+            spacing gui.scale(18)
+            for it_tag, it_name in gui.items_all:
+                vbox:
+                    spacing gui.scale(4)
+                    xsize gui.scale(200)
+                    if persistent.item_found.get(it_tag, False):
+                        button:
+                            xysize (gui.scale(200), gui.scale(200))
+                            action Show("item_lightbox", img=it_tag, caption=it_name)
+                            add it_tag:
+                                fit "contain"
+                                xysize (gui.scale(184), gui.scale(184))
+                                align (0.5, 0.5)
+                        text it_name xalign 0.5 size gui.scale(16)
+                    else:
+                        frame:
+                            xysize (gui.scale(200), gui.scale(200))
+                            background Solid(gui.frame_bg_color)
+                            text "???" align (0.5, 0.5) size gui.scale(34) color gui.insensitive_color
+                        text _("???") xalign 0.5 size gui.scale(16) color gui.insensitive_color
+`;
+
+export function screensRpy(locales?: GuiLocales, hasItems?: boolean): string {
   const languagePrefs = languagePrefsBlock(locales);
+  // 아이템이 있을 때만 보관함 진입 버튼(내비)과 아이템 화면들을 낸다.
+  const galleryNav = hasItems ? '        textbutton _("발견한 아이템") action ShowMenu("item_gallery")' : '';
+  const galleryScreens = hasItems ? ITEM_SCREENS : '';
   return String.raw`################################################################################
 ## 자동 생성: 자체 GUI 화면 (zero-PNG, Solid 기반)
 ################################################################################
@@ -350,7 +428,7 @@ screen navigation():
         textbutton _("정보") action ShowMenu("about")
 
         textbutton _("크레딧") action ShowMenu("credits")
-
+${galleryNav}
         if renpy.variant("pc") or (renpy.variant("web") and not renpy.variant("mobile")):
 
             textbutton _("도움말") action ShowMenu("help")
@@ -1298,5 +1376,5 @@ style slider_vbox:
 style slider_slider:
     variant "small"
     xsize gui.scale(600)
-`;
+${galleryScreens}`;
 }
