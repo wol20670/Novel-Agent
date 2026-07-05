@@ -224,23 +224,31 @@ export const aiConfig: AiConfig = {
       //   (앱은 배경/CG/스프라이트에 단일 네거티브를 공용하므로 캐릭터 안전 태그를 함께 둔다.)
       //   + 검은 레터박스/장식 테두리 억제: V4.5 계열이 scenery 배경에 검은 띠·프레임을 구워 넣는
       //     경향이 있어(danbooru 'letterboxed'/'border' 분포) 배경·CG·스프라이트 공통으로 막는다.
+      // 2026-07-05: 우리 취향에 맞는 예시 일러스트 100장의 positive/negative 태그를 빈도 집계해
+      // 반영(reference/novelai 정리와 별개로, 실제 "우리 취향" 데이터 기반). subject 태그(1girl·헤어
+      // 컬러 등)는 캐릭터별 appearance 가 담당하는 영역이라 전역 기본값에서 제외 — 전역엔 품질/스타일/
+      // 공통 negative 만 반영한다.
       negativePrompt:
         'blurry, lowres, upscaled, artistic error, film grain, scan artifacts, ' +
         'worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, ' +
         'halftone, multiple views, logo, too many watermarks, negative space, blank page, ' +
-        'bad anatomy, bad hands, ' +
+        'bad anatomy, bad hands, extra fingers, fused fingers, missing fingers, poorly drawn hands, extra limbs, ' +
+        'cropped, out of frame, signature, text, nsfw, nude, ' +
+        // 100장 예시 중 negative 최빈값(20~28%) — 특정 앞머리 렌더링을 피하려는 뚜렷한 취향 신호.
+        'one-line bangs, forehead-exposing bangs, middle part bangs, ' +
         'letterboxed, black bars, border, frame, framed',
       // V4.5 품질 태그는 프롬프트 "맨 끝"에 붙인다(모델별 공식 권장값, 2026-07-01 docs.novelai.net).
       // 현재 모델=Curated → 공식 권장 'location, masterpiece, no text, -0.8::feet::, rating:general'.
       // 단 '-0.8::feet::' 는 전신 입화(head to toe)와 충돌해 의도적으로 제외한다(재추가 시 발 잘림).
       // V4.5 Full 이면 'location, very aesthetic, masterpiece, no text'.
       // qualityToggle(서버 자동부착)에 의존하지 않고 직접 부착해 결정적으로 동작시킨다.
-      qualityTags: 'location, masterpiece, no text, rating:general',
+      // best quality/beautiful detailed/highres 는 100장 취향 데이터에서 고빈도(35~57%)로 확인해 추가.
+      qualityTags: 'location, masterpiece, best quality, beautiful detailed, highres, no text, rating:general',
       // CG는 스프라이트 복제가 아니라 "웹소설 표지 일러스트" 톤을 노린다 — 배경 존재를 강제하는
       // detailed background 를 포함해 img2img 폐기 후에도 빈 배경으로 돌아가지 않게 한다.
       qualityTagsCg:
         'very aesthetic, beautiful detailed background, cinematic lighting, dramatic composition, ' +
-        'official art, absurdres, masterpiece, no text',
+        'official art, absurdres, masterpiece, best quality, no text',
       img2imgStrength: 0.6,
       // 그림체 참조(vibe transfer) 기본 강도/정보추출량(여러 장 업로드 시 각 이미지에 공통 적용).
       vibeStrength: 0.6,
