@@ -72,6 +72,16 @@ describe('generateRenpyFiles: 아이템 팝업 + 보관함 출력', () => {
     expect(sc).toContain('screen item_gallery():');
     expect(sc).toContain('textbutton _("발견한 아이템") action ShowMenu("item_gallery")');
   });
+
+  it('item_popup 의 페이드/줌 인 애니메이션은 별도 transform 으로 분리된다(add 블록에 SL 프로퍼티와 ATL 워퍼를 섞으면 파싱 에러)', () => {
+    const sc = fileOf(files, 'game/screens.rpy')!.content;
+    expect(sc).toContain('add img at item_popup_appear:');
+    expect(sc).toContain('transform item_popup_appear:');
+    expect(sc).toContain('easein 0.22 alpha 1.0 zoom 1.0');
+    // add 블록 안에는 순수 SL 프로퍼티만 남아야 한다(easein 이 함께 있으면 회귀).
+    const addBlock = sc.slice(sc.indexOf('add img at item_popup_appear:'), sc.indexOf('text caption:'));
+    expect(addBlock).not.toContain('easein');
+  });
 });
 
 describe('generateRenpyFiles: 아이템이 없으면 관련 출력을 내지 않는다', () => {

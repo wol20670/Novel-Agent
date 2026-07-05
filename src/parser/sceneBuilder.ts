@@ -67,6 +67,8 @@ export interface ScriptMeta {
   baseLocale?: Locale;
   textLocales?: Locale[];
   voiceLocales?: Locale[];
+  /** #설정_이름 으로 지정된 캐릭터별 언어별 이름(원문 이름 → i18n). */
+  names?: Record<string, I18nText>;
 }
 
 export interface BuildResult {
@@ -183,6 +185,25 @@ export class SceneBuilder {
     const locs = parseLocaleSpec(spec);
     if (locs.length) this.meta.voiceLocales = locs;
   }
+  /**
+   * #설정_이름 원문 = en | ja — 캐릭터 표시 이름의 언어별 번역(자막 언어 전환 시 이름표도 따라 바뀜).
+   * `=` 로 원문/번역을 나누고, 번역쪽은 `|` 로 en·ja 순서 분리. en/ja 어느 한쪽만 있어도 된다.
+   */
+  setCharName(spec: string) {
+    const idx = spec.search(/[=＝]/);
+    if (idx < 0) return;
+    const name = spec.slice(0, idx).trim();
+    if (!name) return;
+    const parts = spec
+      .slice(idx + 1)
+      .split(/[|｜]/)
+      .map((s) => s.trim());
+    const i18n: I18nText = {};
+    if (parts[0]) i18n.en = parts[0];
+    if (parts[1]) i18n.ja = parts[1];
+    if (!Object.keys(i18n).length) return;
+    this.meta.names = { ...(this.meta.names ?? {}), [name]: i18n };
+  }
 
   setBackground(name: string) {
     const sc = this.ensureScene();
@@ -240,6 +261,7 @@ export class SceneBuilder {
       color: PALETTE[i % PALETTE.length],
       expressions: {},
       isProtagonist: PROTAGONIST_NAMES.has(name),
+      i18nName: this.meta.names?.[name],
     }));
     const meta = Object.keys(this.meta).length ? this.meta : undefined;
     return { scenes: this.scenes, characters, meta };
@@ -263,6 +285,10 @@ export function applyTag(b: SceneBuilder, body: string): boolean {
   }
   if (t.startsWith('#설정_목소리언어')) {
     b.setVoiceLocales(t.replace(/^#설정_목소리언어\s*[:：]?\s*/, ''));
+    return true;
+  }
+  if (t.startsWith('#설정_이름')) {
+    b.setCharName(t.replace(/^#설정_이름\s*/, ''));
     return true;
   }
   if (t.startsWith('#배경')) {

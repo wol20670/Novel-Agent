@@ -241,34 +241,49 @@ export interface NaiGenerateOpts {
   negative?: string;
   /** 그림체 참조 이미지(여러 장). vibe transfer 로 화풍만 반영한다. */
   styleReferences?: Blob[];
+  /** styleReferences 의 vibe 강도/정보추출량 오버라이드(미지정 시 config 기본값). */
+  vibeStrength?: number;
+  vibeInfoExtracted?: number;
+  /** 긍정 프롬프트 끝에 붙는 품질 태그 오버라이드(미지정 시 config 기본값, 예: CG 전용 태그). */
+  qualityTags?: string;
 }
 
-/** 긍정 프롬프트 "끝"에 V4.5 품질 태그를 붙인다(권장 위치). */
-function withQualityTags(prompt: string): string {
-  const tags = aiConfig.image.novelai.qualityTags;
+/** 긍정 프롬프트 "끝"에 V4.5 품질 태그를 붙인다(권장 위치). override 가 있으면 그걸 쓴다(예: CG 전용 태그). */
+function withQualityTags(prompt: string, override?: string): string {
+  const tags = override ?? aiConfig.image.novelai.qualityTags;
   return tags ? `${prompt}, ${tags}` : prompt;
 }
 
-/** 그림체 참조 Blob[] → buildParameters 의 vibe 옵션(encode-vibe 인코딩 + 세션 캐시). */
-async function toVibe(refs: Blob[] | undefined, apiKey: string) {
+/**
+ * 그림체 참조 Blob[] → buildParameters 의 vibe 옵션(encode-vibe 인코딩 + 세션 캐시).
+ * strength/infoExtracted 를 지정하면 그 호출에만 다른 강도를 쓴다(예: CG 는 느슨한 참조).
+ */
+async function toVibe(
+  refs: Blob[] | undefined,
+  apiKey: string,
+  opts?: { strength?: number; infoExtracted?: number },
+) {
   if (!refs || refs.length === 0) return undefined;
   const cfg = aiConfig.image.novelai;
-  const images = await Promise.all(
-    refs.map((r) => novelaiEncodeVibe(r, { apiKey, infoExtracted: cfg.vibeInfoExtracted })),
-  );
-  return { images, strength: cfg.vibeStrength };
+  const infoExtracted = opts?.infoExtracted ?? cfg.vibeInfoExtracted;
+  const images = await Promise.all(refs.map((r) => novelaiEncodeVibe(r, { apiKey, infoExtracted })));
+  return { images, strength: opts?.strength ?? cfg.vibeStrength };
 }
 
 /** 텍스트 → 이미지(불투명). 투명배경이 필요하면 호출부에서 removeBackground 를 이어 붙인다. */
 export async function novelaiGenerate(prompt: string, opts: NaiGenerateOpts): Promise<Blob> {
   const cfg = aiConfig.image.novelai;
-  const vibe = await toVibe(opts.styleReferences, opts.apiKey);
+  const vibe = await toVibe(opts.styleReferences, opts.apiKey, {
+    strength: opts.vibeStrength,
+    infoExtracted: opts.vibeInfoExtracted,
+  });
+  const input = withQualityTags(prompt, opts.qualityTags);
   const body = {
-    input: withQualityTags(prompt),
+    input,
     model: cfg.model,
     action: 'generate',
     parameters: buildParameters({
-      prompt: withQualityTags(prompt),
+      prompt: input,
       negative: opts.negative ?? cfg.negativePrompt,
       size: opts.size,
       steps: opts.steps,

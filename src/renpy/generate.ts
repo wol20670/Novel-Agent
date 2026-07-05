@@ -249,7 +249,9 @@ export function resolveItems(project: Project): ItemRef[] {
 const indent = (n: number) => '    '.repeat(n);
 
 function esc(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ').trim();
+  // %(변수)s 같은 보간 문법이 아닌 순수 문자(예: "할인 20%")는 %% 로 이스케이프해야 한다.
+  // 안 하면 Ren'Py 가 그 줄을 표시할 때 "Unknown string format code" 로 런타임에 죽는다(lint 로 실측 확인).
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%').replace(/\n/g, ' ').trim();
 }
 
 /**
@@ -304,7 +306,9 @@ function characterDefs(
   const nameColor = (hue: string) => enforceContrast(hue, dialogueBox, 4.5);
   const lines = ['# 자동 생성: 캐릭터 정의', ''];
   for (const c of project.characters) {
-    lines.push(`define ${ids.get(c.name)} = Character("${esc(c.name)}", color="${nameColor(c.color)}")`);
+    // 이름을 _() 로 감싸 Ren'Py 번역 문자열로 등록 — tl/<lang>/script.rpy 의 이름 old/new 가 이 리터럴을
+    // 원문 키로 치환한다(자막 언어 전환 시 이름표도 자동으로 바뀜). i18nName 이 없으면 원문 그대로 표시.
+    lines.push(`define ${ids.get(c.name)} = Character(_("${esc(c.name)}"), color="${nameColor(c.color)}")`);
   }
   if (project.characters.length === 0) lines.push('# (등장 캐릭터 없음)');
   if (joints.size) {
@@ -636,13 +640,14 @@ function itemsRpy(items: ItemRef[]): string {
   ].join('\n');
 }
 
-/** Ren'Py 텍스트 리터럴용 안전 이스케이프: 따옴표·역슬래시·개행 + 텍스트태그([],{}) 무력화. */
+/** Ren'Py 텍스트 리터럴용 안전 이스케이프: 따옴표·역슬래시·개행 + 텍스트태그([],{}) 무력화 + %(문자 그대로의 퍼센트) 이스케이프. */
 function escRpyText(s: string): string {
   return s
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
     .replace(/\[/g, '[[')
     .replace(/\{/g, '{{')
+    .replace(/%/g, '%%')
     .replace(/\r?\n/g, '\\n')
     .trim();
 }
@@ -699,6 +704,15 @@ function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] 
     if (!rl) continue; // base 로케일이 en/ja 인 특수 케이스 방어
     const seen = new Set<string>(); // 같은 원문 중복 방지(strings 블록은 원문 1개당 1매핑)
     const body: string[] = [];
+    // 캐릭터 이름표 번역 — characterDefs 가 _() 로 감싼 것과 동일한 esc 로 원문 키를 맞춘다.
+    for (const c of project.characters) {
+      const tr = c.i18nName?.[loc];
+      if (!tr) continue;
+      const key = esc(c.name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      body.push(`    old "${key}"`, `    new "${esc(tr)}"`, '');
+    }
     for (const r of refs) {
       for (const line of r.scene.lines) {
         if (line.kind === 'item') continue; // 아이템 라인은 자막 없음
@@ -717,9 +731,12 @@ function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] 
   return files;
 }
 
-/** Ren'Py 문자열 리터럴 이스케이프 — 태그({…})·보간([…])은 보존하고 따옴표·역슬래시·개행만 처리. */
+/**
+ * Ren'Py 문자열 리터럴 이스케이프 — 태그({…})·보간([…])은 보존하고 따옴표·역슬래시·개행·%(문자 그대로의
+ * 퍼센트, 예: "20%")를 처리한다. %는 %% 로 안 바꾸면 "Unknown string format code" 런타임 에러가 난다.
+ */
 function escLit(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n');
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%').replace(/\r?\n/g, '\\n');
 }
 
 /**

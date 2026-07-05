@@ -179,12 +179,14 @@ interface State {
   /** 외부 제작 아이템 이미지를 업로드해 그 이름에 적용(투명 PNG 권장). */
   uploadItem: (name: string, file: File) => Promise<void>;
   /**
-   * 캐릭터의 기본 입화(+해당 컷 장면의 배경)를 소스로 CG 를 생성한다.
-   * 캐릭터·배경과 가장 닮은 CG 가 나오게 한다. 키 필요.
+   * 캐릭터의 기본 입화를 느슨한 그림체 참조(vibe)로 삼아 CG 를 text2img 로 생성한다.
+   * 머리색·의상 등 필수 특징만 반영하고 배경·구도는 새로 그린다(웹소설 표지 톤). 키 필요.
    */
   generateCgWithCharacter: (desc: string, characterName: string) => Promise<void>;
   /** 이미 생성된 CG 컷을 지시문대로 미세 수정. 키 필요. */
   refineCg: (desc: string, instruction: string) => Promise<void>;
+  /** 이 CG 컷의 대표 이미지를 4배 업스케일(Anlas 소모). 키 필요. */
+  upscaleCg: (desc: string) => Promise<void>;
 
   // 외부 제작 이미지 업로드 (직접 적용)
   importBackground: (sceneId: string, file: File) => Promise<void>;
@@ -236,6 +238,9 @@ interface State {
   /** 스프라이트 누끼 방식 — browser(무료·브라우저) / novelai(Director·Anlas) / none(흰 배경). 기본 browser. */
   bgRemovalMethod: BgRemoval;
   setBgRemovalMethod: (m: BgRemoval) => void;
+  /** CG 고품질 토글 — 켜면 전역 naiMode 와 무관하게 CG 만 Large 사이즈로 생성(Anlas 소모). 기본 false(무료 사이즈). */
+  cgHighQuality: boolean;
+  setCgHighQuality: (v: boolean) => void;
   /** 표정(Emotion Director) 적용 강도 = defry(0~5). 0=강하게(눈색 등 드리프트↑)·클수록 약하게(원본 보존↑). */
   emotionDefry: number;
   setEmotionDefry: (n: number) => void;
@@ -525,6 +530,7 @@ export const useStore = create<State>((set, get) => {
     archiveReady: false,
     naiMode: 'free',
     bgRemovalMethod: 'browser',
+    cgHighQuality: false,
     emotionDefry: aiConfig.image.novelai.emotionDefry,
 
     setRawInput: (text) => {
@@ -1667,6 +1673,9 @@ export const useStore = create<State>((set, get) => {
           width: project.width,
           height: project.height,
           apiKey,
+          // CG 는 스프라이트·배경과 별개로 "웹소설 표지 일러스트" 톤의 전용 품질 태그를 쓴다.
+          qualityTags: aiConfig.image.novelai.qualityTagsCg,
+          highQuality: get().cgHighQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
@@ -1767,9 +1776,6 @@ export const useStore = create<State>((set, get) => {
       if (!baseId) return flash(`${characterName}의 ① 기본 입화를 먼저 생성하세요.`);
       const charBlob = await getAsset(baseId);
       if (!charBlob) return flash('캐릭터 기본 입화 원본을 찾지 못했습니다.');
-      // 같은 컷을 쓰는 장면 중 배경이 있으면 그 배경도 소스로 함께 준다.
-      const bgId = using.find((s) => s.backgroundAssetId)?.backgroundAssetId;
-      const bgBlob = bgId ? (await getAsset(bgId)) ?? undefined : undefined;
       const busyKey = `cg:${key}`;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
       try {
@@ -1781,16 +1787,19 @@ export const useStore = create<State>((set, get) => {
           description: key,
           directions: using[0].direction,
           character: charBlob,
-          background: bgBlob,
+          // 머리색·의상 등 "필수 특징"만 프롬프트에 얹는다(스프라이트 전체를 베끼지 않음).
+          essentials: char?.appearance,
+          seedKey: characterName,
           apiKey,
           promptOverride,
+          highQuality: get().cgHighQuality,
         });
         const id = assetId();
         await putAsset(id, blob);
         const meta: AssetMeta = {
           id,
           kind: 'cg',
-          prompt: `${key} (참조: ${characterName}${bgBlob ? '+배경' : ''})`,
+          prompt: `${key} (참조: ${characterName})`,
           mime: 'image/png',
           source,
           filename: `cg_${Date.now().toString(36)}.png`,
@@ -1802,9 +1811,57 @@ export const useStore = create<State>((set, get) => {
         set((s) => ({ assets: { ...s.assets, [id]: meta }, project: { ...s.project, scenes } }));
         autoSave();
         for (const p of prevs) await deleteAsset(p).catch(() => {});
-        flash(`${characterName}${bgBlob ? '·배경' : ''} 참조 CG 를 생성했습니다.`);
+        flash(`${characterName} 참조 CG 를 생성했습니다.`);
       } catch (e) {
         flash(`참조 CG 생성 실패: ${(e as Error).message}`);
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
+      }
+    },
+
+    upscaleCg: async (desc) => {
+      const key = desc.trim();
+      if (!key) return;
+      const apiKey = get().apiKey?.trim();
+      if (!apiKey) return flash('업스케일은 NovelAI 토큰이 필요합니다.');
+      // 이 컷의 현재 대표 에셋 찾기(refineCg 와 동일 패턴).
+      let curId: string | undefined;
+      outer: for (const sc of get().project.scenes) {
+        for (let i = 0; i < sc.cg.length; i++) {
+          if (sc.cg[i].trim() === key && sc.cgAssetIds?.[i]) {
+            curId = sc.cgAssetIds[i];
+            break outer;
+          }
+        }
+      }
+      if (!curId) return flash('먼저 이 CG 컷을 생성하세요.');
+      const src = await getAsset(curId);
+      if (!src) return flash('원본 CG 를 찾지 못했습니다.');
+      const busyKey = `upscale:cg:${key}`;
+      if (get().busy[busyKey]) return;
+      set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      try {
+        flash('CG 업스케일 중… (Anlas 소모)', 'info');
+        const { blob } = await upscaleImage({ blob: src, scale: 4, apiKey });
+        const id = assetId();
+        await putAsset(id, blob);
+        const meta: AssetMeta = {
+          id,
+          kind: 'cg',
+          prompt: `${key} (업스케일 4배)`,
+          mime: 'image/png',
+          source: 'novelai',
+          filename: `cg_${Date.now().toString(36)}.png`,
+          createdAt: Date.now(),
+        };
+        void archiveImage(blob, `cg/${safeFileName(key)}_업스케일_${timestamp()}.png`);
+        const { scenes, prevs } = applyCgToGroup(get().project.scenes, key, id);
+        set((s) => ({ assets: { ...s.assets, [id]: meta }, project: { ...s.project, scenes } }));
+        autoSave();
+        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        flash('CG 를 업스케일했습니다.');
+      } catch (e) {
+        flash(`CG 업스케일 실패: ${(e as Error).message}`);
       } finally {
         set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
       }
@@ -2182,6 +2239,15 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    setCgHighQuality: (v) => {
+      set({ cgHighQuality: v });
+      try {
+        localStorage.setItem('na_cg_hq', v ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+    },
+
     setEmotionDefry: (n) => {
       const v = Math.max(0, Math.min(5, Math.round(n)));
       set({ emotionDefry: v });
@@ -2239,6 +2305,12 @@ export const useStore = create<State>((set, get) => {
       try {
         const m = localStorage.getItem('na_bg_method');
         if (m === 'browser' || m === 'ai' || m === 'novelai' || m === 'none') set({ bgRemovalMethod: m });
+      } catch {
+        /* ignore */
+      }
+      try {
+        const hq = localStorage.getItem('na_cg_hq');
+        if (hq === '1' || hq === '0') set({ cgHighQuality: hq === '1' });
       } catch {
         /* ignore */
       }
@@ -2556,6 +2628,9 @@ function mergeChars(prev: Character[], next: Character[]): Character[] {
           appearance: old.appearance ?? c.appearance,
           personality: old.personality ?? c.personality,
           isProtagonist: old.isProtagonist ?? c.isProtagonist,
+          // i18nName 은 #설정_이름 태그(대본) 기반 — 이번 분석에 태그가 있으면 그 값을 우선 채택,
+          // 없으면(태그를 잠시 지웠거나 이 청크엔 없음) 기존 값을 보존.
+          i18nName: c.i18nName ?? old.i18nName,
         }
       : c;
   });

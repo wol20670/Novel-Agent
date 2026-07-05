@@ -137,9 +137,10 @@ export default function AssetsTab() {
 
       <section>
         <h3 className="section-title mb-1">🎬 CG 컷 <span className="text-gray-500 font-normal text-xs">· {cgs.length}종</span></h3>
-        <p className="text-xs text-gray-500 mb-3">
+        <p className="text-xs text-gray-500 mb-1">
           대본의 <code className="text-accent">#CG 설명</code> 단위. 같은 설명이면 한 컷으로 공유됩니다. <b>생성</b>(AI, 키 있으면 NovelAI)하거나 외부 제작 이미지를 업로드해 사용합니다(둘 다 없으면 Canvas 임시). 생성한 CG 도 보관 폴더에 자동 저장됩니다.
         </p>
+        <CgHighQualityToggle />
         {cgs.length === 0 ? (
           <p className="text-gray-600 text-sm">CG 컷 없음</p>
         ) : (
@@ -845,14 +846,27 @@ function ItemGroupRow({ name }: { name: string }) {
   );
 }
 
+function CgHighQualityToggle() {
+  const hq = useStore((s) => s.cgHighQuality);
+  const setHq = useStore((s) => s.setCgHighQuality);
+  return (
+    <label className="flex items-center gap-1.5 text-[11px] text-gray-400 mb-3">
+      <input type="checkbox" checked={hq} onChange={(e) => setHq(e.target.checked)} />
+      CG 고품질(Large 해상도) — 기본은 무료 크기, 켜면 CG 생성마다 Anlas 소모
+    </label>
+  );
+}
+
 function CgGroupRow({ group }: { group: CgGroup }) {
   const genCg = useStore((s) => s.generateCg);
   const genCgWithChar = useStore((s) => s.generateCgWithCharacter);
   const refineCg = useStore((s) => s.refineCg);
+  const upscaleCg = useStore((s) => s.upscaleCg);
   const renameCg = useStore((s) => s.renameCgGroup);
   const importCg = useStore((s) => s.importCgGroup);
   const clearCg = useStore((s) => s.clearCgGroup);
   const busy = useStore((s) => s.busy[`cg:${group.desc.trim()}`]);
+  const upBusy = useStore((s) => s.busy[`upscale:cg:${group.desc.trim()}`]);
   const url = useAssetUrl(group.repAssetId);
   // 기본 입화가 있는 캐릭터만 참조 소스로 쓸 수 있다. (셀렉터는 안정 ref, filter 는 렌더에서.)
   const refChars = useStore((s) => s.project.characters).filter((c) => c.expressions['기본']);
@@ -893,7 +907,7 @@ function CgGroupRow({ group }: { group: CgGroup }) {
               className="field text-[10px] !py-0.5 flex-1 min-w-0"
               value={refChar}
               onChange={(e) => setRefChar(e.target.value)}
-              title="이 캐릭터의 기본 입화(+장면 배경)를 소스로 닮은 CG 생성"
+              title="이 캐릭터의 머리색·의상 등 필수 특징만 느슨하게 참조해 배경 있는 표지풍 CG 생성"
             >
               <option value="">참조 인물…</option>
               {refChars.map((c) => (
@@ -906,7 +920,7 @@ function CgGroupRow({ group }: { group: CgGroup }) {
               className="btn-ghost text-[11px] shrink-0"
               disabled={busy || !refChar}
               onClick={() => refChar && genCgWithChar(group.desc, refChar)}
-              title="선택한 캐릭터의 기본 입화 + 장면 배경을 소스로 CG 생성(가장 닮게)"
+              title="선택한 캐릭터를 느슨하게 참조(vibe)해 배경·구도는 새로 그린 CG 생성"
             >
               🎭
             </button>
@@ -923,6 +937,16 @@ function CgGroupRow({ group }: { group: CgGroup }) {
             }}
           >
             ✏️ 수정
+          </button>
+        )}
+        {url && (
+          <button
+            className="btn-ghost text-[11px]"
+            disabled={upBusy}
+            title="이 CG 를 4배 업스케일(마음에 든 그림의 해상도만 올림, Anlas 소모)"
+            onClick={() => upscaleCg(group.desc)}
+          >
+            {upBusy ? <Spinner /> : '⬆️ 업스케일'}
           </button>
         )}
         <UploadButton

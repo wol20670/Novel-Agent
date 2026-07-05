@@ -13,7 +13,7 @@ import {
 } from './novelaiProvider';
 import { browserRemoveBackground } from './bgRemoveLocal';
 import { aiRemoveBackground } from './bgRemoveAi';
-import { aiConfig, naiSize, naiActiveSizes, naiActiveSteps } from '../../config/aiConfig';
+import { aiConfig, naiSize, naiActiveSizes, naiActiveSteps, type NaiMode } from '../../config/aiConfig';
 import type { Expression } from '../../types';
 
 /**
@@ -47,6 +47,10 @@ export interface ImageRequest {
   seed?: number;
   /** 네거티브 프롬프트 오버라이드(미지정 시 config 기본값). 배경 배치는 "인물 없음" 등을 덧댄다. */
   negative?: string;
+  /** 품질 태그 오버라이드(미지정 시 config 기본값, 예: CG 전용 표지 톤 태그). */
+  qualityTags?: string;
+  /** true 면 전역 naiMode 와 무관하게 이번 호출만 고품질(Large) 사이즈로 생성. */
+  highQuality?: boolean;
 }
 
 export interface ImageResult {
@@ -57,12 +61,14 @@ export interface ImageResult {
 export async function generateImage(req: ImageRequest): Promise<ImageResult> {
   const apiKey = req.apiKey?.trim();
   if (apiKey) {
+    const mode: NaiMode | undefined = req.highQuality ? 'high' : undefined;
     const blob = await novelaiGenerate(req.promptOverride?.trim() || req.prompt, {
       apiKey,
-      size: naiSize(req.width, req.height),
-      steps: naiActiveSteps(),
+      size: naiSize(req.width, req.height, mode),
+      steps: naiActiveSteps(mode),
       seed: req.seed,
       negative: req.negative,
+      qualityTags: req.qualityTags,
     });
     return { blob, source: 'novelai' };
   }
@@ -151,26 +157,42 @@ export async function generateMenuArtImage(opts: {
 }
 
 /**
- * 캐릭터 입화를 소스로 CG 한 컷을 합성한다(img2img). 캐릭터의 얼굴·머리·의상 정체성을
- * 유지해 "그 캐릭터가 그 배경에 있는" CG 를 만든다. 배경은 텍스트로 묘사. 키 필수.
+ * 캐릭터 스프라이트를 "느슨한 그림체 참조"(vibe transfer)로 삼아 CG 한 컷을 text2img 로 새로 그린다.
+ * 예전엔 투명 누끼 스프라이트를 img2img base 로 써서 빈 배경을 그대로 복사하는 문제가 있었다 —
+ * text2img + 낮은 강도의 vibe 참조로 바꿔 배경·구도는 완전히 새로 그리고, 인물은 머리색·의상 등
+ * "필수 특징"만 반영한다(스프라이트 복제가 아니라 웹소설 표지 일러스트 톤을 노림). 키 필수.
  */
 export async function generateCgFromReference(opts: {
   description: string;
   directions: string[];
+  /** 참조로 쓸 캐릭터 기본 입화(스프라이트) — 느슨한 vibe 로만 반영(정체성 강제 X). */
   character: Blob;
-  background?: Blob;
+  /** 인물 일관성 시드(보통 캐릭터 이름) — 같은 인물의 여러 CG 간 톤을 일관되게 유지한다. */
+  seedKey?: string;
+  /** 참조 인물의 필수 외형 요약(머리색·의상 등, Character.appearance). 프롬프트 앞쪽에 얹는다. */
+  essentials?: string;
   apiKey: string;
   /** 한글→영문 컴파일된 장면 태그(있으면 우선 사용). NovelAI 는 한글을 못 읽어 raw 한글은 폴백일 뿐. */
   promptOverride?: string;
+  /** true 면 전역 naiMode 와 무관하게 이번 CG 만 고품질(Large) 사이즈로 생성. */
+  highQuality?: boolean;
 }): Promise<ImageResult> {
   const scene =
     opts.promptOverride?.trim() || [opts.description, ...opts.directions].filter(Boolean).join(', ');
-  const prompt = [scene, 'visual novel cg, emotional scene, same character'].filter(Boolean).join(', ');
-  const blob = await novelaiImg2img(prompt, opts.character, {
+  const prompt = [opts.essentials, scene, 'visual novel cg, light novel cover illustration, emotional scene']
+    .filter(Boolean)
+    .join(', ');
+  const cfg = aiConfig.image.novelai;
+  const mode: NaiMode | undefined = opts.highQuality ? 'high' : undefined;
+  const blob = await novelaiGenerate(prompt, {
     apiKey: opts.apiKey.trim(),
-    size: naiActiveSizes().landscape,
-    steps: naiActiveSteps(),
-    strength: 0.7,
+    size: naiActiveSizes(mode).landscape,
+    steps: naiActiveSteps(mode),
+    seed: opts.seedKey ? seedFromString(opts.seedKey) : undefined,
+    styleReferences: [opts.character],
+    vibeStrength: cfg.cgVibeStrength,
+    vibeInfoExtracted: cfg.cgVibeInfoExtracted,
+    qualityTags: cfg.qualityTagsCg,
   });
   return { blob, source: 'novelai' };
 }

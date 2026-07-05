@@ -141,6 +141,12 @@ export interface Character {
    * (같은 캐릭터라도 언어마다 다른 성우를 배정할 수 있다.)
    */
   voiceIds?: Partial<Record<Locale, string>>;
+  /**
+   * 언어별 캐릭터 이름(표시 이름표) — `#설정_이름 원문 = en | ja` 태그로 지정.
+   * base(원문) 언어는 name 자체가 담당하므로 여기엔 담지 않는다. 없으면 자막 언어를 바꿔도
+   * 이름표는 원문 그대로(폴백).
+   */
+  i18nName?: I18nText;
 }
 
 export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice' | 'item';
@@ -301,6 +307,13 @@ export function effectiveTextLocales(p: Project): Locale[] {
       for (const [loc, v] of Object.entries(line.i18n) as [Locale, string | undefined][]) {
         if (v && v.trim()) set.add(loc);
       }
+    }
+  }
+  // ③ 캐릭터 이름 번역(#설정_이름)만 있고 대사 번역이 하나도 없는 프로젝트도 그 언어가 켜지게 한다.
+  for (const c of p.characters) {
+    if (!c.i18nName) continue;
+    for (const [loc, v] of Object.entries(c.i18nName) as [Locale, string | undefined][]) {
+      if (v && v.trim()) set.add(loc);
     }
   }
   return [base, ...[...set].filter((l) => l !== base)];

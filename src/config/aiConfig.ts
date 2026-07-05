@@ -97,12 +97,24 @@ export interface AiConfig {
       negativePrompt: string;
       /** 긍정 프롬프트 "끝"에 붙는 V4.5 품질 태그(모델별 권장값). */
       qualityTags: string;
+      /**
+       * CG 전용 품질 태그(맨 끝 부착). 스프라이트를 그대로 베낀 그림이 아니라 "웹소설 표지 일러스트"
+       * 느낌을 내려고 배경·조명·구도 관련 태그를 강화한다(스프라이트/배경 공용 qualityTags 와 별개).
+       */
+      qualityTagsCg: string;
       /** img2img 기본 변형 강도(0~1). 낮을수록 원본 유지. */
       img2imgStrength: number;
       /** 그림체 참조(vibe transfer) 기본 강도(0~1). */
       vibeStrength: number;
       /** 그림체 참조 정보 추출량(0~1, 1=화풍 강하게 반영). */
       vibeInfoExtracted: number;
+      /**
+       * CG 캐릭터 참조 전용 vibe 강도/정보추출량 — 스프라이트를 "그대로 베끼기"가 아니라
+       * 머리색·의상 등 필수 특징만 느슨하게 반영하도록 스프라이트/배경 공용값보다 낮게 잡는다.
+       * (정보추출량을 낮추면 구도 위주로만 반영 → 투명/흰 배경이 CG 에 새어드는 것도 막아준다.)
+       */
+      cgVibeStrength: number;
+      cgVibeInfoExtracted: number;
       /**
        * 표정(Emotion Director) 적용 강도 = defry(0~5). 웹 Director 의 Normal/Slightly Weak/… 와 동일.
        * 0=Normal(가장 강하게 적용 → 눈색·머리 등 드리프트↑), 클수록 약하게 적용 → 원본 보존↑(표정 변화는 약해짐).
@@ -224,10 +236,18 @@ export const aiConfig: AiConfig = {
       // V4.5 Full 이면 'location, very aesthetic, masterpiece, no text'.
       // qualityToggle(서버 자동부착)에 의존하지 않고 직접 부착해 결정적으로 동작시킨다.
       qualityTags: 'location, masterpiece, no text, rating:general',
+      // CG는 스프라이트 복제가 아니라 "웹소설 표지 일러스트" 톤을 노린다 — 배경 존재를 강제하는
+      // detailed background 를 포함해 img2img 폐기 후에도 빈 배경으로 돌아가지 않게 한다.
+      qualityTagsCg:
+        'very aesthetic, beautiful detailed background, cinematic lighting, dramatic composition, ' +
+        'official art, absurdres, masterpiece, no text',
       img2imgStrength: 0.6,
       // 그림체 참조(vibe transfer) 기본 강도/정보추출량(여러 장 업로드 시 각 이미지에 공통 적용).
       vibeStrength: 0.6,
       vibeInfoExtracted: 1.0,
+      // CG 캐릭터 참조는 느슨하게 — 머리색·의상 등 "필수 특징"만 반영하고 구도·배경은 새로 그리게 한다.
+      cgVibeStrength: 0.4,
+      cgVibeInfoExtracted: 0.35,
       // 표정 강도 기본값: 1=Slightly Weak(약간 약하게 → 눈색 등 보존). 0 이면 가장 강하게(드리프트↑).
       emotionDefry: 1,
     },
@@ -258,21 +278,21 @@ export const aiConfig: AiConfig = {
   },
 };
 
-/** 현재 NovelAI 모드의 사이즈 세트. */
-export function naiActiveSizes(): { portrait: NaiSize; landscape: NaiSize; square: NaiSize } {
+/** 지정 모드(미지정 시 현재 전역 모드)의 사이즈 세트. 개별 호출에서 전역 모드를 안 건드리고 크기만 오버라이드할 때 쓴다(예: CG 고품질 토글). */
+export function naiActiveSizes(modeOverride?: NaiMode): { portrait: NaiSize; landscape: NaiSize; square: NaiSize } {
   const nai = aiConfig.image.novelai;
-  return nai.modes[nai.mode].sizes;
+  return nai.modes[modeOverride ?? nai.mode].sizes;
 }
 
-/** 현재 NovelAI 모드의 생성 스텝. */
-export function naiActiveSteps(): number {
+/** 지정 모드(미지정 시 현재 전역 모드)의 생성 스텝. */
+export function naiActiveSteps(modeOverride?: NaiMode): number {
   const nai = aiConfig.image.novelai;
-  return nai.modes[nai.mode].steps;
+  return nai.modes[modeOverride ?? nai.mode].steps;
 }
 
-/** 배경/CG 의 (가로,세로) 요청을 현재 NovelAI 모드 사이즈로 정규화. */
-export function naiSize(w: number, h: number): NaiSize {
-  const sizes = naiActiveSizes();
+/** 배경/CG 의 (가로,세로) 요청을 지정(또는 현재) NovelAI 모드 사이즈로 정규화. */
+export function naiSize(w: number, h: number, modeOverride?: NaiMode): NaiSize {
+  const sizes = naiActiveSizes(modeOverride);
   const ratio = w / h;
   if (ratio > aiConfig.image.landscapeRatio) return sizes.landscape;
   if (ratio < aiConfig.image.portraitRatio) return sizes.portrait;

@@ -13,7 +13,7 @@
 
 import { SceneBuilder, applyTag, splitJointSpeaker, type BuildResult } from './sceneBuilder';
 
-const FIELD = /^(장면|배경|BGM|복장|연출|CG|점프|글언어|목소리언어)\s*[:：]\s*(.*)$/i;
+const FIELD = /^(장면|배경|BGM|복장|연출|CG|점프|글언어|목소리언어|이름)\s*[:：]\s*(.*)$/i;
 
 export function parseText(input: string): BuildResult {
   const b = new SceneBuilder();
@@ -59,6 +59,7 @@ export function parseText(input: string): BuildResult {
         '점프': '#점프 ',
         '글언어': '#설정_글언어 ',
         '목소리언어': '#설정_목소리언어 ',
+        '이름': '#설정_이름 ',
       };
       applyTag(b, (map[key] ?? '#') + val);
       continue;

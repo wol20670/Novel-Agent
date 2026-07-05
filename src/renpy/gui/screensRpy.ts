@@ -68,19 +68,24 @@ const ITEM_SCREENS = String.raw`
 screen item_popup(img, caption):
     zorder -5
     add Solid("#00000073")
-    add img:
+    add img at item_popup_appear:
         fit "contain"
         ysize int(config.screen_height * 0.45)
         anchor (0.5, 0.5)
         pos (0.5, 0.42)
-        alpha 0.0 zoom 0.9
-        easein 0.22 alpha 1.0 zoom 1.0
     text caption:
         xalign 0.5
         ypos 0.72
         size gui.name_text_size
         color gui.accent_color
         outlines [ (absolute(2), "#000000", absolute(0), absolute(0)) ]
+
+## SL add 블록은 일반 프로퍼티(fit/ysize/anchor/pos)와 ATL 워퍼(easein)를 한 블록에 섞으면
+## "'easein' is not a keyword argument" 파싱 에러가 난다 — 페이드/줌 인 애니메이션은 반드시
+## 별도 transform 으로 분리해 at 으로 참조한다(아래 notify_appear 와 동일 패턴).
+transform item_popup_appear:
+    alpha 0.0 zoom 0.9
+    easein 0.22 alpha 1.0 zoom 1.0
 
 ## 보관함에서 다시보기 — 모달 라이트박스(닫기/Esc 로 종료). tag 없음 = 갤러리 위에 겹쳐 뜬다.
 screen item_lightbox(img, caption):
