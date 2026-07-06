@@ -5,7 +5,7 @@ import { collectUntranslated } from './generators/translate/collect';
 import { translateBatch } from './generators/translate';
 import { parseText, parseWorkbook } from './parser';
 import type { ScriptMeta } from './parser';
-import { putAsset, deleteAsset, clearAssets } from './storage/assetStore';
+import { putAsset, getAsset, deleteAsset, clearAssets } from './storage/assetStore';
 import { saveProject, loadProject, clearProject } from './storage/projectStore';
 import { SAMPLE_STORY } from './sample';
 import { exportProjectFile, importProjectFile } from './project/transfer';
@@ -1065,6 +1065,18 @@ export const useStore = create<State>((set, get) => {
           saveProject(project, assets);
         } catch (e) {
           flash((e as Error).message, 'error');
+        }
+        // 가져오기는 IndexedDB 로컬 복원만 하고 uploadAsset 경로를 안 타므로, 협업 중이면 여기서
+        // 직접 Storage 에도 올려야 상대방이 이 배경·CG·스프라이트를 받아갈 수 있다(안 하면 로컬에는
+        // 있는데 서버엔 없어서 상대방 화면에 영영 안 뜨는 문제).
+        if (get().collabEnabled) {
+          void (async () => {
+            for (const id of newIds) {
+              const blob = await getAsset(id);
+              if (blob) void collabPushAsset(id, blob);
+            }
+          })();
+          void collabPushProject(project);
         }
         flash(`프로젝트를 불러왔습니다: 장면 ${project.scenes.length}개 · 에셋 ${assetCount}개 복원.`);
       } catch (e) {

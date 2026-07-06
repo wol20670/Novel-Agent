@@ -80,14 +80,19 @@ export function roomKey(): string {
   return config.room.trim().toLowerCase();
 }
 
-/** Supabase 클라이언트 싱글턴. 준비 안 됐으면 null. */
+/**
+ * Supabase 클라이언트 싱글턴 — 페이지 생애주기 동안 단 한 번만 만들고 재연결 시에도 재사용한다.
+ * URL·anon key 는 빌드에 고정돼 다시 만들 이유가 없고, supabase-js 는 같은 storageKey 로
+ * createClient 를 반복 호출할 때마다 이전 GoTrueClient 인스턴스를 명시적으로 해제하지 않은 채
+ * 새로 등록해 "Multiple GoTrueClient instances" 경고가 재연결할수록 계속 쌓인다(예전엔 재연결마다
+ * 클라이언트를 null 로 지우고 다시 만들어서 이 문제가 있었음 — 이제 resetSupabaseChannels 는
+ * 채널만 정리, 클라이언트는 그대로 둠). 준비 안 됐으면 null.
+ */
 export function getSupabaseClient(): SupabaseClient | null {
   if (!isCollabReady()) return null;
   if (!client) {
     const { url, anonKey } = getEnvCredentials();
-    // 협업은 로그인을 안 하는 anon 전용 사용이라 세션 저장이 불필요 — 기본값대로 두면
-    // resetSupabaseClient() 로 재생성될 때마다 같은 storageKey 로 GoTrue 클라이언트가
-    // 중복 생성돼 "Multiple GoTrueClient instances" 경고가 뜬다.
+    // 협업은 로그인을 안 하는 anon 전용 사용이라 세션 저장이 불필요.
     client = createClient(url, anonKey, {
       auth: { persistSession: false, autoRefreshToken: false, storageKey: 'na-collab-noauth' },
     });
@@ -95,8 +100,8 @@ export function getSupabaseClient(): SupabaseClient | null {
   return client;
 }
 
-/** 설정 변경(재연결) 시 기존 채널을 정리하고 클라이언트를 다시 만들 수 있게 한다. */
-export function resetSupabaseClient(): void {
+/** 방/설정을 바꿔 재연결할 때 기존 Realtime 채널만 정리한다(클라이언트 자체는 재사용 — 위 참고). */
+export function resetSupabaseChannels(): void {
   if (client) {
     try {
       client.removeAllChannels();
@@ -104,5 +109,4 @@ export function resetSupabaseClient(): void {
       /* ignore */
     }
   }
-  client = null;
 }

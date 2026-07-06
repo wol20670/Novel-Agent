@@ -2,7 +2,7 @@
 // (순환 의존 방지: 다른 collab/* 모듈은 store.ts 를 직접 참조하지 않는다.)
 
 import type { Project } from '../types';
-import { isCollabReady, getCollabConfig, getSupabaseClient, resetSupabaseClient } from './supabaseClient';
+import { isCollabReady, getCollabConfig, getSupabaseClient, resetSupabaseChannels } from './supabaseClient';
 import {
   pushProject,
   pullProjectOnce,
@@ -40,7 +40,7 @@ function teardownChannels(): void {
 export async function startCollab(hooks: CollabHooks): Promise<void> {
   teardownChannels();
   resetSyncState();
-  resetSupabaseClient();
+  resetSupabaseChannels();
 
   if (!isCollabReady()) {
     // enabled 인데 준비가 안 됐다면(주로 이 빌드에 Supabase 접속 정보가 없는 경우) 명확히 에러로 표시.
@@ -79,10 +79,10 @@ export async function startCollab(hooks: CollabHooks): Promise<void> {
   hooks.setStatus('online');
 }
 
-/** 협업을 끈다 — 채널 해제, 클라이언트 정리. */
+/** 협업을 끈다 — 채널만 해제(클라이언트는 재사용을 위해 유지, supabaseClient.ts 참고). */
 export function stopCollab(): void {
   teardownChannels();
-  resetSupabaseClient();
+  resetSupabaseChannels();
 }
 
 export {
