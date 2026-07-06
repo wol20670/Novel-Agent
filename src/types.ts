@@ -217,6 +217,12 @@ export interface Project {
     outline?: boolean;
     outlineColor?: string;
     dialogueGradient?: boolean;
+    /**
+     * 본문(대사) 폰트 · 이름(화자) 폰트 — src/fonts/fontCatalog.ts 의 FontPreset id.
+     * 미지정이면 기본 폰트(나눔고딕). nameFontId 미지정이면 bodyFontId 를 따라간다.
+     */
+    bodyFontId?: string;
+    nameFontId?: string;
   };
 }
 

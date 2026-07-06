@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { downloadExcelTemplate, downloadTextTemplate } from '../template';
 import { GENRE_OPTIONS, DEFAULT_GENRE, resolveTheme } from '../renpy/gui';
@@ -6,6 +6,9 @@ import type { GenreId, GuiTheme } from '../renpy/gui';
 import { translateModeOf } from '../types';
 import { canvasMenuArt } from '../generators/image/canvasMenu';
 import { hasEnvCredentials, generateRoomCode } from '../collab';
+import { DEFAULT_FONT, getCachedCatalog, loadFontCatalog } from '../fonts/fontCatalog';
+import type { FontPreset } from '../fonts/fontCatalog';
+import { loadFontFace } from '../fonts/fontCache';
 import Spinner from './Spinner';
 import UploadButton from './UploadButton';
 
@@ -527,6 +530,117 @@ function ThemeStudio() {
   );
 }
 
+/** 폰트 id → 미리보기용 CSS font-family(로드 전/실패 시 undefined = 브라우저 기본 폰트). */
+function useFontFamily(id: string | undefined): string | undefined {
+  const [family, setFamily] = useState<string>();
+  useEffect(() => {
+    let alive = true;
+    setFamily(undefined);
+    loadFontFace(id).then((f) => {
+      if (alive) setFamily(f);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+  return family;
+}
+
+const FONT_PREVIEW_TEXT = '다람쥐 헌 쳇바퀴에 타고파 1234';
+const INHERIT_BODY = '__inherit__'; // 이름 폰트 select 의 "본문과 동일" 옵션 값(빈 문자열 대신 명시적 sentinel)
+
+/** 본문(대사)/이름(화자) 폰트 선택 — GCS 매니페스트(src/fonts/fontCatalog.ts)에서 목록을 받아온다. */
+function FontControls() {
+  const project = useStore((s) => s.project);
+  const update = useStore((s) => s.updateProjectMeta);
+  const ov = project.guiOverrides ?? {};
+  const setOv = (patch: Partial<NonNullable<typeof project.guiOverrides>>) =>
+    update({ guiOverrides: { ...(project.guiOverrides ?? {}), ...patch } });
+
+  const [fonts, setFonts] = useState<FontPreset[]>(getCachedCatalog());
+  useEffect(() => {
+    loadFontCatalog().then(setFonts);
+  }, []);
+  const customAvailable = fonts.length > 1; // 기본 폰트 1개뿐이면 매니페스트 로드 실패/미설정
+
+  const bodyId = ov.bodyFontId ?? DEFAULT_FONT.id;
+  const nameId = ov.nameFontId; // undefined = "본문과 동일"
+  const bodyFamily = useFontFamily(bodyId);
+  const nameFamily = useFontFamily(nameId ?? bodyId);
+
+  const grouped = useMemo(() => {
+    const byCat = new Map<string, FontPreset[]>();
+    for (const f of fonts) {
+      const list = byCat.get(f.category) ?? [];
+      list.push(f);
+      byCat.set(f.category, list);
+    }
+    return [...byCat.entries()];
+  }, [fonts]);
+
+  const optionsFor = (f: FontPreset) => (
+    <option key={f.id} value={f.id}>
+      {f.label}
+      {!f.fullHangul ? ' (이름·제목 권장)' : ''}
+    </option>
+  );
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="grid grid-cols-2 gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-gray-400">
+          본문(대사) 폰트
+          <select
+            className="field text-xs"
+            value={bodyId}
+            onChange={(e) => setOv({ bodyFontId: e.target.value === DEFAULT_FONT.id ? undefined : e.target.value })}
+          >
+            {grouped.map(([cat, list]) => (
+              <optgroup key={cat} label={cat}>
+                {list.map(optionsFor)}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-gray-400">
+          이름(화자) 폰트
+          <select
+            className="field text-xs"
+            value={nameId ?? INHERIT_BODY}
+            onChange={(e) => setOv({ nameFontId: e.target.value === INHERIT_BODY ? undefined : e.target.value })}
+          >
+            <option value={INHERIT_BODY}>본문과 동일</option>
+            {grouped.map(([cat, list]) => (
+              <optgroup key={cat} label={cat}>
+                {list.map(optionsFor)}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div
+          className="rounded border border-edge/60 px-2 py-1.5 text-sm truncate bg-black/10"
+          style={{ fontFamily: bodyFamily }}
+        >
+          {FONT_PREVIEW_TEXT}
+        </div>
+        <div
+          className="rounded border border-edge/60 px-2 py-1.5 text-sm truncate bg-black/10"
+          style={{ fontFamily: nameFamily }}
+        >
+          {FONT_PREVIEW_TEXT}
+        </div>
+      </div>
+      {!customAvailable && (
+        <p className="text-[10px] text-gray-500">
+          커스텀 폰트 목록을 못 불러왔습니다(오프라인이거나 미설정) — 기본 폰트(나눔고딕)만 사용됩니다.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** 대사창 불투명도 · 글자색 · 외곽선 · 이름색 조정(테마 위에 덮어씀). */
 function DialogueGuiControls() {
   const project = useStore((s) => s.project);
@@ -547,6 +661,7 @@ function DialogueGuiControls() {
   return (
     <div className="flex flex-col gap-2 pt-1 border-t border-edge/50">
       <span className="label">대사창 · 폰트 (인게임)</span>
+      <FontControls />
       <label className="flex items-center gap-2 text-[11px] text-gray-400">
         <span className="w-20 shrink-0">창 색·불투명</span>
         <input type="color" value={boxColor} onChange={(e) => setOv({ dialogueBoxColor: e.target.value })} className="w-6 h-6 rounded border border-edge bg-transparent shrink-0" title="대사창·선택지 배경색(기본 검정)" />
@@ -591,7 +706,14 @@ function DialogueGuiControls() {
             <input type="color" value={outlineColor} onChange={(e) => setOv({ outlineColor: e.target.value })} className="w-6 h-6 rounded border border-edge bg-transparent" />
           </label>
         )}
-        {(ov.dialogueBoxColor || ov.dialogueOpacity != null || ov.textColor || ov.nameColor || ov.outline || ov.outlineColor) && (
+        {(ov.dialogueBoxColor ||
+          ov.dialogueOpacity != null ||
+          ov.textColor ||
+          ov.nameColor ||
+          ov.outline ||
+          ov.outlineColor ||
+          ov.bodyFontId ||
+          ov.nameFontId) && (
           <button className="text-[10px] text-gray-500 hover:text-rose-600 ml-auto" onClick={() => update({ guiOverrides: undefined })}>
             기본값
           </button>

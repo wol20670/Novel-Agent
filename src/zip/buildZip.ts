@@ -10,6 +10,8 @@ import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
 import { canvasMenuArt, solidPng, buttonBgAssets, textboxGradientPng } from '../generators/image/canvasMenu';
 import { resolveTheme } from '../renpy/gui';
+import { loadFontCatalog, fontById, DEFAULT_FONT } from '../fonts/fontCatalog';
+import { ensureFontBlob, ensureFontLicense } from '../fonts/fontCache';
 
 async function blobForBackground(
   assetId: string | undefined,
@@ -157,12 +159,14 @@ export async function collectProjectFiles(
     out.push({ path: 'game/gui/textbox.png', data: await textboxGradientPng(boxColor, maxAlpha) });
   }
 
-  // 한글 폰트(나눔고딕, OFL) — Ren'Py 기본 폰트는 한글 글리프가 없다.
-  // 일본어(자막·음성 어느 쪽이든) 프로젝트에서만 Source Han Sans(≈2.9MB)를 함께 번들한다.
-  // gui.rpy(guiRpy)의 JP 폰트 참조 조건과 반드시 일치해야 한다(같은 규칙: ja ∈ text|voice).
+  // 한글 폰트 — Ren'Py 기본 폰트는 한글 글리프가 없다. 선택한 본문/이름 폰트(기본은 나눔고딕)를
+  // game/fonts/ 에 번들. 일본어(자막·음성 어느 쪽이든) 프로젝트에서만 Source Han Sans(≈2.9MB)도
+  // 함께 번들한다. gui.rpy(guiRpy)의 JP 폰트 참조 조건과 반드시 일치해야 한다(같은 규칙: ja ∈ text|voice).
   const japanese =
     effectiveTextLocales(project).includes('ja') || effectiveVoiceLocales(project).includes('ja');
-  for (const f of await koreanFontFiles(japanese)) out.push(f);
+  const fontResult = await selectedFontFiles(project.guiOverrides, japanese);
+  placeholders += fontResult.placeholders;
+  for (const f of fontResult.files) out.push(f);
 
   return { files: out, placeholders };
 }
@@ -179,28 +183,62 @@ export async function buildRenpyZip(project: Project): Promise<ZipResult> {
 }
 
 /**
- * 앱에 번들된 폰트 파일들. 실패 시 빈 배열(글자가 □ 로 보일 수 있음).
- * - NanumGothic: 한글·라틴 본문(Ren'Py 기본 폰트는 한글 글리프 없음).
- * - SourceHanSansLite: 일본어(かな·한자) 자막/UI 용. gui.rpy 의 FontGroup 이 일본어 범위만 이 폰트로 폴백한다.
- *   (NanumGothic 은 일본어 글리프가 없어 일본어 자막이 빈칸으로 나오는 문제 대응. 둘 다 SIL OFL 1.1.)
+ * 선택한 본문/이름 폰트(왼쪽 패널 GUI 설정, 기본은 나눔고딕 번들) + (일본어 프로젝트면)
+ * SourceHanSansLite 를 game/fonts/ 에 넣을 파일 목록으로 만든다.
+ * - 나눔고딕: 한글·라틴 본문(Ren'Py 기본 폰트는 한글 글리프 없음) — 항상 public/fonts/OFL.txt 포함.
+ * - SourceHanSansLite: 일본어(かな·한자) 자막/UI 용. gui.rpy 의 FontGroup 이 일본어 범위만 이 폰트로
+ *   폴백한다(나눔고딕은 일본어 글리프가 없어 자막이 빈칸으로 나오는 문제 대응). 둘 다 SIL OFL 1.1.
+ * - 커스텀(GCS) 폰트 다운로드 실패 시 기본 폰트로 자동 폴백(오프라인에도 항상 실행 가능한 zip 보장) —
+ *   이 경우 placeholders 카운트를 올려 호출 측 토스트("임시 에셋 N개 포함")에 반영한다.
  */
-async function koreanFontFiles(includeJapanese: boolean): Promise<ProjectFile[]> {
-  const base = import.meta.env.BASE_URL || '/';
-  try {
-    // JP 폰트는 일본어가 있을 때만 받아온다(없으면 fetch 자체를 건너뛰어 ≈2.9MB 절약).
-    const [font, license, jpFont] = await Promise.all([
-      fetch(`${base}fonts/NanumGothic.ttf`),
-      fetch(`${base}fonts/OFL.txt`),
-      includeJapanese ? fetch(`${base}fonts/SourceHanSansLite.ttf`) : Promise.resolve(null),
-    ]);
-    const files: ProjectFile[] = [];
-    if (font.ok) files.push({ path: 'game/fonts/NanumGothic.ttf', data: await font.blob() });
-    if (jpFont?.ok) files.push({ path: 'game/fonts/SourceHanSansLite.ttf', data: await jpFont.blob() });
-    if (license.ok) files.push({ path: 'game/fonts/OFL.txt', data: await license.text() });
-    return files;
-  } catch {
-    return [];
+async function selectedFontFiles(
+  guiOverrides: Project['guiOverrides'],
+  includeJapanese: boolean,
+): Promise<{ files: ProjectFile[]; placeholders: number }> {
+  await loadFontCatalog(); // fontById/fontGamePath 가 정확히 조회할 수 있도록 매니페스트를 먼저 채운다.
+
+  const bodyId = guiOverrides?.bodyFontId;
+  const nameId = guiOverrides?.nameFontId ?? bodyId;
+  const ids = [...new Set([bodyId, nameId].filter((v): v is string => !!v))];
+  const wanted = ids.length ? ids.map((id) => fontById(id)) : [DEFAULT_FONT];
+
+  const files: ProjectFile[] = [];
+  const seenFiles = new Set<string>(); // 본문=이름 동일 폰트 등 중복 방지
+  let placeholders = 0;
+  let needDefaultLicense = false;
+
+  for (const preset of wanted) {
+    let actual = preset;
+    let blob = await ensureFontBlob(preset.id);
+    if (!blob && !preset.bundled) {
+      // 커스텀 폰트 다운로드 실패 → 기본 폰트로 대체(실행 가능한 zip 보장).
+      console.warn(`[fonts] ${preset.label} 다운로드 실패 — 기본 폰트로 대체`);
+      actual = DEFAULT_FONT;
+      blob = await ensureFontBlob(DEFAULT_FONT.id);
+      placeholders++;
+    }
+    if (!blob || seenFiles.has(actual.file)) continue;
+    seenFiles.add(actual.file);
+    files.push({ path: `game/fonts/${actual.file}`, data: blob });
+    if (actual.bundled) {
+      needDefaultLicense = true;
+    } else {
+      const license = await ensureFontLicense(actual.id);
+      if (license) files.push({ path: `game/fonts/${actual.id}-OFL.txt`, data: license });
+    }
   }
+
+  const base = import.meta.env.BASE_URL || '/';
+  if (needDefaultLicense) {
+    const license = await fetch(`${base}fonts/OFL.txt`).catch(() => null);
+    if (license?.ok) files.push({ path: 'game/fonts/OFL.txt', data: await license.text() });
+  }
+  if (includeJapanese) {
+    const jp = await fetch(`${base}fonts/SourceHanSansLite.ttf`).catch(() => null);
+    if (jp?.ok) files.push({ path: 'game/fonts/SourceHanSansLite.ttf', data: await jp.blob() });
+  }
+
+  return { files, placeholders };
 }
 
 /** 브라우저 다운로드 트리거. */

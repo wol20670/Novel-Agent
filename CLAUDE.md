@@ -54,6 +54,22 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
   "연결 실패"로 정확히 뜨는지 재확인할 것(과거 여기서 버그 있었음 — Supabase 클라이언트가 네트워크
   오류를 조용히 `{error}` 로 반환하고 throw 하지 않아서 상태가 잘못 "연결됨"으로 뜬 적 있음).
 
+## 폰트 프리셋(본문/이름 폰트 선택 — src/fonts/)
+- 폰트는 앱에 번들하지 않고 **사용자 소유 GCS 공개 버킷**에서 온디맨드로 받아 IndexedDB에 캐싱한다
+  (기본 폰트 나눔고딕만 `public/fonts`에 로컬 번들 — 네트워크 없어도 항상 동작). 목록은 버킷의
+  `manifest.json`(데이터)이라 **폰트 추가는 앱 재배포 없이** `scripts/upload-fonts.mjs` 재실행만으로 끝.
+- `src/fonts/fontCatalog.ts`(매니페스트 fetch + id→경로 변환, 항상 동기 — `resolveTheme`/
+  `withGuiOverrides`가 이미 전역에서 동기로 쓰이고 있어 여기서 async로 바꾸면 파급이 큼) /
+  `src/fonts/fontCache.ts`(바이너리 fetch+IndexedDB 캐시+FontFace 등록, 비동기).
+- `Project.guiOverrides.bodyFontId`/`nameFontId`(id, 미지정=기본)가 `withGuiOverrides`
+  (`src/renpy/gui/theme.ts`)를 거쳐 `gui.text_font`/`gui.name_text_font`로, `buildZip.ts`의
+  `selectedFontFiles`를 거쳐 실제 `.ttf`(+OFL 라이선스)로 각각 반영된다 — **두 경로가 항상 일치해야
+  함**(하나만 바꾸면 gui.rpy가 zip에 없는 파일을 참조하게 됨).
+- `VITE_FONTS_BASE_URL`(버킷 base URL, `.env.example`) 미설정/오프라인이면 기본 폰트만 조용히 폴백
+  (에러 없음). 커스텀 폰트 다운로드 실패 시에도 기본 폰트로 자동 대체 + placeholders 카운트 반영.
+- 버킷 준비(1회, gsutil): 공개(uniform + `allUsers` Object Viewer) + CORS(`scripts/gcs-fonts-cors.json`,
+  origin `*` — 공개 정적 폰트라 문제없음). 업로드는 `node scripts/upload-fonts.mjs gs://<버킷>`.
+
 ## 데이터·구조
 - 저장: 프로젝트 메타=localStorage, 바이너리 에셋=IndexedDB. **앱 작업물은 브라우저별**(기기 이동은 앱 📤내보내기/📥가져오기 `.npproj.zip`). 키도 기기별 재입력.
 - 핵심 파일: 상태=`src/store.ts`(zustand), Ren'Py 출력=`src/renpy/generate.ts`, AI 설정 단일소스=`src/config/aiConfig.ts`(OpenAI `chat` 블록만 존재).

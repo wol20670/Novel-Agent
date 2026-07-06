@@ -3,6 +3,8 @@
 // gui.rpy / screens.rpy / 메뉴 아트를 전부 결정한다. 컴파일러(guiRpy/screensRpy)는
 // 이 객체만 읽으므로, 겉모습은 장르마다 완전히 달라지되 생성된 코드는 항상 유효하다.
 
+import { fontGamePath } from '../../fonts/fontCatalog';
+
 export type GenreId = 'romance' | 'horror' | 'scifi' | 'thriller' | 'slice';
 
 /** Canvas 메뉴 배경 스타일(브라우저 canvasMenu 가 해석). */
@@ -255,6 +257,12 @@ export interface GuiOverrides {
    * 매우 투명한 시네마틱 대사창에 적합. dialogueOpacity 가 그라데이션 하단의 최대 진하기.
    */
   dialogueGradient?: boolean;
+  /**
+   * 본문(대사) 폰트 · 이름(화자) 폰트 — src/fonts/fontCatalog.ts 의 FontPreset id.
+   * 미지정이면 기본 폰트(나눔고딕). nameFontId 미지정이면 bodyFontId 를 따라간다.
+   */
+  bodyFontId?: string;
+  nameFontId?: string;
 }
 
 /** 테마 위에 사용자 GUI 조정(대사창 색·불투명도·글자색·이름색)을 덮어쓴 새 테마. */
@@ -263,6 +271,9 @@ export function withGuiOverrides(theme: GuiTheme, ov?: GuiOverrides): GuiTheme {
   const boxOn = ov.dialogueOpacity != null || !!ov.dialogueBoxColor;
   const boxColor = ov.dialogueBoxColor ?? '#000000';
   const boxAlpha = ov.dialogueOpacity ?? 0.4; // 패널 표시값·buildZip 기본과 일치
+  // 폰트: 미지정이면 테마 기본값 그대로(회귀 없음). 메뉴/UI(interfaceFont)는 본문 폰트를 따라간다.
+  const bodyFont = ov.bodyFontId ? fontGamePath(ov.bodyFontId) : theme.textFont;
+  const nameFont = ov.bodyFontId || ov.nameFontId ? fontGamePath(ov.nameFontId ?? ov.bodyFontId) : theme.nameFont;
   return {
     ...theme,
     dialogueBox: boxOn ? hexWithAlpha(boxColor, boxAlpha) : theme.dialogueBox,
@@ -270,5 +281,8 @@ export function withGuiOverrides(theme: GuiTheme, ov?: GuiOverrides): GuiTheme {
     choiceIdleBg: boxOn ? hexWithAlpha(boxColor, Math.min(boxAlpha + 0.1, 0.9)) : theme.choiceIdleBg,
     dialogueText: ov.textColor || theme.dialogueText,
     nameText: ov.nameColor || theme.nameText,
+    textFont: bodyFont,
+    interfaceFont: bodyFont,
+    nameFont,
   };
 }
