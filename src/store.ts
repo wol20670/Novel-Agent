@@ -972,12 +972,17 @@ export const useStore = create<State>((set, get) => {
     resetAll: () => {
       clearProject();
       clearAssets().catch(() => {});
+      const empty = emptyProject();
       set({
-        project: emptyProject(),
+        project: empty,
         assets: {},
         selectedSceneId: null,
         activeTab: 'scenes',
       });
+      // 협업 중이면 초기화도 밀어줘야 상대방도 같이 비워지고, 내가 새로고침해도 원격의 옛
+      // 데이터를 다시 받아와 초기화가 무효화되지 않는다(로컬만 지우면 remote 는 그대로라
+      // 재접속 pull 때 덮어써짐).
+      if (get().collabEnabled) void collabPushProject(empty);
       flash('초기화했습니다.');
     },
 
