@@ -1,6 +1,15 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { effectiveExpressions, emojiFor, characterOutfits, type Expression, type Scene } from '../types';
+import {
+  effectiveExpressions,
+  effectiveTextLocales,
+  baseLocaleOf,
+  LOCALE_LABEL,
+  emojiFor,
+  characterOutfits,
+  type Expression,
+  type Scene,
+} from '../types';
 import { backgroundKey, bgmKey, hasBgm } from '../renpy/generate';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
@@ -323,7 +332,12 @@ function CharacterCard({ name }: { name: string }) {
   const setOutfitAppearance = useStore((s) => s.setOutfitAppearance);
   const setOutfitExclude = useStore((s) => s.setOutfitExclude);
   const removeOutfit = useStore((s) => s.removeOutfit);
+  const setI18nName = useStore((s) => s.setCharacterI18nName);
   const exprList = effectiveExpressions(useStore((s) => s.project.expressions));
+  // 이름표 번역칸은 자막 언어가(원문 외에) 실제로 켜져 있을 때만 보인다 — 꺼져 있으면 내보내기에
+  // 반영될 곳이 없어 입력칸만 있어도 혼란스럽다(자동 번역 켜면 자연히 나타남).
+  const project = useStore((s) => s.project);
+  const nameLocales = effectiveTextLocales(project).filter((l) => l !== baseLocaleOf(project));
 
   // 현재 편집 중인 의상(기본/추가 의상). 업로드·썸네일이 모두 이 의상을 대상으로 한다.
   const [outfit, setOutfit] = useState('기본');
@@ -367,6 +381,23 @@ function CharacterCard({ name }: { name: string }) {
         onChange={(e) => updateChar(name, { personality: e.target.value })}
         title="그림 분위기를 ChatGPT 에 설명할 때 참고할 메모입니다."
       />
+
+      {/* 이름표 번역 — 자막 언어를 바꿨을 때 보일 이름. 비우면 원문(대본 그대로) 표시. */}
+      {nameLocales.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+          <span className="text-[10px] text-gray-500 mr-0.5">🌐 이름표</span>
+          {nameLocales.map((loc) => (
+            <input
+              key={loc}
+              className="field text-xs flex-1 min-w-[90px]"
+              placeholder={`${LOCALE_LABEL[loc]} 이름 (예: Hanjisu)`}
+              value={c.i18nName?.[loc] ?? ''}
+              onChange={(e) => setI18nName(name, loc, e.target.value)}
+              title={`자막을 ${LOCALE_LABEL[loc]}로 바꿨을 때 표시할 이름표. 비우면 원문("${name}") 그대로 표시됩니다.`}
+            />
+          ))}
+        </div>
+      )}
 
       {/* 의상(복장) 탭 — 대본 #복장 캐릭터:의상 으로 장면별 지정. 의상마다 표정 세트가 따로 업로드된다. */}
       <div className="flex flex-wrap items-center gap-1 mb-1.5">

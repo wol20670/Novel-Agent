@@ -312,7 +312,9 @@ function characterDefs(
   const nameColor = (hue: string) => enforceContrast(hue, dialogueBox, 4.5);
   const lines = ['# 자동 생성: 캐릭터 정의', ''];
   for (const c of project.characters) {
-    lines.push(`define ${ids.get(c.name)} = Character("${esc(c.name)}", color="${nameColor(c.color)}")`);
+    // _() 로 감싸야 translationFiles() 가 내보내는 이름표 번역(old/new)이 자막 언어 전환 시 적용된다
+    // (define 은 init 시 1회 실행이라, 감싸지 않으면 언어를 바꿔도 이름표는 원문에 고정됨).
+    lines.push(`define ${ids.get(c.name)} = Character(_("${esc(c.name)}"), color="${nameColor(c.color)}")`);
   }
   if (project.characters.length === 0) lines.push('# (등장 캐릭터 없음)');
   if (joints.size) {
@@ -697,6 +699,8 @@ function voicesRpy(project: Project): string {
  * game/tl/<lang>/script.rpy — 자막 번역(Ren'Py 공식 번역 시스템). base 를 제외한 각 언어의
  * i18n 검수본을 `translate <lang> strings:` 의 old/new 로 내보낸다. 번역이 없는 대사는 블록을
  * 생략 → 런타임에 원문(base)으로 자연 폴백한다. 대사 텍스트는 script.rpy 의 say 와 동일하게 esc.
+ * 캐릭터 이름표(i18nName, 에셋 탭에서 설정)도 같은 strings 블록에 함께 실어 보낸다 — characterDefs()
+ * 가 이름을 `_()` 로 감싸둔 것과 짝을 이룬다. 합동 대사 화자(둘 이상 동시) 라벨은 대상 아님(범위 밖).
  */
 function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] {
   const base = baseLocaleOf(project);
@@ -717,6 +721,14 @@ function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] 
         seen.add(key);
         body.push(`    old "${key}"`, `    new "${esc(tr)}"`, '');
       }
+    }
+    for (const c of project.characters) {
+      const tr = c.i18nName?.[loc];
+      if (!tr) continue;
+      const key = esc(c.name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      body.push(`    old "${key}"`, `    new "${esc(tr)}"`, '');
     }
     if (!body.length) continue; // 이 언어 번역이 하나도 없으면 파일 생략
     const content = [`# 자동 생성: ${LOCALE_LABEL[loc]} 자막 번역`, `translate ${rl} strings:`, '', ...body].join('\n');

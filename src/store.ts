@@ -102,6 +102,8 @@ interface State {
   removeOutfit: (charName: string, name: string) => Promise<void>;
   /** 이 캐릭터의 모든 업로드 입화를 비운다(표정 세트는 유지, 다시 업로드 가능). */
   clearCharacterSprites: (name: string) => Promise<void>;
+  /** 캐릭터 이름표의 언어별 번역 설정(에셋 탭 캐릭터 카드). 비우면(value='') 그 언어 번역을 지운다. */
+  setCharacterI18nName: (charName: string, locale: Locale, value: string) => void;
 
   // 표정 세트 편집 (추가 / 이름변경 / 삭제). '기본'은 고정(이름변경·삭제 불가).
   addExpression: (name: string) => void;
@@ -650,6 +652,23 @@ export const useStore = create<State>((set, get) => {
                 }
               : c,
           ),
+        },
+      }));
+      autoSave();
+    },
+
+    setCharacterI18nName: (charName, locale, value) => {
+      const v = value.trim();
+      set((s) => ({
+        project: {
+          ...s.project,
+          characters: s.project.characters.map((c) => {
+            if (c.name !== charName) return c;
+            const i18nName = { ...c.i18nName };
+            if (v) i18nName[locale] = v;
+            else delete i18nName[locale];
+            return { ...c, i18nName: Object.keys(i18nName).length ? i18nName : undefined };
+          }),
         },
       }));
       autoSave();
@@ -1231,6 +1250,7 @@ function mergeChars(prev: Character[], next: Character[]): Character[] {
           appearance: old.appearance ?? c.appearance,
           personality: old.personality ?? c.personality,
           isProtagonist: old.isProtagonist ?? c.isProtagonist,
+          i18nName: old.i18nName ?? c.i18nName,
         }
       : c;
   });

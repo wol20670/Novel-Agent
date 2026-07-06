@@ -136,6 +136,12 @@ export interface Character {
    * 에셋 창의 스프라이트 관리에서도 제외한다. 대사 이름표·분기에는 정상 참여.
    */
   isProtagonist?: boolean;
+  /**
+   * 언어별 캐릭터 이름표(선택) — 자막 언어를 바꿨을 때 표시할 이름. base(원문) 언어는
+   * name 자체가 담당하므로 여기엔 담지 않는다. 없으면 그 언어에서도 원문 이름 그대로(폴백).
+   * 에셋 탭의 캐릭터 카드에서 편집(다른 자막 언어가 켜져 있을 때만 입력칸이 보인다).
+   */
+  i18nName?: I18nText;
 }
 
 export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice' | 'item';
