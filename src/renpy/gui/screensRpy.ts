@@ -68,7 +68,7 @@ const ITEM_SCREENS = String.raw`
 screen item_popup(img, caption):
     zorder -5
     add Solid("#00000073")
-    add img:
+    add img at transform:
         fit "contain"
         ysize int(config.screen_height * 0.45)
         anchor (0.5, 0.5)
