@@ -5,7 +5,7 @@ import { collectUntranslated } from './generators/translate/collect';
 import { translateBatch } from './generators/translate';
 import { parseText, parseWorkbook } from './parser';
 import type { ScriptMeta } from './parser';
-import { putAsset, deleteAsset, getAssetUrl, clearAssets } from './storage/assetStore';
+import { putAsset, deleteAsset, clearAssets } from './storage/assetStore';
 import { saveProject, loadProject, clearProject } from './storage/projectStore';
 import { SAMPLE_STORY } from './sample';
 import { exportProjectFile, importProjectFile } from './project/transfer';
@@ -19,6 +19,19 @@ import {
   disconnectFolder as fsDisconnectFolder,
   syncProjectToFolder,
 } from './project/folderSync';
+import {
+  startCollab,
+  stopCollab,
+  loadCollabConfig,
+  persistCollabConfig,
+  pushProject as collabPushProject,
+  pushAsset as collabPushAsset,
+  ensureAsset as collabEnsureAsset,
+  updatePresence,
+  type CollabStatus,
+  type PeerPresence,
+  type CollabHooks,
+} from './collab';
 
 export type Tab = 'scenes' | 'assets' | 'renpy';
 
@@ -127,6 +140,21 @@ interface State {
    */
   openaiKey: string;
   setOpenaiKey: (key: string) => void;
+
+  /**
+   * 협업(실시간 공유, 가벼운 버전) — 2인 전제. Supabase 접속 정보(URL·anon key)는 빌드에
+   * 내장되어 있어 사용자는 "방 코드"(6자리)와 이름만 다룬다. ⚠️ 보안 경계 아님: 방 코드를 아는
+   * 사람은 누구나 읽고 쓸 수 있다. 저장 시점(자동저장)마다 전체 프로젝트가 동기화되고, 같은
+   * 순간 서로 다른 값을 저장하면 나중 저장이 이긴다(last-write-wins) — 프레즌스로 충돌을 피한다.
+   */
+  collabEnabled: boolean;
+  collabRoom: string;
+  collabName: string;
+  collabStatus: CollabStatus;
+  /** 지금 같은 방에 있는 상대방들(나 자신 제외, 저장 대상 아님). */
+  collabPeers: PeerPresence[];
+  setCollabConfig: (patch: Partial<{ room: string; displayName: string; enabled: boolean }>) => Promise<void>;
+
   save: () => void;
   hydrate: () => void;
   resetAll: () => void;
@@ -164,8 +192,42 @@ export const useStore = create<State>((set, get) => {
           flash((e as Error).message, 'error');
         }
       }
+      // 협업이 켜져 있으면 같은 저장 시점에 상대방에게도 반영(가벼운 공유 — 키 입력마다 아님).
+      if (get().collabEnabled) void collabPushProject(project);
     }, 600);
   };
+
+  // 협업 프레즌스로 방송할 "나 지금 여기 봄" 스냅샷.
+  const presenceSelf = (): Omit<PeerPresence, 'clientId'> => {
+    const s = get();
+    const scene = s.project.scenes.find((sc) => sc.id === s.selectedSceneId);
+    return {
+      name: s.collabName.trim() || '익명',
+      activeTab: s.activeTab,
+      selectedSceneId: s.selectedSceneId,
+      sceneTitle: scene?.title,
+    };
+  };
+
+  // 협업 라이프사이클(startCollab/stopCollab)이 store 를 건드릴 때 쓰는 훅 묶음.
+  const collabHooks = (): CollabHooks => ({
+    getProject: () => get().project,
+    applyRemoteProject: (project) => {
+      set((s) => {
+        const stillExists = project.scenes.some((sc) => sc.id === s.selectedSceneId);
+        return { project, selectedSceneId: stillExists ? s.selectedSceneId : (project.scenes[0]?.id ?? null) };
+      });
+      // autoSave()/pushProject 를 다시 타지 않는 별도 경로 — 로컬 캐시만 직접 갱신(에코 방지).
+      try {
+        saveProject(project, get().assets);
+      } catch {
+        /* ignore */
+      }
+    },
+    setStatus: (status) => set({ collabStatus: status }),
+    setPeers: (peers) => set({ collabPeers: peers }),
+    getPresenceSelf: presenceSelf,
+  });
 
   const setScenes = (scenes: Scene[]) => {
     set((s) => ({ project: { ...s.project, scenes } }));
@@ -198,6 +260,7 @@ export const useStore = create<State>((set, get) => {
     }
     const id = assetId();
     await putAsset(id, file);
+    if (get().collabEnabled) void collabPushAsset(id, file); // 상대방이 필요할 때 받아가도록 Storage 에도 올림
     const meta: AssetMeta = {
       id,
       kind,
@@ -215,6 +278,11 @@ export const useStore = create<State>((set, get) => {
     project: emptyProject(),
     assets: {},
     openaiKey: '',
+    collabEnabled: false,
+    collabRoom: '',
+    collabName: '',
+    collabStatus: 'off',
+    collabPeers: [],
     activeTab: 'scenes',
     selectedSceneId: null,
     busy: {},
@@ -381,8 +449,14 @@ export const useStore = create<State>((set, get) => {
       flash('모든 장면을 승인했습니다.');
     },
 
-    selectScene: (id) => set({ selectedSceneId: id }),
-    setActiveTab: (t) => set({ activeTab: t }),
+    selectScene: (id) => {
+      set({ selectedSceneId: id });
+      updatePresence(presenceSelf()); // collab 꺼져 있으면 내부적으로 no-op
+    },
+    setActiveTab: (t) => {
+      set({ activeTab: t });
+      updatePresence(presenceSelf());
+    },
 
     updateProjectMeta: (patch) => {
       set((s) => ({ project: { ...s.project, ...patch } }));
@@ -832,7 +906,32 @@ export const useStore = create<State>((set, get) => {
       flash(`${which === 'main' ? '메인' : '게임'} 메뉴 배경 업로드를 해제했습니다(Canvas 생성으로 복귀).`);
     },
 
-    assetUrl: (id) => getAssetUrl(id ?? ''),
+    assetUrl: async (id) => {
+      if (!id) return undefined;
+      // 로컬(IndexedDB)에 있으면 바로, 없고 협업이 켜져 있으면 Storage 에서 받아와 캐싱 후 반환.
+      const blob = await collabEnsureAsset(id);
+      return blob ? URL.createObjectURL(blob) : undefined;
+    },
+
+    setCollabConfig: async (patch) => {
+      const cur = get();
+      const merged = persistCollabConfig({
+        room: patch.room ?? cur.collabRoom,
+        displayName: patch.displayName ?? cur.collabName,
+        enabled: patch.enabled ?? cur.collabEnabled,
+      });
+      set({
+        collabRoom: merged.room,
+        collabName: merged.displayName,
+        collabEnabled: merged.enabled,
+      });
+      if (merged.enabled) {
+        await startCollab(collabHooks());
+      } else {
+        stopCollab();
+        set({ collabStatus: 'off', collabPeers: [] });
+      }
+    },
 
     setOpenaiKey: (key) => {
       set({ openaiKey: key });
@@ -870,6 +969,14 @@ export const useStore = create<State>((set, get) => {
       getConnectedFolderName().then((name) => {
         if (name) set({ folderName: name });
       });
+      // 협업 설정 복원 — 켜져 있었다면 자동으로 재접속.
+      const collab = loadCollabConfig();
+      set({
+        collabEnabled: collab.enabled,
+        collabRoom: collab.room,
+        collabName: collab.displayName,
+      });
+      if (collab.enabled) void startCollab(collabHooks());
     },
 
     resetAll: () => {

@@ -21,6 +21,8 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
   const importBg = useStore((s) => s.importBackground);
   const importBgm = useStore((s) => s.importBgm);
   const bgUrl = useAssetUrl(scene.backgroundAssetId);
+  // 협업 — 지금 이 장면을 보고 있는 상대방(있으면 편집 충돌을 피하라는 신호).
+  const peersHere = useStore((s) => s.collabPeers.filter((p) => p.selectedSceneId === sceneId));
 
   return (
     <div
@@ -40,6 +42,14 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => update(sceneId, { title: e.target.value })}
         />
+        {peersHere.length > 0 && (
+          <span
+            className="chip border-emerald-500/40 text-emerald-600 text-[10px] shrink-0"
+            title={`${peersHere.map((p) => p.name).join(', ')}님이 지금 이 장면을 보고 있어요 — 동시 수정을 피하세요`}
+          >
+            🟢 {peersHere.map((p) => p.name).join(', ')} 편집 중
+          </span>
+        )}
       </div>
 
       <div className="flex gap-1 mb-3">

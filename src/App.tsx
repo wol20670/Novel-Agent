@@ -4,6 +4,7 @@ import LeftPanel from './components/LeftPanel';
 import CenterPanel from './components/CenterPanel';
 import RightPanel from './components/RightPanel';
 import Stepper from './components/Stepper';
+import CollabBadge from './components/CollabBadge';
 
 const TOAST_STYLE: Record<string, string> = {
   info: 'bg-accent2 text-white',
@@ -39,6 +40,7 @@ export default function App() {
           >
             {openaiKey ? '● AI 텍스트 기능 켜짐' : '○ OpenAI 키 없음'}
           </span>
+          <CollabBadge />
           <span className="text-gray-400">
             장면 <b className="text-gray-200">{project.scenes.length}</b> · 승인{' '}
             <b className="text-emerald-600">{approved}</b>
