@@ -253,7 +253,9 @@ export function resolveItems(project: Project): ItemRef[] {
 const indent = (n: number) => '    '.repeat(n);
 
 function esc(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ').trim();
+  // %(변수)s 같은 보간 문법이 아닌 순수 문자(예: "할인 20%")는 %% 로 이스케이프해야 한다.
+  // 안 하면 Ren'Py 가 그 줄을 표시할 때 "Unknown string format code" 로 런타임에 죽는다(실제 SDK로 확인).
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%').replace(/\n/g, ' ').trim();
 }
 
 /**
@@ -653,6 +655,7 @@ function escRpyText(s: string): string {
     .replace(/"/g, '\\"')
     .replace(/\[/g, '[[')
     .replace(/\{/g, '{{')
+    .replace(/%/g, '%%')
     .replace(/\r?\n/g, '\\n')
     .trim();
 }
@@ -739,7 +742,7 @@ function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] 
 
 /** Ren'Py 문자열 리터럴 이스케이프 — 태그({…})·보간([…])은 보존하고 따옴표·역슬래시·개행만 처리. */
 function escLit(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n');
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%').replace(/\r?\n/g, '\\n');
 }
 
 /**
