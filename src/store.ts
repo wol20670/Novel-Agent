@@ -26,7 +26,6 @@ import {
   persistCollabConfig,
   pushProject as collabPushProject,
   pushAsset as collabPushAsset,
-  ensureAsset as collabEnsureAsset,
   updatePresence,
   type CollabStatus,
   type PeerPresence,
@@ -108,8 +107,6 @@ interface State {
   addExpression: (name: string) => void;
   renameExpression: (oldName: string, newName: string) => void;
   removeExpression: (name: string) => Promise<void>;
-
-  assetUrl: (id: string | undefined) => Promise<string | undefined>;
 
   /** 아이템(소품) 팝업 이미지 업로드 — 이름 기준 공유(project.itemAssetIds). */
   uploadItem: (name: string, file: File) => Promise<void>;
@@ -904,13 +901,6 @@ export const useStore = create<State>((set, get) => {
       });
       autoSave();
       flash(`${which === 'main' ? '메인' : '게임'} 메뉴 배경 업로드를 해제했습니다(Canvas 생성으로 복귀).`);
-    },
-
-    assetUrl: async (id) => {
-      if (!id) return undefined;
-      // 로컬(IndexedDB)에 있으면 바로, 없고 협업이 켜져 있으면 Storage 에서 받아와 캐싱 후 반환.
-      const blob = await collabEnsureAsset(id);
-      return blob ? URL.createObjectURL(blob) : undefined;
     },
 
     setCollabConfig: async (patch) => {

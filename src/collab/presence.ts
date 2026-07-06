@@ -16,8 +16,24 @@ let channel: RealtimeChannel | null = null;
 let clientId = '';
 let trackTimer: ReturnType<typeof setTimeout> | null = null;
 
+const CLIENT_ID_LS = 'na_collab_client_id';
+
+// 새로고침마다 새 id를 뽑으면 이전 세션이 "나"로 제외되지 못해 유령 접속자로 남는다.
+// 같은 브라우저는 localStorage 에 저장된 id 를 재사용해 이 문제를 막는다.
 function ensureClientId(): string {
-  if (!clientId) clientId = `c_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+  if (clientId) return clientId;
+  try {
+    const saved = localStorage.getItem(CLIENT_ID_LS);
+    if (saved) return (clientId = saved);
+  } catch {
+    /* ignore */
+  }
+  clientId = `c_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+  try {
+    localStorage.setItem(CLIENT_ID_LS, clientId);
+  } catch {
+    /* ignore */
+  }
   return clientId;
 }
 

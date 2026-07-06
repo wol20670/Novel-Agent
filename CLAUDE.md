@@ -41,6 +41,14 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
   라우팅이 없어 필수는 아니지만 방어적으로 있음).
 - Supabase 쪽 필요 설정(테이블 스키마·Storage 버킷·RLS off·Realtime publication)은 대시보드에서
   수동으로 해야 함 — 자동화 불가. 정확한 SQL·순서는 세션 히스토리(또는 사용자에게 문의) 참고.
+  **`projects` 테이블은 RLS off로 충분하지만 Storage `assets` 버킷은 RLS를 끌 수 없다**
+  (storage.objects는 항상 RLS 적용) — anon 역할에 select/insert/update 정책을 반드시 추가해야
+  에셋 업로드·다운로드가 됨(안 하면 콘솔에 `new row violates row-level security policy` 400).
+- 프레즌스(`src/collab/presence.ts`)의 clientId는 localStorage 에 영속화돼 있다 — 새로고침마다
+  새 id를 뽑으면 이전 세션이 "나"로 제외되지 못해 유령 접속자가 누적되는 버그가 있었음(수정됨).
+- 협업을 끄고 같은 방 코드로 재입장하면 이전 프로젝트가 그대로 복원된다 — **의도된 동작**(방 데이터가
+  방 코드를 PK로 서버에 저장돼 있음, 끄기는 채널 해제일 뿐 방 삭제가 아님). 방을 비우려면 대시보드에서
+  해당 room 행/에셋을 직접 지워야 함(앱에 초기화 UI 없음).
 - 에코(무한루프) 방지가 `src/collab/sync.ts`의 핵심 — 버전 카운터로 자기 자신이 보낸 변경을
   걸러낸다. 이 로직 건드릴 땐 반드시 실제 네트워크 오류 상황(가짜 URL 등)으로 상태 배지가
   "연결 실패"로 정확히 뜨는지 재확인할 것(과거 여기서 버그 있었음 — Supabase 클라이언트가 네트워크

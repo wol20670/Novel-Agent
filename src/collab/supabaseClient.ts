@@ -85,7 +85,12 @@ export function getSupabaseClient(): SupabaseClient | null {
   if (!isCollabReady()) return null;
   if (!client) {
     const { url, anonKey } = getEnvCredentials();
-    client = createClient(url, anonKey);
+    // 협업은 로그인을 안 하는 anon 전용 사용이라 세션 저장이 불필요 — 기본값대로 두면
+    // resetSupabaseClient() 로 재생성될 때마다 같은 storageKey 로 GoTrue 클라이언트가
+    // 중복 생성돼 "Multiple GoTrueClient instances" 경고가 뜬다.
+    client = createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false, storageKey: 'na-collab-noauth' },
+    });
   }
   return client;
 }
