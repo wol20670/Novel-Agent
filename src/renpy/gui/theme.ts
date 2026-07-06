@@ -271,9 +271,10 @@ export function withGuiOverrides(theme: GuiTheme, ov?: GuiOverrides): GuiTheme {
   const boxOn = ov.dialogueOpacity != null || !!ov.dialogueBoxColor;
   const boxColor = ov.dialogueBoxColor ?? '#000000';
   const boxAlpha = ov.dialogueOpacity ?? 0.4; // 패널 표시값·buildZip 기본과 일치
-  // 폰트: 미지정이면 테마 기본값 그대로(회귀 없음). 메뉴/UI(interfaceFont)는 본문 폰트를 따라간다.
+  // 폰트: 미지정이면 테마 기본값 그대로(회귀 없음). 메뉴/UI(interfaceFont)는 본문 폰트를 따라가고,
+  // 이름 폰트는 별도 지정 없으면 본문 폰트를 따라간다.
   const bodyFont = ov.bodyFontId ? fontGamePath(ov.bodyFontId) : theme.textFont;
-  const nameFont = ov.bodyFontId || ov.nameFontId ? fontGamePath(ov.nameFontId ?? ov.bodyFontId) : theme.nameFont;
+  const nameFont = ov.nameFontId ? fontGamePath(ov.nameFontId) : bodyFont;
   return {
     ...theme,
     dialogueBox: boxOn ? hexWithAlpha(boxColor, boxAlpha) : theme.dialogueBox,

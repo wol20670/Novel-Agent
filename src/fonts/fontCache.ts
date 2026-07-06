@@ -46,6 +46,10 @@ async function putCached(id: string, blob: Blob): Promise<void> {
 // 동시에 같은 폰트를 여러 번(미리보기+내보내기 등) 요청해도 다운로드는 1회만 나가도록 dedupe.
 const inFlight = new Map<string, Promise<Blob | undefined>>();
 
+// 번들(로컬) 폰트는 세션 내내 안 바뀌므로 세션 동안 1회만 fetch 하고 재사용(같은 화면에서
+// 미리보기+내보내기가 반복 호출해도 매번 네트워크를 안 타게).
+const bundledCache = new Map<string, Promise<Blob | undefined>>();
+
 /**
  * 폰트 id → 실제 폰트 바이너리. 기본(번들) 폰트는 public/fonts 에서, 그 외(GCS 커스텀)는
  * IndexedDB 캐시 → 없으면 GCS 다운로드 후 캐싱. 실패 시 undefined(호출 측이 기본 폰트로 폴백).
@@ -54,13 +58,19 @@ export async function ensureFontBlob(id: string | undefined): Promise<Blob | und
   const preset = fontById(id);
 
   if (preset.bundled) {
-    try {
-      const base = import.meta.env.BASE_URL || '/';
-      const res = await fetch(`${base}fonts/${preset.file}`);
-      return res.ok ? await res.blob() : undefined;
-    } catch {
-      return undefined;
-    }
+    const cached = bundledCache.get(preset.id);
+    if (cached) return cached;
+    const p = (async () => {
+      try {
+        const base = import.meta.env.BASE_URL || '/';
+        const res = await fetch(`${base}fonts/${preset.file}`);
+        return res.ok ? await res.blob() : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    bundledCache.set(preset.id, p);
+    return p;
   }
 
   const cached = await getCached(preset.id).catch(() => undefined);

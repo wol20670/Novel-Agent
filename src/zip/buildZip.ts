@@ -53,6 +53,11 @@ export interface ProjectFile {
 export async function collectProjectFiles(
   project: Project,
 ): Promise<{ files: ProjectFile[]; placeholders: number }> {
+  // generateRenpyFiles 가 gui.rpy 를 만들며 폰트 경로(fontGamePath)를 동기로 조회하므로, 그 전에
+  // 매니페스트를 반드시 채워둬야 한다 — 안 그러면 커스텀 폰트를 골랐어도 카탈로그가 비어 있어
+  // 조용히 기본 폰트 경로로 생성되고, 뒤의 selectedFontFiles 는 카탈로그가 찬 뒤라 실제 커스텀
+  // 폰트 파일을 번들해서 gui.rpy 와 game/fonts/ 내용이 서로 어긋나는 버그가 있었음.
+  await loadFontCatalog();
   const { files: textFiles, refs, sprites } = generateRenpyFiles(project);
   const out: ProjectFile[] = textFiles.map((f) => ({ path: f.path, data: f.content }));
 
@@ -185,7 +190,8 @@ export async function buildRenpyZip(project: Project): Promise<ZipResult> {
 /**
  * 선택한 본문/이름 폰트(왼쪽 패널 GUI 설정, 기본은 나눔고딕 번들) + (일본어 프로젝트면)
  * SourceHanSansLite 를 game/fonts/ 에 넣을 파일 목록으로 만든다.
- * - 나눔고딕: 한글·라틴 본문(Ren'Py 기본 폰트는 한글 글리프 없음) — 항상 public/fonts/OFL.txt 포함.
+ * - 나눔고딕: 한글·라틴 본문(Ren'Py 기본 폰트는 한글 글리프 없음) — 본문/이름 어느 한쪽이라도 기본
+ *   폰트를 쓰면(bodyFontId 미지정이 기본) 나눔고딕과 public/fonts/OFL.txt 를 함께 포함한다.
  * - SourceHanSansLite: 일본어(かな·한자) 자막/UI 용. gui.rpy 의 FontGroup 이 일본어 범위만 이 폰트로
  *   폴백한다(나눔고딕은 일본어 글리프가 없어 자막이 빈칸으로 나오는 문제 대응). 둘 다 SIL OFL 1.1.
  * - 커스텀(GCS) 폰트 다운로드 실패 시 기본 폰트로 자동 폴백(오프라인에도 항상 실행 가능한 zip 보장) —
@@ -195,48 +201,52 @@ async function selectedFontFiles(
   guiOverrides: Project['guiOverrides'],
   includeJapanese: boolean,
 ): Promise<{ files: ProjectFile[]; placeholders: number }> {
-  await loadFontCatalog(); // fontById/fontGamePath 가 정확히 조회할 수 있도록 매니페스트를 먼저 채운다.
+  // 호출 측(collectProjectFiles)이 gui.rpy 생성 전에 이미 로드해두지만, 이 함수만 독립 호출될 가능성도
+  // 방어(loadFontCatalog 는 캐시돼 있으면 즉시 반환이라 비용 없음).
+  await loadFontCatalog();
 
-  const bodyId = guiOverrides?.bodyFontId;
+  // bodyFontId 미지정이어도 실제로는 기본 폰트가 쓰이므로(theme.ts withGuiOverrides), 여기서도
+  // 항상 기본 폰트를 wanted 에 포함시켜야 gui.rpy 가 참조하는 파일과 번들 내용이 일치한다.
+  const bodyId = guiOverrides?.bodyFontId ?? DEFAULT_FONT.id;
   const nameId = guiOverrides?.nameFontId ?? bodyId;
-  const ids = [...new Set([bodyId, nameId].filter((v): v is string => !!v))];
-  const wanted = ids.length ? ids.map((id) => fontById(id)) : [DEFAULT_FONT];
+  const wanted = [...new Set([bodyId, nameId])].map((id) => fontById(id));
+
+  // 본문/이름 폰트를 병렬로 확보(각각 독립적인 GCS 다운로드일 수 있음).
+  const resolved = await Promise.all(
+    wanted.map(async (preset) => {
+      let actual = preset;
+      let blob = await ensureFontBlob(preset.id);
+      let placeholder = false;
+      if (!blob && !preset.bundled) {
+        // 커스텀 폰트 다운로드 실패 → 기본 폰트로 대체(실행 가능한 zip 보장).
+        console.warn(`[fonts] ${preset.label} 다운로드 실패 — 기본 폰트로 대체`);
+        actual = DEFAULT_FONT;
+        blob = await ensureFontBlob(DEFAULT_FONT.id);
+        placeholder = !!blob; // 대체 폰트마저 실패하면 아무것도 안 넣으므로 placeholder 로 세지 않는다.
+      }
+      const license = blob && !actual.bundled ? await ensureFontLicense(actual.id) : undefined;
+      return { actual, blob, license, placeholder };
+    }),
+  );
 
   const files: ProjectFile[] = [];
   const seenFiles = new Set<string>(); // 본문=이름 동일 폰트 등 중복 방지
   let placeholders = 0;
-  let needDefaultLicense = false;
-
-  for (const preset of wanted) {
-    let actual = preset;
-    let blob = await ensureFontBlob(preset.id);
-    if (!blob && !preset.bundled) {
-      // 커스텀 폰트 다운로드 실패 → 기본 폰트로 대체(실행 가능한 zip 보장).
-      console.warn(`[fonts] ${preset.label} 다운로드 실패 — 기본 폰트로 대체`);
-      actual = DEFAULT_FONT;
-      blob = await ensureFontBlob(DEFAULT_FONT.id);
-      placeholders++;
-    }
-    if (!blob || seenFiles.has(actual.file)) continue;
-    seenFiles.add(actual.file);
-    files.push({ path: `game/fonts/${actual.file}`, data: blob });
-    if (actual.bundled) {
-      needDefaultLicense = true;
-    } else {
-      const license = await ensureFontLicense(actual.id);
-      if (license) files.push({ path: `game/fonts/${actual.id}-OFL.txt`, data: license });
-    }
+  for (const r of resolved) {
+    if (!r.blob || seenFiles.has(r.actual.file)) continue;
+    seenFiles.add(r.actual.file);
+    files.push({ path: `game/fonts/${r.actual.file}`, data: r.blob });
+    if (r.license) files.push({ path: `game/fonts/${r.actual.id}-OFL.txt`, data: r.license });
+    if (r.placeholder) placeholders++;
   }
 
   const base = import.meta.env.BASE_URL || '/';
-  if (needDefaultLicense) {
-    const license = await fetch(`${base}fonts/OFL.txt`).catch(() => null);
-    if (license?.ok) files.push({ path: 'game/fonts/OFL.txt', data: await license.text() });
-  }
-  if (includeJapanese) {
-    const jp = await fetch(`${base}fonts/SourceHanSansLite.ttf`).catch(() => null);
-    if (jp?.ok) files.push({ path: 'game/fonts/SourceHanSansLite.ttf', data: await jp.blob() });
-  }
+  const [licenseRes, jpRes] = await Promise.all([
+    seenFiles.has(DEFAULT_FONT.file) ? fetch(`${base}fonts/OFL.txt`).catch(() => null) : null,
+    includeJapanese ? fetch(`${base}fonts/SourceHanSansLite.ttf`).catch(() => null) : null,
+  ]);
+  if (licenseRes?.ok) files.push({ path: 'game/fonts/OFL.txt', data: await licenseRes.text() });
+  if (jpRes?.ok) files.push({ path: 'game/fonts/SourceHanSansLite.ttf', data: await jpRes.blob() });
 
   return { files, placeholders };
 }
