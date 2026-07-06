@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> 🔵 **[`HANDOFF.md`](./HANDOFF.md)** 를 먼저 읽으세요 — 2026-07-07 세션 반영 사항(협업 버그·폰트 프리셋·이름표 번역·Ren'Py 버그) + 낡은 `feat/cg-i18n-docs-refresh` 브랜치 무시 안내. 다음 세션에서 최신 상태 확인 후 이 줄과 HANDOFF.md 삭제할 것.
+
 Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite + React + TS + zustand + Tailwind).
 100% 클라이언트(백엔드 없음), BYO 키. 한국어 코드베이스.
 
@@ -69,6 +71,23 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
   (에러 없음). 커스텀 폰트 다운로드 실패 시에도 기본 폰트로 자동 대체 + placeholders 카운트 반영.
 - 버킷 준비(1회, gsutil): 공개(uniform + `allUsers` Object Viewer) + CORS(`scripts/gcs-fonts-cors.json`,
   origin `*` — 공개 정적 폰트라 문제없음). 업로드는 `node scripts/upload-fonts.mjs gs://<버킷>`.
+
+## Ren'Py 생성 주의사항 (실제 SDK로만 잡히는 버그들 — lint로도 못 잡는 것 있음)
+- **화면 언어(screen language)의 `add x:` 블록엔 애니메이션 ATL(`easein`/`linear` 등 워퍼)을 못 쓴다** —
+  정적 속성(`alpha 0.0`, `pos (...)` 등 즉시값)만 허용. 애니메이션을 쓰려면 `add x at transform:`
+  으로 감싸거나 별도 `transform NAME:` 을 정의해 `at NAME`으로 참조해야 함. 안 지키면 Ren'Py가
+  `'easein' is not a keyword argument or valid child of the add statement`로 컴파일 자체가 안 됨
+  (`src/renpy/gui/screensRpy.ts`, 2026-07-07 수정).
+- **대사·이름·UI 텍스트의 리터럴 `%`는 반드시 `%%`로 이스케이프**(`esc`/`escRpyText`/`escLit`,
+  `src/renpy/generate.ts`) — 안 하면 "할인 20%" 같은 문장이 있을 때 Ren'Py가 그 줄을 표시하는
+  **순간(런타임)** `Unknown string format code`로 죽는다. **`npm run typecheck`·lint 둘 다 이 버그를
+  못 잡는다** — 실제 SDK로 그 줄까지 진행시켜봐야 드러남.
+- 이런 종류의 버그를 검증할 땐 코드만 보고 판단하지 말 것: `scripts/gen-lint.ts` 패턴으로
+  `generateRenpyFiles()` 출력을 임시 폴더에 쓰고(`npx esbuild <스크립트>.ts --bundle --platform=node
+  --format=esm --outfile=<번들>.mjs && node <번들>.mjs` — `node`로 `.ts`를 바로 실행하면 확장자 없는
+  상대 import를 ESM 리졸버가 못 찾아 실패하니 반드시 esbuild로 먼저 번들링), 실제 Ren'Py SDK로
+  `renpy.exe <폴더> lint` 실행해 확인. `%` 류(런타임 전용) 버그는 lint로도 안 잡히므로 필요하면
+  Ren'Py 소스(`<SDK>/renpy/*.py`)를 직접 grep해서 실제 동작을 확인.
 
 ## 데이터·구조
 - 저장: 프로젝트 메타=localStorage, 바이너리 에셋=IndexedDB. **앱 작업물은 브라우저별**(기기 이동은 앱 📤내보내기/📥가져오기 `.npproj.zip`). 키도 기기별 재입력.
