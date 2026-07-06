@@ -17,30 +17,16 @@ export default function LeftPanel() {
   const save = useStore((s) => s.save);
   const resetAll = useStore((s) => s.resetAll);
   const clearGenerated = useStore((s) => s.clearGeneratedAssets);
-  const apiKey = useStore((s) => s.apiKey);
-  const setApiKey = useStore((s) => s.setApiKey);
   const openaiKey = useStore((s) => s.openaiKey);
   const setOpenaiKey = useStore((s) => s.setOpenaiKey);
-  const elevenKey = useStore((s) => s.elevenKey);
-  const setElevenKey = useStore((s) => s.setElevenKey);
-  const promptLang = useStore((s) => s.promptLang);
-  const setPromptLang = useStore((s) => s.setPromptLang);
   const translateMode = translateModeOf(project);
   const setTranslateMode = useStore((s) => s.setTranslateMode);
   const exportProject = useStore((s) => s.exportProject);
   const importProject = useStore((s) => s.importProject);
-  const folderSupported = useStore((s) => s.folderSupported);
-  const archiveFolderName = useStore((s) => s.archiveFolderName);
-  const archiveReady = useStore((s) => s.archiveReady);
-  const connectArchive = useStore((s) => s.connectArchive);
-  const verifyArchive = useStore((s) => s.verifyArchive);
-  const disconnectArchive = useStore((s) => s.disconnectArchive);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const projFileRef = useRef<HTMLInputElement>(null);
-  const [showKey, setShowKey] = useState(false);
   const [showOaiKey, setShowOaiKey] = useState(false);
-  const [showElevenKey, setShowElevenKey] = useState(false);
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -64,7 +50,7 @@ export default function LeftPanel() {
   const onClearGenerated = () => {
     if (
       confirm(
-        '생성된 배경·캐릭터 입화·CG·BGM·메뉴 이미지를 모두 삭제합니다.\n(대본·캐릭터 설정·표정/의상 정의·그림체 참조는 유지)\n계속할까요?',
+        '업로드한 배경·캐릭터 입화·CG·BGM·메뉴 이미지를 모두 삭제합니다.\n(대본·캐릭터 설정·표정/의상 정의는 유지)\n계속할까요?',
       )
     )
       clearGenerated();
@@ -88,9 +74,9 @@ export default function LeftPanel() {
         <button
           className="btn-ghost text-[11px] text-gray-400 hover:text-rose-500"
           onClick={onClearGenerated}
-          title="대본·캐릭터 설정·그림체 참조는 두고, 생성된 배경·입화·CG·BGM·메뉴 이미지만 삭제"
+          title="대본·캐릭터 설정은 두고, 업로드한 배경·입화·CG·BGM·메뉴 이미지만 삭제"
         >
-          🧹 생성물 초기화 (대본·설정 유지)
+          🧹 에셋 초기화 (대본·설정 유지)
         </button>
         <div className="flex gap-2">
           <button
@@ -168,435 +154,75 @@ export default function LeftPanel() {
       <ProjectMeta />
       <Divider />
 
-      {/* NovelAI 키 */}
+      {/* OpenAI 키 — 자동 번역 · AI 테마가 공유 */}
       <section className="flex flex-col gap-2">
-        <h2 className="section-title">NovelAI 이미지 API · 선택</h2>
+        <h2 className="section-title">OpenAI 키 · 선택 (번역 · AI 테마)</h2>
         <p className="text-[11px] text-gray-500 leading-snug">
-          키가 있으면 <code className="text-accent">NovelAI Diffusion V4.5</code>로 실제 이미지를 생성합니다(서브컬쳐/애니
-          일러스트 고품질). 없으면 Canvas 임시 이미지로 오프라인 동작합니다. NovelAI 계정 설정의{' '}
-          <b className="text-gray-400">persistent token(pst-…)</b>을 넣으세요. <b className="text-gray-400">키는 이
-          브라우저에만 저장</b>되며 외부로 전송되지 않습니다.
+          이미지·음악은 이제 앱이 생성하지 않습니다(ChatGPT/Suno 등에서 만든 파일을 아래 "에셋" 탭에 업로드하세요).
+          이 키는 텍스트 전용(<code className="text-accent">gpt-4o-mini</code>) 기능 — 대본 자동 번역, AI GUI 테마
+          생성에만 쓰입니다. <b className="text-gray-400">키는 이 브라우저에만 저장</b>되며 외부로 전송되지 않습니다.
         </p>
         <div className="flex gap-2">
           <input
-            type={showKey ? 'text' : 'password'}
+            type={showOaiKey ? 'text' : 'password'}
             className="field flex-1"
-            placeholder="pst-..."
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="sk-..."
+            value={openaiKey}
+            onChange={(e) => setOpenaiKey(e.target.value)}
           />
-          <button className="btn-ghost" onClick={() => setShowKey((v) => !v)}>
-            {showKey ? '숨김' : '표시'}
+          <button className="btn-ghost" onClick={() => setShowOaiKey((v) => !v)}>
+            {showOaiKey ? '숨김' : '표시'}
           </button>
         </div>
         <div
-          className={`text-[11px] flex items-center gap-1.5 ${apiKey ? 'text-emerald-600' : 'text-gray-500'}`}
+          className={`text-[11px] flex items-center gap-1.5 ${openaiKey ? 'text-emerald-600' : 'text-gray-500'}`}
         >
-          <span className={`w-1.5 h-1.5 rounded-full ${apiKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
-          {apiKey ? '키 저장됨 · NovelAI 모드' : '키 없음 · 오프라인(Canvas) 모드'}
+          <span className={`w-1.5 h-1.5 rounded-full ${openaiKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
+          {openaiKey ? '키 저장됨 · AI 텍스트 기능 켜짐' : '키 없음 · 텍스트 기능 꺼짐'}
         </div>
 
-        {/* 프롬프트 입력 언어 + OpenAI 키(한국어 변환·테마용) */}
-        <div className="flex flex-col gap-2 pt-1 border-t border-edge/50">
-          <div className="flex flex-col gap-1">
-            <span className="label">프롬프트 입력 언어</span>
-            <div className="flex gap-1">
+        {/* 자동 번역 모드 — off(기본)/fast/quality. off 가 아니면 장면 탭에 "전체 자동 번역" 버튼이 뜬다. */}
+        <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
+          <span className="label">자동 번역 (대사·지문 → 영어·일본어)</span>
+          <div className="flex gap-1">
+            {(
+              [
+                ['off', '사용 안 함'],
+                ['fast', '번역(저품질)'],
+                ['quality', '번역(고품질)'],
+              ] as const
+            ).map(([m, lbl]) => (
               <button
-                onClick={() => setPromptLang('ko')}
-                title="한국어로 적으면 gpt-4o-mini 가 영문 단부루 태그로 변환 (OpenAI 키 필요)"
-                className={`flex-1 text-[11px] py-1 rounded border transition-colors ${
-                  promptLang === 'ko' ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-500 hover:text-gray-300'
+                key={m}
+                onClick={() => setTranslateMode(m)}
+                className={`chip flex-1 ${
+                  translateMode === m
+                    ? 'border-accent text-accent bg-accent/10'
+                    : 'border-edge text-gray-500 hover:text-gray-300'
                 }`}
               >
-                🇰🇷 한국어 → 영문 변환
+                {lbl}
               </button>
-              <button
-                onClick={() => setPromptLang('en')}
-                title="영어 단부루 태그를 변환 없이 바로 NovelAI 로 전송 (OpenAI 키 불필요)"
-                className={`flex-1 text-[11px] py-1 rounded border transition-colors ${
-                  promptLang === 'en' ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                🔤 영어 태그 그대로
-              </button>
-            </div>
-            <p className="text-[10px] text-gray-500 leading-snug">
-              {promptLang === 'ko'
-                ? '한국어로 적으면 gpt-4o-mini 가 단부루 영문 태그로 변환합니다(아래 OpenAI 키 필요 · 장당 ~$0.0002 · 캐릭터당 1회 캐시).'
-                : '영어 단부루 태그를 변환 없이 바로 NovelAI 로 보냅니다(GPT 미사용 · OpenAI 키 불필요). 예: 1girl, solo, silver hair, school uniform'}
-              {' '}품질 프리픽스·감정·구조 태그는 어느 쪽이든 자동 부착됩니다.
+            ))}
+          </div>
+          {translateMode === 'quality' && (
+            <p className="text-[11px] text-amber-600">
+              ⚠️ 고품질(gpt-4o)은 API 비용이 더 큽니다. 필요할 때만 쓰세요.
             </p>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <span className="label">OpenAI 키 · 선택 (한국어 변환 · AI 테마)</span>
-            <div className="flex gap-2">
-              <input
-                type={showOaiKey ? 'text' : 'password'}
-                className="field flex-1"
-                placeholder="sk-..."
-                value={openaiKey}
-                onChange={(e) => setOpenaiKey(e.target.value)}
-              />
-              <button className="btn-ghost" onClick={() => setShowOaiKey((v) => !v)}>
-                {showOaiKey ? '숨김' : '표시'}
-              </button>
-            </div>
-            <div
-              className={`text-[11px] flex items-center gap-1.5 ${
-                promptLang === 'ko' && openaiKey ? 'text-emerald-600' : 'text-gray-500'
-              }`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  promptLang === 'ko' && openaiKey ? 'bg-emerald-400' : 'bg-gray-600'
-                }`}
-              />
-              {promptLang === 'en'
-                ? '영어 모드 · 변환 안 함'
-                : openaiKey
-                  ? '한국어 → 영문 변환 ON'
-                  : '변환 OFF · 한국어 원문 전달 (키 입력 권장)'}
-            </div>
-          </div>
-
-          {/* 자동 번역 모드 — off(기본)/fast/quality. off 가 아니면 장면 탭에 "전체 자동 번역" 버튼이 뜬다. */}
-          <div className="flex flex-col gap-1">
-            <span className="label">자동 번역 (대사·지문 → 영어·일본어)</span>
-            <div className="flex gap-1">
-              {(
-                [
-                  ['off', '사용 안 함'],
-                  ['fast', '번역(저품질)'],
-                  ['quality', '번역(고품질)'],
-                ] as const
-              ).map(([m, lbl]) => (
-                <button
-                  key={m}
-                  onClick={() => setTranslateMode(m)}
-                  className={`chip flex-1 ${
-                    translateMode === m
-                      ? 'border-accent text-accent bg-accent/10'
-                      : 'border-edge text-gray-500 hover:text-gray-300'
-                  }`}
-                >
-                  {lbl}
-                </button>
-              ))}
-            </div>
-            {translateMode === 'quality' && (
-              <p className="text-[11px] text-amber-600">
-                ⚠️ 고품질(gpt-4o)은 API 비용이 더 큽니다. 필요할 때만 쓰세요.
-              </p>
-            )}
-            {translateMode !== 'off' && (
-              <p className="text-[11px] text-gray-500">
-                장면 탭 상단의 <b>🌐 전체 자동 번역</b> 버튼으로 실행됩니다(빈 칸만 채움, OpenAI 키 필요).
-              </p>
-            )}
-          </div>
-        </div>
-
-        <NaiModeSelector />
-      </section>
-
-      {/* ElevenLabs 음악(BGM) 토큰 */}
-      <section className="flex flex-col gap-2">
-        <h2 className="section-title">🎵 ElevenLabs 음악(BGM) API · 선택</h2>
-        <p className="text-[11px] text-gray-500 leading-snug">
-          키가 있으면 <code className="text-accent">ElevenLabs Music</code>으로 실제 BGM(instrumental·가사 없음)을
-          생성합니다(오른쪽 장면 미리보기의 <b className="text-gray-400">음악 생성</b> 버튼에 연동). 없으면 오프라인
-          합성(synth)으로 동작합니다. <b className="text-gray-400">라이선스 음원 학습 → 게임 상업 배포 허용(유료
-          플랜)</b>. NovelAI 처럼 브라우저 직접 호출이라 개발 서버(dev)에서만 동작하며, 키는 이 브라우저에만
-          저장됩니다.
-        </p>
-        <div className="flex gap-2">
-          <input
-            type={showElevenKey ? 'text' : 'password'}
-            className="field flex-1"
-            placeholder="ElevenLabs API 키 (xi-api-key)"
-            value={elevenKey}
-            onChange={(e) => setElevenKey(e.target.value)}
-          />
-          <button className="btn-ghost" onClick={() => setShowElevenKey((v) => !v)}>
-            {showElevenKey ? '숨김' : '표시'}
-          </button>
-        </div>
-        <div
-          className={`text-[11px] flex items-center gap-1.5 ${elevenKey ? 'text-emerald-600' : 'text-gray-500'}`}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${elevenKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
-          {elevenKey ? '키 저장됨 · ElevenLabs BGM 모드' : '키 없음 · 오프라인 합성(synth) 모드'}
-        </div>
-      </section>
-
-      <BatchGen />
-
-      <BgBatchGen />
-
-      {/* 이미지 보관 폴더 */}
-      {folderSupported && (
-        <section className="flex flex-col gap-2">
-          <h2 className="section-title">📁 이미지 보관 폴더 · 선택</h2>
-          <p className="text-[11px] text-gray-500 leading-snug">
-            폴더를 연결하면 <b className="text-gray-400">AI 로 생성한 배경·캐릭터 입화</b>가 생성될 때마다 그
-            폴더에 자동 저장됩니다(<code className="text-accent">backgrounds/</code>,{' '}
-            <code className="text-accent">characters/</code> 로 분류, 타임스탬프 파일명). 재생성해도 이전
-            이미지가 폴더에 그대로 남아 나중에 다시 고를 수 있습니다.
-          </p>
-          {archiveFolderName ? (
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-2">
-                <div className={`text-[11px] flex items-center gap-1.5 flex-1 min-w-0 ${archiveReady ? 'text-emerald-600' : 'text-amber-500'}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${archiveReady ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                  <span className="truncate">보관 중: {archiveFolderName}</span>
-                </div>
-                <button className="btn-ghost text-[11px]" onClick={connectArchive} title="다른 폴더로 변경">
-                  변경
-                </button>
-                <button className="btn-ghost text-[11px] text-gray-500" onClick={disconnectArchive}>
-                  해제
-                </button>
-              </div>
-              {!archiveReady && (
-                <button
-                  className="btn-primary text-[11px]"
-                  onClick={verifyArchive}
-                  title="리로드 후 폴더 쓰기 권한이 해제됨 — 클릭해 다시 허용해야 저장됩니다"
-                >
-                  ⚠️ 폴더 권한 허용 (저장 활성화)
-                </button>
-              )}
-            </div>
-          ) : (
-            <button className="btn-ghost" onClick={connectArchive}>
-              📂 보관 폴더 연결
-            </button>
           )}
-        </section>
-      )}
+          {translateMode !== 'off' && (
+            <p className="text-[11px] text-gray-500">
+              장면 탭 상단의 <b>🌐 전체 자동 번역</b> 버튼으로 실행됩니다(빈 칸만 채움, OpenAI 키 필요).
+            </p>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
 
 function Divider() {
   return <div className="h-px bg-edge/60" />;
-}
-
-const NAI_MODE_OPTS: { key: 'free' | 'high'; label: string; hint: string }[] = [
-  { key: 'free', label: '무료', hint: 'Opus 무제한 무료 (≤1MP: 832×1216 / 1216×832)' },
-  { key: 'high', label: '고품질', hint: '큰 해상도(1024×1536 등)로 더 선명 · Anlas 소모' },
-];
-
-/** NovelAI 생성 모드 선택 — 무료(Opus 무제한) / 고품질(큰 해상도, Anlas). 모든 생성에 적용. */
-function NaiModeSelector() {
-  const mode = useStore((s) => s.naiMode);
-  const setMode = useStore((s) => s.setNaiMode);
-  const bgMethod = useStore((s) => s.bgRemovalMethod);
-  const setBgMethod = useStore((s) => s.setBgRemovalMethod);
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="label">생성 모드</span>
-      <div className="flex gap-1">
-        {NAI_MODE_OPTS.map((o) => (
-          <button
-            key={o.key}
-            onClick={() => setMode(o.key)}
-            title={o.hint}
-            className={`flex-1 text-[11px] py-1 rounded border transition-colors ${
-              mode === o.key
-                ? 'border-accent text-accent bg-accent/10'
-                : 'border-edge text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-      <p className="text-[10px] text-gray-500 leading-snug">
-        {NAI_MODE_OPTS.find((o) => o.key === mode)?.hint}. <b className="text-gray-400">무료</b>로 구성·일관성을
-        확인하고, 최종본만 <b className="text-gray-400">고품질</b>로 재생성하면 Anlas 를 아낄 수 있어요.
-      </p>
-      <span className="label mt-1">스프라이트 누끼(투명 PNG)</span>
-      <div className="flex gap-1">
-        {(
-          [
-            { key: 'browser', label: '빠름', hint: '브라우저 flood-fill · Anlas 0 · 즉시 · 단순 배경에 최적' },
-            { key: 'ai', label: 'AI', hint: 'ML 세그멘테이션(MODNet) · Anlas 0 · 색 충돌 없음 · 첫 1회 모델 다운로드(~수십 MB)' },
-            { key: 'novelai', label: 'NovelAI', hint: 'Director 툴 누끼 · 고품질이지만 장당 Anlas 소모(예: ~65)' },
-            { key: 'none', label: '안 함', hint: '흰 배경 그대로 · 직접 후처리할 때' },
-          ] as const
-        ).map((o) => (
-          <button
-            key={o.key}
-            onClick={() => setBgMethod(o.key)}
-            title={o.hint}
-            className={`flex-1 text-[11px] py-1 rounded border transition-colors ${
-              bgMethod === o.key ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-      <p className="text-[10px] text-gray-500 leading-snug">
-        {bgMethod === 'browser'
-          ? '브라우저 flood-fill 로 흰 배경 제거(Anlas 0·즉시). 단순 배경에 최적이나, 흰 옷·가장자리 색이 닿으면 약함.'
-          : bgMethod === 'ai'
-            ? 'AI 세그멘테이션(MODNet)으로 인물만 분리(Anlas 0). 색 충돌 없어 흰 옷도 안전 · 권장. 첫 1회만 모델 다운로드(이후 캐시).'
-            : bgMethod === 'novelai'
-              ? 'NovelAI Director 툴로 누끼(고품질, 머리카락 경계 강함) — 단 장당 Anlas 소모.'
-              : '흰 배경 그대로 둡니다(Anlas 0). 외부 툴로 직접 누끼할 때만.'}
-      </p>
-    </div>
-  );
-}
-
-/** DB 태그를 무작위 조합해 미소녀 입화를 멈출 때까지 1장씩(무료) 생성하는 패널. */
-function BatchGen() {
-  const running = useStore((s) => s.batchRunning);
-  const results = useStore((s) => s.batchResults);
-  const start = useStore((s) => s.startBatchGen);
-  const stop = useStore((s) => s.stopBatchGen);
-  const upscale = useStore((s) => s.upscaleResult);
-  const busy = useStore((s) => s.busy);
-  return (
-    <section className="flex flex-col gap-2">
-      <h2 className="section-title">🎲 랜덤 미소녀 생성</h2>
-      <p className="text-[11px] text-gray-500 leading-snug">
-        DB 태그를 무작위 조합해 <b className="text-gray-400">멈출 때까지 1장씩 무료</b>로 계속 생성합니다(브라우저
-        누끼 · Anlas 0). 결과는 아래 + 소스 보관 폴더(<code className="text-accent">random/</code>)에 저장돼요.
-      </p>
-      <button
-        onClick={() => (running ? stop() : start())}
-        className={`text-xs py-1.5 rounded border font-medium transition-colors ${
-          running
-            ? 'border-red-500 text-red-400 bg-red-500/10 hover:bg-red-500/20'
-            : 'border-accent text-accent bg-accent/10 hover:bg-accent/20'
-        }`}
-      >
-        {running ? `■ 멈춤 (생성됨 ${results.length})` : '▶ 시작'}
-      </button>
-      {results.length > 0 && (
-        <>
-          <p className="text-[10px] text-gray-600 leading-snug">
-            마음에 드는 디자인은 <b className="text-gray-500">⬆4×</b>로 같은 그림 그대로 고해상도화(4배 · Anlas 소모)해
-            최종 입화로 쓰세요. <b className="text-gray-500">📋</b>는 레시피(프롬프트+시드) 복사. 같은 시드 재생성은
-            해상도가 바뀌면 다른 그림이 되니 업스케일이 정석입니다.
-          </p>
-          <div className="grid grid-cols-4 gap-1">
-            {results.map((r, i) => {
-              const up = !!busy[`upscale:${r.seed}`];
-              return (
-                <div
-                  key={i}
-                  className="relative group aspect-[2/3] overflow-hidden rounded border border-edge bg-black/20"
-                >
-                  <a href={r.url} target="_blank" rel="noreferrer" className="block w-full h-full">
-                    <img src={r.url} alt="" className="w-full h-full object-cover" />
-                  </a>
-                  <div className="absolute bottom-0 inset-x-0 flex opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      type="button"
-                      title={`프롬프트+시드 복사 (seed ${r.seed})\n${r.prompt}`}
-                      onClick={() =>
-                        navigator.clipboard?.writeText(`seed: ${r.seed}\n${r.prompt}`).catch(() => {})
-                      }
-                      className="flex-1 text-[9px] py-0.5 bg-black/65 text-gray-200 hover:bg-black/85"
-                    >
-                      📋
-                    </button>
-                    <button
-                      type="button"
-                      title="4배 업스케일 (같은 그림 그대로 고해상도 · Anlas 소모)"
-                      disabled={up}
-                      onClick={() => upscale(r, 4)}
-                      className="flex-1 text-[9px] py-0.5 bg-black/65 text-amber-300 hover:bg-black/85 disabled:opacity-50"
-                    >
-                      {up ? '업스케일 중…' : '⬆ 업스케일 4×'}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
-function BgBatchGen() {
-  const running = useStore((s) => s.bgBatchRunning);
-  const results = useStore((s) => s.bgBatchResults);
-  const start = useStore((s) => s.startBgBatchGen);
-  const stop = useStore((s) => s.stopBgBatchGen);
-  const upscale = useStore((s) => s.upscaleResult);
-  const busy = useStore((s) => s.busy);
-  return (
-    <section className="flex flex-col gap-2">
-      <h2 className="section-title">🏞️ 랜덤 배경 생성</h2>
-      <p className="text-[11px] text-gray-500 leading-snug">
-        DB 장소 태그를 무작위 조합해 <b className="text-gray-400">인물 없는 배경</b>을 멈출 때까지 1장씩
-        무료로 계속 생성합니다(가로 1216×832 · Anlas 0). 결과는 아래 + 소스 보관 폴더(
-        <code className="text-accent">random-bg/</code>)에 저장돼요.
-      </p>
-      <button
-        onClick={() => (running ? stop() : start())}
-        className={`text-xs py-1.5 rounded border font-medium transition-colors ${
-          running
-            ? 'border-red-500 text-red-400 bg-red-500/10 hover:bg-red-500/20'
-            : 'border-accent text-accent bg-accent/10 hover:bg-accent/20'
-        }`}
-      >
-        {running ? `■ 멈춤 (생성됨 ${results.length})` : '▶ 시작'}
-      </button>
-      {results.length > 0 && (
-        <>
-          <p className="text-[10px] text-gray-600 leading-snug">
-            마음에 드는 배경은 <b className="text-gray-500">⬆4×</b>로 같은 그림 그대로 고해상도화(4배 · Anlas
-            소모)해 최종 배경으로 쓰세요. <b className="text-gray-500">📋</b>는 레시피(프롬프트+시드) 복사.
-          </p>
-          <div className="grid grid-cols-2 gap-1">
-            {results.map((r, i) => {
-              const up = !!busy[`upscale:${r.seed}`];
-              return (
-                <div
-                  key={i}
-                  className="relative group aspect-video overflow-hidden rounded border border-edge bg-black/20"
-                >
-                  <a href={r.url} target="_blank" rel="noreferrer" className="block w-full h-full">
-                    <img src={r.url} alt="" className="w-full h-full object-cover" />
-                  </a>
-                  <div className="absolute bottom-0 inset-x-0 flex opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      type="button"
-                      title={`프롬프트+시드 복사 (seed ${r.seed})\n${r.prompt}`}
-                      onClick={() =>
-                        navigator.clipboard?.writeText(`seed: ${r.seed}\n${r.prompt}`).catch(() => {})
-                      }
-                      className="flex-1 text-[9px] py-0.5 bg-black/65 text-gray-200 hover:bg-black/85"
-                    >
-                      📋
-                    </button>
-                    <button
-                      type="button"
-                      title="4배 업스케일 (같은 그림 그대로 고해상도 · Anlas 소모)"
-                      disabled={up}
-                      onClick={() => upscale(r, 4, 'background')}
-                      className="flex-1 text-[9px] py-0.5 bg-black/65 text-amber-300 hover:bg-black/85 disabled:opacity-50"
-                    >
-                      {up ? '업스케일 중…' : '⬆ 업스케일 4×'}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </section>
-  );
 }
 
 function ProjectMeta() {
@@ -672,33 +298,18 @@ function ThemeStudio() {
   const generateAiTheme = useStore((s) => s.generateAiTheme);
   const clearAiTheme = useStore((s) => s.clearAiTheme);
   const importMenuArt = useStore((s) => s.importMenuArt);
-  const generateMenuArt = useStore((s) => s.generateMenuArt);
   const clearMenuArt = useStore((s) => s.clearMenuArt);
   const busy = useStore((s) => s.aiThemeBusy);
-  const busyMenuMain = useStore((s) => s.busy['menu:main']);
-  const busyMenuGame = useStore((s) => s.busy['menu:game']);
-  const apiKey = useStore((s) => s.apiKey);
+  const openaiKey = useStore((s) => s.openaiKey);
 
   const theme = resolveTheme(project.genre, project.guiTheme);
   const custom = !!project.guiTheme;
-  // 타이틀 합성에 참조할 수 있는 후보: 기본 입화 있는 캐릭터 / 생성된 배경.
-  const refChars = project.characters.filter((c) => c.expressions['기본']);
-  const refBgKeys = [
-    ...new Set(
-      project.scenes
-        .filter((s) => s.backgroundAssetId)
-        .map((s) => (s.background || s.title).trim()),
-    ),
-  ];
-  const [menuCharRef, setMenuCharRef] = useState('');
-  const [menuBgRef, setMenuBgRef] = useState('');
-  const menuRefOpts = { charName: menuCharRef || undefined, bgKey: menuBgRef || undefined };
 
   return (
     <div className="rounded-lg border border-accent/30 bg-accent2/5 p-2.5 flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-accent">✨ AI 테마 스튜디오</span>
-        <span className="text-[10px] text-gray-500">{apiKey ? 'AI 모드' : '오프라인 모드'}</span>
+        <span className="text-[10px] text-gray-500">{openaiKey ? 'AI 모드' : '오프라인 모드'}</span>
       </div>
 
       <div>
@@ -730,54 +341,7 @@ function ThemeStudio() {
       <ThemePreview theme={theme} />
 
       <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
-        <span className="label">타이틀·메뉴 배경 (AI 생성 / 직접 업로드)</span>
-        {(refChars.length > 0 || refBgKeys.length > 0) && (
-          <div className="flex gap-1.5">
-            <select
-              className="field text-[11px] !py-1 flex-1 min-w-0"
-              value={menuCharRef}
-              onChange={(e) => setMenuCharRef(e.target.value)}
-              title="타이틀에 등장시킬 메인 캐릭터(기본 입화 기준) — 게임과 어울리게 합성"
-            >
-              <option value="">참조 캐릭터 없음</option>
-              {refChars.map((c) => (
-                <option key={c.name} value={c.name}>{c.name}</option>
-              ))}
-            </select>
-            <select
-              className="field text-[11px] !py-1 flex-1 min-w-0"
-              value={menuBgRef}
-              onChange={(e) => setMenuBgRef(e.target.value)}
-              title="타이틀 배경으로 참고할 장면 배경 — 장소·분위기 일치"
-            >
-              <option value="">참조 배경 없음</option>
-              {refBgKeys.map((k) => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-            </select>
-          </div>
-        )}
-        <p className="text-[10px] text-gray-500 leading-snug">
-          참조를 고르면 그 캐릭터·배경을 소스로 <b className="text-gray-400">게임과 어울리는</b> 타이틀을 합성합니다(없으면 제목·장르·분위기 텍스트로 생성). <b className="text-gray-400">장르·분위기</b>를 먼저 정한 뒤 생성하세요.
-        </p>
-        <div className="flex gap-2">
-          <button
-            className="btn-ghost flex-1 text-[11px]"
-            disabled={!apiKey || busyMenuMain}
-            onClick={() => generateMenuArt('main', menuRefOpts)}
-            title={apiKey ? 'NovelAI 로 타이틀(메인 메뉴) 배경 생성' : '이미지 API 키가 필요합니다'}
-          >
-            {busyMenuMain ? <Spinner /> : project.menuArt?.main ? '✨ 메인 재생성' : '✨ 메인 AI 생성'}
-          </button>
-          <button
-            className="btn-ghost flex-1 text-[11px]"
-            disabled={!apiKey || busyMenuGame}
-            onClick={() => generateMenuArt('game', menuRefOpts)}
-            title={apiKey ? 'NovelAI 로 게임 메뉴 배경 생성' : '이미지 API 키가 필요합니다'}
-          >
-            {busyMenuGame ? <Spinner /> : project.menuArt?.game ? '✨ 게임 재생성' : '✨ 게임 AI 생성'}
-          </button>
-        </div>
+        <span className="label">타이틀·메뉴 배경 (ChatGPT 등에서 만든 이미지 업로드)</span>
         <div className="flex gap-2">
           <UploadButton
             onFile={(f) => importMenuArt('main', f)}
@@ -809,12 +373,6 @@ function ThemeStudio() {
       </div>
 
       <DialogueGuiControls />
-
-      {!apiKey && (
-        <p className="text-[10px] text-gray-500 leading-snug">
-          키 없이도 스토리·분위기 기반 변형이 적용됩니다. 위 NovelAI 키를 넣으면 더 정교한 AI 생성으로 업그레이드됩니다.
-        </p>
-      )}
     </div>
   );
 }

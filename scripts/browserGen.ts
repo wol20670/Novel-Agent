@@ -3,4 +3,3 @@
 export { canvasImage } from '../src/generators/image/canvasProvider';
 export { canvasSprite } from '../src/generators/image/canvasSprite';
 export { canvasMenuArt, solidPng } from '../src/generators/image/canvasMenu';
-export { synthBgm } from '../src/generators/audio/synthProvider';

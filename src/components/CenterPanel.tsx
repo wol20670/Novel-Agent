@@ -16,9 +16,6 @@ export default function CenterPanel() {
   const setActiveTab = useStore((s) => s.setActiveTab);
   const scenes = useStore((s) => s.project.scenes);
   const approveAll = useStore((s) => s.approveAll);
-  const genAllBg = useStore((s) => s.generateAllBackgrounds);
-  const genAllBgm = useStore((s) => s.generateAllBgm);
-  const batchBusy = useStore((s) => !!(s.busy['batch:bg'] || s.busy['batch:bgm']));
   const translateMode = useStore((s) => translateModeOf(s.project));
   const autoTranslate = useStore((s) => s.autoTranslateAll);
   const translating = useStore((s) => !!s.busy['batch:translate']);
@@ -45,17 +42,6 @@ export default function CenterPanel() {
         ))}
         {activeTab === 'scenes' && scenes.length > 0 && (
           <div className="ml-auto flex items-center gap-2">
-            <button
-              className="btn-soft"
-              onClick={async () => {
-                await genAllBg();
-                await genAllBgm();
-              }}
-              disabled={batchBusy}
-              title="장면들의 배경·BGM 을 고유 이름마다 한 번씩 일괄 생성"
-            >
-              {batchBusy ? <Spinner /> : '🎨 배경·음악 일괄 생성'}
-            </button>
             {translateMode !== 'off' && (
               <button
                 className="btn-soft"

@@ -3,7 +3,7 @@ import { useStore } from '../store';
 import { SCENE_STATUS_LABEL, effectiveExpressions, emojiFor, baseLocaleOf, LOCALE_LABEL, type SceneStatus, type Expression, type Line, type Locale } from '../types';
 import { inferEmotion } from '../generators/emotion';
 import { useAssetUrl } from './useAssetUrl';
-import Spinner from './Spinner';
+import UploadButton from './UploadButton';
 
 const STATUS_BTN: Record<SceneStatus, { on: string; dot: string }> = {
   review: { on: 'bg-gray-500/15 text-gray-300 border-gray-400', dot: 'bg-gray-400' },
@@ -18,10 +18,8 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
   const setStatus = useStore((s) => s.setSceneStatus);
   const select = useStore((s) => s.selectScene);
   const selected = useStore((s) => s.selectedSceneId === sceneId);
-  const genBg = useStore((s) => s.generateBackground);
-  const genBgm = useStore((s) => s.generateBgm);
-  const busyBg = useStore((s) => s.busy[`${sceneId}:bg`]);
-  const busyBgm = useStore((s) => s.busy[`${sceneId}:bgm`]);
+  const importBg = useStore((s) => s.importBackground);
+  const importBgm = useStore((s) => s.importBgm);
   const bgUrl = useAssetUrl(scene.backgroundAssetId);
 
   return (
@@ -70,7 +68,7 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
         {bgUrl ? (
           <img src={bgUrl} className="w-full h-full object-cover" />
         ) : (
-          <span className="text-xs text-gray-600">배경 미생성 · "배경 생성"을 눌러보세요</span>
+          <span className="text-xs text-gray-600">배경 미업로드 · 아래 "배경 업로드"로 추가하세요</span>
         )}
         <div className="absolute top-2 right-2 flex gap-1">
           {scene.backgroundAssetId && <span className="chip bg-black/50 border-emerald-500/50 text-emerald-300">배경✓</span>}
@@ -149,12 +147,13 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
 
       {/* 액션 */}
       <div className="flex gap-2 flex-wrap items-center" onClick={(e) => e.stopPropagation()}>
-        <button className="btn-primary" disabled={busyBg} onClick={() => genBg(sceneId)}>
-          {busyBg ? <Spinner label="생성 중" /> : '🖼 배경 생성'}
-        </button>
-        <button className="btn-ghost" disabled={busyBgm} onClick={() => genBgm(sceneId)}>
-          {busyBgm ? <Spinner label="생성 중" /> : '🎵 음악 생성'}
-        </button>
+        <UploadButton label="🖼 배경 업로드" className="btn-primary" onFile={(f) => importBg(sceneId, f)} />
+        <UploadButton
+          label="🎵 BGM 업로드"
+          className="btn-ghost"
+          accept="audio/*"
+          onFile={(f) => importBgm(sceneId, f)}
+        />
         {scene.status !== 'approved' && (
           <button className="btn-soft ml-auto" onClick={() => setStatus(sceneId, 'approved')}>
             ✓ 승인

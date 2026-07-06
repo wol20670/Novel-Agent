@@ -1,15 +1,32 @@
 // 실제 브라우저(헤드리스 Chromium)로 전체 파이프라인을 클릭 검증한다.
-// 샘플 → 분석 → 전체 승인 → 배경/음악 생성(폴백) → Ren'Py 확인 → ZIP 다운로드 → 내용물 검증.
+// 샘플 → 분석 → 전체 승인 → 배경/BGM/스프라이트 업로드(픽스처 파일) → Ren'Py 확인 → ZIP 다운로드 → 내용물 검증.
+// 이미지·음악은 이제 앱이 생성하지 않으므로(ChatGPT/Suno 등 외부 도구 → 업로드), 여기선 작은 픽스처
+// 파일을 업로드 버튼의 숨김 input 에 직접 주입해 업로드 경로를 검증한다.
 import { chromium } from 'playwright';
 import JSZip from 'jszip';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const shotDir = join(root, 'e2e-shots');
 mkdirSync(shotDir, { recursive: true });
+
+// 업로드 버튼 검증용 픽스처(1x1 PNG · 최소 mp3 프레임 헤더).
+const fixturePng = join(shotDir, 'fixture.png');
+writeFileSync(
+  fixturePng,
+  Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  ),
+);
+const fixtureMp3 = join(shotDir, 'fixture.mp3');
+writeFileSync(fixtureMp3, Buffer.from([0xff, 0xfb, 0x90, 0x00, 0x00, 0x00, 0x00, 0x00]));
+
+/** UploadButton은 <button>과 숨김 <input type=file> 을 형제로 렌더링한다 — 버튼 기준으로 input을 찾아 파일을 주입. */
+const uploadVia = (button, file) => button.locator('xpath=following-sibling::input[@type="file"]').first().setInputFiles(file);
 
 const BASE = process.env.BASE_URL || 'http://localhost:4173';
 const log = (...a) => console.log(...a);
@@ -45,28 +62,28 @@ try {
   const approvedChips = await page.getByRole('button', { name: '✓ 전체 승인됨' }).count();
   assert(approvedChips > 0, '전체 승인 완료 상태 표시');
 
-  // 3) 첫 장면 배경 생성 (Canvas 폴백) — SceneCard 첫 버튼
-  await page.getByRole('button', { name: /배경 생성/ }).first().click();
+  // 3) 첫 장면 배경 업로드 (픽스처 PNG) — SceneCard 첫 버튼
+  await uploadVia(page.getByRole('button', { name: /배경 업로드/ }).first(), fixturePng);
   await page.waitForSelector('img[src^="blob:"]', { timeout: 15000 });
-  assert(true, '배경 이미지(blob) 생성·표시');
+  assert(true, '배경 이미지(blob) 업로드·표시');
 
-  // 4) 첫 장면 음악 생성 (합성 WAV)
-  await page.getByRole('button', { name: /음악 생성/ }).first().click();
+  // 4) 첫 장면 BGM 업로드 (픽스처 mp3)
+  await uploadVia(page.getByRole('button', { name: /BGM 업로드/ }).first(), fixtureMp3);
   await page.waitForSelector('audio[src^="blob:"]', { timeout: 20000 });
-  assert(true, 'BGM 오디오(blob) 생성·표시');
+  assert(true, 'BGM 오디오(blob) 업로드·표시');
   await page.screenshot({ path: join(shotDir, '2-generated.png'), fullPage: true });
 
-  // 4.5) 에셋 탭 — 첫 캐릭터 스프라이트 생성 (Canvas 임시 입화)
+  // 4.5) 에셋 탭 — 첫 캐릭터 기본 입화 업로드 (픽스처 PNG)
   await page.getByRole('button', { name: /^🎨 에셋$/ }).click();
   await page.waitForTimeout(300);
   const before = await page.locator('img[src^="blob:"]').count();
-  await page.getByRole('button', { name: /스프라이트 생성/ }).first().click();
+  await uploadVia(page.getByRole('button', { name: /기본 입화 업로드/ }).first(), fixturePng);
   await page.waitForFunction(
     (n) => document.querySelectorAll('img[src^="blob:"]').length > n,
     before,
     { timeout: 20000 },
   );
-  assert(true, '캐릭터 스프라이트(Canvas) 생성·표시');
+  assert(true, '캐릭터 스프라이트(업로드) 표시');
   await page.screenshot({ path: join(shotDir, '4-sprites.png'), fullPage: true });
 
   // 5) Ren'Py 탭 — 스크립트 내용 확인
@@ -102,16 +119,19 @@ try {
   assert(names.includes('game/fonts/NanumGothic.ttf'), 'ZIP: 한글 폰트(나눔고딕) 포함');
   assert(names.some((n) => n.startsWith('game/images/sprite_') && n.endsWith('.png')), 'ZIP: 캐릭터 스프라이트 PNG 포함');
   assert(names.some((n) => n.startsWith('game/images/bg_') && n.endsWith('.png')), 'ZIP: 배경 PNG 포함');
-  assert(names.some((n) => n.startsWith('game/audio/bgm_') && n.endsWith('.wav')), 'ZIP: BGM WAV 포함');
+  assert(names.some((n) => n.startsWith('game/audio/bgm_') && n.endsWith('.mp3')), 'ZIP: 업로드한 BGM mp3 포함');
 
-  // PNG/WAV 매직넘버 확인
+  // PNG 매직넘버 + BGM 은 업로드 픽스처 바이트가 그대로 들어갔는지 확인.
   const bgFile = names.find((n) => n.startsWith('game/images/bg_'));
   const pngBuf = await zip.files[bgFile].async('uint8array');
   assert(pngBuf[0] === 0x89 && pngBuf[1] === 0x50, `배경 PNG 시그니처 정상 (${bgFile}, ${pngBuf.length} bytes)`);
-  const wavFile = names.find((n) => n.startsWith('game/audio/bgm_'));
-  const wavBuf = await zip.files[wavFile].async('uint8array');
-  const riff = String.fromCharCode(...wavBuf.slice(0, 4));
-  assert(riff === 'RIFF', `BGM WAV 시그니처 정상 (${wavFile}, ${wavBuf.length} bytes)`);
+  const mp3File = names.find((n) => n.startsWith('game/audio/bgm_'));
+  const mp3Buf = await zip.files[mp3File].async('uint8array');
+  const fixtureMp3Buf = readFileSync(fixtureMp3);
+  assert(
+    mp3Buf.length === fixtureMp3Buf.length && mp3Buf.every((b, i) => b === fixtureMp3Buf[i]),
+    `BGM mp3 픽스처 바이트 일치 (${mp3File}, ${mp3Buf.length} bytes)`,
+  );
 
   // 7) 새로고침 후 자동복원
   await page.reload({ waitUntil: 'networkidle' });

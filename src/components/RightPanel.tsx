@@ -2,26 +2,24 @@ import { useStore } from '../store';
 import { useAssetUrl } from './useAssetUrl';
 import { getAsset } from '../storage/assetStore';
 import { downloadBlob } from '../zip/buildZip';
-import Spinner from './Spinner';
 import UploadButton from './UploadButton';
 import ScenePlayer from './ScenePlayer';
 
 export default function RightPanel() {
   const sceneId = useStore((s) => s.selectedSceneId);
   const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId) ?? null);
-  const genBg = useStore((s) => s.generateBackground);
-  const refineBg = useStore((s) => s.refineBackground);
   const importBg = useStore((s) => s.importBackground);
-  const genBgm = useStore((s) => s.generateBgm);
-  const busyBg = useStore((s) => (sceneId ? s.busy[`${sceneId}:bg`] : false));
-  const busyBgm = useStore((s) => (sceneId ? s.busy[`${sceneId}:bgm`] : false));
+  const importBgm = useStore((s) => s.importBgm);
+  const clearBgm = useStore((s) => s.clearBgm);
   const bgUrl = useAssetUrl(scene?.backgroundAssetId);
   const bgmUrl = useAssetUrl(scene?.bgmAssetId);
 
-  const saveWav = async () => {
+  const saveBgm = async () => {
     if (!scene?.bgmAssetId) return;
     const blob = await getAsset(scene.bgmAssetId);
-    if (blob) downloadBlob(blob, `${scene.title || 'bgm'}.wav`);
+    if (!blob) return;
+    const ext = blob.type.split('/')[1]?.split(';')[0] || 'mp3';
+    downloadBlob(blob, `${scene.title || 'bgm'}.${ext}`);
   };
   const savePng = async () => {
     if (!scene?.backgroundAssetId) return;
@@ -49,24 +47,11 @@ export default function RightPanel() {
           </div>
 
           <div className="flex gap-2">
-            <button className="btn-primary flex-1" disabled={busyBg} onClick={() => genBg(scene.id)}>
-              {busyBg ? <Spinner label="생성 중" /> : '🖼 배경 생성'}
-            </button>
-            <button
-              className="btn-ghost"
-              disabled={busyBg || !scene.backgroundAssetId}
-              title="이 배경을 지시문대로 미세 수정 (예: 노을을 더 붉게)"
-              onClick={() => {
-                const ins = window.prompt('이 배경을 어떻게 수정할까요? (예: 노을을 더 붉게, 조명을 따뜻하게)');
-                if (ins && ins.trim()) refineBg(scene.id, ins.trim());
-              }}
-            >
-              ✏️ 수정
-            </button>
             <UploadButton
               onFile={(f) => importBg(scene.id, f)}
-              label="↥ 업로드"
-              title="외부 제작 이미지를 이 배경으로 사용"
+              label="🖼 배경 업로드"
+              className="btn-primary flex-1"
+              title="ChatGPT 등에서 만든 배경 이미지를 업로드"
             />
             <button className="btn-ghost" disabled={!scene.backgroundAssetId} onClick={savePng}>
               ↓ PNG
@@ -78,14 +63,21 @@ export default function RightPanel() {
             {bgmUrl ? (
               <audio src={bgmUrl} controls className="w-full h-9 mt-1" />
             ) : (
-              <p className="text-gray-600 text-xs py-2">BGM 미생성</p>
+              <p className="text-gray-600 text-xs py-2">BGM 미업로드</p>
             )}
             <div className="flex gap-2 mt-2">
-              <button className="btn-primary flex-1" disabled={busyBgm} onClick={() => genBgm(scene.id)}>
-                {busyBgm ? <Spinner label="생성 중" /> : '음악 생성'}
+              <UploadButton
+                onFile={(f) => importBgm(scene.id, f)}
+                label="🎵 BGM 업로드"
+                className="btn-primary flex-1"
+                accept="audio/*"
+                title="Suno 등에서 만든 BGM(mp3 권장)을 업로드"
+              />
+              <button className="btn-ghost" disabled={!scene.bgmAssetId} onClick={saveBgm}>
+                ↓ 저장
               </button>
-              <button className="btn-ghost" disabled={!scene.bgmAssetId} onClick={saveWav}>
-                ↓ WAV
+              <button className="btn-ghost" disabled={!scene.bgmAssetId} onClick={() => clearBgm(scene.id)}>
+                해제
               </button>
             </div>
           </div>

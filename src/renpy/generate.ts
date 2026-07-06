@@ -5,7 +5,6 @@ import type { Project, Scene, Line, Character, Expression } from '../types';
 import { RENPY_LANG, LOCALE_LABEL, baseLocaleOf, effectiveTextLocales, effectiveVoiceLocales } from '../types';
 import { SlugMap } from './slug';
 import { generateGuiFiles, resolveTheme, withGuiOverrides } from './gui';
-import { voiceBaseName } from '../generators/audio/elevenVoiceProvider';
 import { CONFIRM_STRINGS, UI_STRINGS, uiTr } from './gui/uiStrings';
 import { inferEmotion } from '../generators/emotion';
 import { enforceContrast } from '../generators/theme/color';
@@ -13,6 +12,11 @@ import { enforceContrast } from '../generators/theme/color';
 export interface RenpyFile {
   path: string; // game/ 이하 경로
   content: string;
+}
+
+/** Ren'Py 참조용 결정적 base 이름(언어·확장자 없음). vo("...") 와 업로드 음성 파일 경로가 이걸 공유한다. */
+function voiceBaseName(charId: string, sceneLabel: string, lineIdx: number): string {
+  return `${charId}_${sceneLabel}_${String(lineIdx).padStart(3, '0')}`;
 }
 
 /** 한글 표정 → Ren'Py 이미지 속성(ASCII). 이미지 attribute 는 ASCII 가 안전. */
@@ -205,7 +209,7 @@ export interface SceneAssetRef {
   label: string; // scene_1 (장면은 고유)
   bgTag: string; // 배경 이미지 태그 — 같은 배경 이름이면 동일 (bg_1)
   bgFile: string; // bg_1.png
-  bgmFile?: string; // bgm_1.wav (BGM 지정 시, 같은 BGM 이름이면 동일)
+  bgmFile?: string; // bgm_1.mp3 (업로드본이 있을 때만, 같은 BGM 이름이면 동일)
   cgTags: string[]; // 같은 CG 설명이면 동일
   cgFiles: string[];
 }
@@ -265,7 +269,10 @@ export function resolveSceneAssets(project: Project): SceneAssetRef[] {
   return approved.map((scene, i) => {
     const ordinal = i + 1;
     const bgTag = bgSlugs.get(backgroundKey(scene));
-    const bgmTag = hasBgm(scene) ? bgmSlugs.get(bgmKey(scene)) : undefined;
+    // 배경은 항상 Canvas 폴백이 채우지만 BGM 은 이제 업로드본이 없으면 파일이 없다 — 이름만
+    // 있고(#BGM) 실제 오디오를 업로드하지 않은 장면은 `play music` 자체를 방출하지 않는다
+    // (Ren'Py 는 없는 파일을 참조하면 런타임 에러이므로, 여기서 assetId 유무로 게이팅한다).
+    const bgmTag = scene.bgmAssetId ? bgmSlugs.get(bgmKey(scene)) : undefined;
     const cgTags = scene.cg.map((desc) => cgSlugs.get(desc.trim() || `${scene.title}_cg`));
     return {
       scene,
@@ -273,7 +280,8 @@ export function resolveSceneAssets(project: Project): SceneAssetRef[] {
       label: `scene_${ordinal}`,
       bgTag,
       bgFile: `${bgTag}.png`,
-      bgmFile: bgmTag ? `${bgmTag}.wav` : undefined,
+      // Suno 등에서 받는 BGM 은 대부분 mp3 — Ren'Py music 채널은 mp3 를 그대로 재생한다(WAV 변환 없음).
+      bgmFile: bgmTag ? `${bgmTag}.mp3` : undefined,
       cgTags,
       cgFiles: cgTags.map((t) => `${t}.png`),
     };

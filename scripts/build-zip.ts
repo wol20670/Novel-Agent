@@ -72,17 +72,8 @@ for (const ref of refs) {
     );
     out.push({ path: `game/images/${ref.cgFiles[j]}`, data: b64ToBuf(cg) });
   }
-
-  if (ref.bgmFile) {
-    const wav = await page.evaluate(
-      async (p) => {
-        const { blob } = await (window as any).Gen.synthBgm(p);
-        return (window as any).toB64(blob);
-      },
-      s.bgm || s.title,
-    );
-    out.push({ path: `game/audio/${ref.bgmFile}`, data: b64ToBuf(wav) });
-  }
+  // BGM 은 이제 업로드본만 있다(생성 폴백 없음) — 샘플 스토리는 업로드가 없어 ref.bgmFile 이 항상
+  // undefined 이므로(§renpy/generate.ts bgmAssetId 게이팅) 여기선 채울 것이 없다.
 }
 
 // 캐릭터 스프라이트(있으면)

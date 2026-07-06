@@ -136,11 +136,6 @@ export interface Character {
    * 에셋 창의 스프라이트 관리에서도 제외한다. 대사 이름표·분기에는 정상 참여.
    */
   isProtagonist?: boolean;
-  /**
-   * 언어별 ElevenLabs voice_id — 다국어 성우 매핑. 해당 로케일 id 가 없으면 그 언어 음성은 생성하지 않는다.
-   * (같은 캐릭터라도 언어마다 다른 성우를 배정할 수 있다.)
-   */
-  voiceIds?: Partial<Record<Locale, string>>;
 }
 
 export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice' | 'item';
@@ -149,8 +144,8 @@ export interface AssetMeta {
   id: string;
   kind: AssetKind;
   prompt: string;
-  mime: string; // image/png | audio/wav
-  /** 어떤 provider 로 생성됐는지 (canvas | openai | synth ...). */
+  mime: string; // image/png | image/jpeg | audio/mpeg | audio/wav 등(업로드 파일 그대로)
+  /** 에셋 출처 (canvas=오프라인 플레이스홀더, upload=사용자 업로드). */
   source: string;
   /** Ren'Py 에셋 파일명 (예: bg_school.png). */
   filename: string;
@@ -202,18 +197,6 @@ export interface Project {
    * 대본 `#아이템 <이름>` 태그로 참조되고, "발견한 아이템" 보관함이 이 목록을 갤러리로 보여준다.
    */
   itemAssetIds?: Record<string, string>;
-  /**
-   * 캐릭터 "그림체 참조" 이미지들(선택, 여러 장). 업로드하면 기본 입화 생성 시 이 그림들의
-   * 화풍·채색·렌더링만 참고(NovelAI vibe transfer)하고, 인물은 캐릭터 외형 설명대로 새로 그린다
-   * (전 캐릭터 공통). 여러 장일수록 화풍 반영 정확도가 올라간다.
-   */
-  styleRefAssetIds?: string[];
-  /**
-   * 배경 이름(라벨, backgroundKey)별 "상세 생성 프롬프트".
-   * 비어 있으면 배경 이름을 그대로 프롬프트로 쓴다. 있으면 이름은 라벨로만 쓰고
-   * 이 텍스트로 생성한다(이름은 그대로 두고 디테일하게 지시).
-   */
-  backgroundPrompts?: Record<string, string>;
   /**
    * GUI 대사창·폰트 사용자 조정(테마 위에 덮어씀). 비면 테마 기본값 사용.
    * - dialogueOpacity: 대사창 배경 불투명도(0~1, 기본 0.4 · 그라데이션 권장 0.35~0.45)

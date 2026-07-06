@@ -17,7 +17,7 @@ export default function App() {
   const toast = useStore((s) => s.toast);
   const toastType = useStore((s) => s.toastType);
   const project = useStore((s) => s.project);
-  const apiKey = useStore((s) => s.apiKey);
+  const openaiKey = useStore((s) => s.openaiKey);
 
   useEffect(() => {
     hydrate();
@@ -34,10 +34,10 @@ export default function App() {
         <div className="ml-auto flex items-center gap-3 text-xs">
           <span
             className={`chip ${
-              apiKey ? 'border-emerald-500/50 text-emerald-600' : 'border-edge text-gray-400'
+              openaiKey ? 'border-emerald-500/50 text-emerald-600' : 'border-edge text-gray-400'
             }`}
           >
-            {apiKey ? '● NovelAI 모드' : '○ 오프라인 모드'}
+            {openaiKey ? '● AI 텍스트 기능 켜짐' : '○ OpenAI 키 없음'}
           </span>
           <span className="text-gray-400">
             장면 <b className="text-gray-200">{project.scenes.length}</b> · 승인{' '}

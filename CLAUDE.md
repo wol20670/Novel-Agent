@@ -1,35 +1,37 @@
 # CLAUDE.md
 
-> 🔵 **진행 중 인수인계: [`HANDOFF.md`](./HANDOFF.md) 를 먼저 읽으세요** (PC→노트북 이어받기: PCM BGM 최적화·GUI 가독성 반영 완료 / ElevenLabs 유료키 실측만 대기 중). 후속 작업 완료 후 이 줄과 HANDOFF.md 를 삭제할 것.
-
 Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite + React + TS + zustand + Tailwind).
 100% 클라이언트(백엔드 없음), BYO 키. 한국어 코드베이스.
 
+이미지(배경·캐릭터 입화·CG)와 음악(BGM)은 **앱이 생성하지 않는다** — ChatGPT/Suno 등 외부 도구에서
+만든 파일을 앱에 **업로드**하는 워크플로우다(2026-07 전면 개편). 앱에 남은 AI 기능은 전부 텍스트
+전용(OpenAI `gpt-4o-mini`): 대본 자동 번역(영/일), AI GUI 테마 생성.
+
 ## 명령
-- `npm run dev` — 개발 서버(http://localhost:5173). **NovelAI는 dev에서만 동작**(CORS 프록시 필요).
+- `npm run dev` — 개발 서버(http://localhost:5173).
 - `npm run build` — tsc + vite build
 - `npm run typecheck` — `tsc --noEmit`. **코드 변경 후 항상 실행.**
-- `npm run sync:tags` — Google 시트 → `src/generators/image/tagDictionary.ts`(@generated 블록). predev가 `--soft`로 자동 실행.
-- `npm run push:tags` — 시트 정규화·쓰기(중복병합·정렬). **서비스 계정 키 `.secrets/sheets-sa.json` 필요**(gitignore·기기 로컬). `scripts/tag-additions.csv`로 신규 태그 추가.
+- `npm run test` — vitest(파서·번역·아이템 단위/통합 테스트).
 
 ## 환경 함정 (중요)
 - **Windows node 종료는 PowerShell**: `Get-Process node | Stop-Process -Force`. bash `pkill`/`taskkill`는 자주 실패. 좀비 `vite preview`가 `dist`/포트를 잡으면 옛 빌드를 계속 서빙한다.
-- **OneDrive dist 빌드 함정**: 프로젝트가 OneDrive 동기 폴더라, `vite build`가 23MB wasm을 `dist/`에 쓸 때 간헐적으로 **에러 없이 exit 127**로 죽는다. **코드 문제 아님**(환경). 검증만 목적이면 `npx vite build --outDir <OneDrive 밖 경로> --emptyOutDir`. tsc는 무관하게 통과. 근본해결은 프로젝트를 OneDrive 밖에 두기.
+- **OneDrive dist 빌드 함정**: 프로젝트가 OneDrive 동기 폴더라, `vite build`가 `dist/`에 쓸 때 간헐적으로 **에러 없이 exit 127**로 죽는다. **코드 문제 아님**(환경). 검증만 목적이면 `npx vite build --outDir <OneDrive 밖 경로> --emptyOutDir`. tsc는 무관하게 통과. 근본해결은 프로젝트를 OneDrive 밖에 두기.
 
-## NovelAI (이미지 생성 = NovelAI 단일 / OpenAI 키는 텍스트용만: 태그 변환·테마)
-- 호스트: 생성·증강·encode-vibe = `/nai`(image.novelai.net), **업스케일 = `/nai-api`(api.novelai.net = Primary 호스트)**. dev 프록시는 `vite.config.ts`(`/nai-api`를 `/nai`보다 먼저).
-- 토큰 = persistent token(`pst-…`), localStorage만, **절대 커밋 금지**.
-- **무료(Opus) 4조건**(전부 충족 시 Anlas 0): n_samples=1 · 총 ≤1,048,576px · steps ≤28 · 텍스트 전용(img2img/augment 미사용).
-- **업스케일**: 4배 고정(예: 832×1216→3328×4864), ~7 Anlas. 같은 시드라도 **해상도 바꿔 재생성하면 다른 그림** → 재생성 말고 업스케일이 정석.
-- **Vibe(그림체 참조)**: `/ai/encode-vibe`로 **선인코딩**(신규 1장 2 Anlas, 세션 캐시) 후 참조. raw base64 직접 전달은 V4.5에서 오작동. 다중 패널 참조는 콜라주 유발 → 단일 인물 권장.
-- **Emotion Director(표정 변경)는 무료** — 비용 누수 아님, 건드리지 말 것.
-- 스프라이트는 **전신**(`1.4::full body::`) + 콜라주 방지 네거티브.
-- 상세 API 명세: `docs/`의 NovelAI PDF(gitignore·로컬 전용).
+## 에셋 워크플로우 (배경·캐릭터·CG·BGM)
+- 사용자가 ChatGPT(이미지) / Suno(음악) 등 외부 사이트에서 직접 생성 → 앱의 **에셋 탭**에서 업로드.
+- 업로드 안 한 에셋은 오프라인 Canvas 플레이스홀더(`src/generators/image/canvas*.ts`)로 자동 채워져
+  ZIP·미리보기가 항상 동작한다. 단 **BGM 은 플레이스홀더가 없다** — 업로드 안 한 씬은 `play music`
+  자체가 방출되지 않는다(`src/renpy/generate.ts` 의 `scene.bgmAssetId` 게이팅).
+- BGM 파일명은 항상 `.mp3` 로 고정(Suno 기본 출력 포맷 기준, `src/renpy/generate.ts`). wav 등 다른
+  포맷을 올리면 확장자만 mp3 로 저장되니 주의(재생 자체는 대체로 문제없음).
+- 성우(TTS) 파이프라인은 **골격만 유지**(`Project.voiceLocales`, `voices.rpy` 출력, 업로드 mp3 재생
+  경로) — 실제 생성/업로드 UI는 미구현. Supertone(공식 API 확인됨: `docs.supertoneapi.com`, 호스트
+  `https://supertoneapi.com/v1`, 헤더 `x-sup-api-key`, `POST /text-to-speech/{VOICE_ID}`) 연동은 후속 작업.
 
 ## 데이터·구조
 - 저장: 프로젝트 메타=localStorage, 바이너리 에셋=IndexedDB. **앱 작업물은 브라우저별**(기기 이동은 앱 📤내보내기/📥가져오기 `.npproj.zip`). 키도 기기별 재입력.
-- 핵심 파일: 상태=`src/store.ts`(zustand), Ren'Py 출력=`src/renpy/generate.ts`, AI 설정 단일소스=`src/config/aiConfig.ts`, 태그 사전=`src/generators/image/tagDictionary.ts`(자동생성, 직접 편집 금지).
-- gitignore: `.secrets/`(서비스 계정 키), `docs/`, `node_modules/`, `dist/`.
+- 핵심 파일: 상태=`src/store.ts`(zustand), Ren'Py 출력=`src/renpy/generate.ts`, AI 설정 단일소스=`src/config/aiConfig.ts`(OpenAI `chat` 블록만 존재).
+- gitignore: `.secrets/`, `docs/`, `node_modules/`, `dist/`.
 
 ## 워크플로우 (YOU MUST)
 - **커밋·푸시는 사용자가 명시적으로 허락하기 전까지 절대 금지.** 코드 수정·검증은 자유.

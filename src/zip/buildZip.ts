@@ -9,7 +9,6 @@ import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
 import { canvasMenuArt, solidPng, buttonBgAssets, textboxGradientPng } from '../generators/image/canvasMenu';
-import { synthBgm } from '../generators/audio/synthProvider';
 import { resolveTheme } from '../renpy/gui';
 
 async function blobForBackground(
@@ -26,13 +25,10 @@ async function blobForBackground(
   return canvasImage(prompt, label, w, h);
 }
 
-async function blobForBgm(assetId: string | undefined, prompt: string): Promise<Blob> {
-  if (assetId) {
-    const existing = await getAsset(assetId);
-    if (existing) return existing;
-  }
-  const { blob } = await synthBgm(prompt);
-  return blob;
+// BGM 은 이제 업로드본만 있다(생성 폴백 없음) — generate.ts 가 bgmAssetId 없는 장면은
+// bgmFile 자체를 만들지 않으므로, 여기 도달하는 항목은 항상 assetId 를 가진다(방어적으로만 체크).
+async function blobForBgm(assetId: string | undefined): Promise<Blob | undefined> {
+  return assetId ? getAsset(assetId) : undefined;
 }
 
 export interface ZipResult {
@@ -121,10 +117,8 @@ export async function collectProjectFiles(
     out.push({ path: `game/images/${file}`, data: cg });
   }
   for (const [file, p] of bgmByFile) {
-    const had = !!p.assetId && !!(await getAsset(p.assetId));
-    const bgm = await blobForBgm(p.assetId, p.prompt);
-    if (!had) placeholders++;
-    out.push({ path: `game/audio/${file}`, data: bgm });
+    const bgm = await blobForBgm(p.assetId);
+    if (bgm) out.push({ path: `game/audio/${file}`, data: bgm }); // 없으면 건너뜀(방어적 — 정상 경로에선 항상 있음)
   }
 
   // 아이템(소품) 팝업 이미지 — 이름 기준 공유. assetId 있으면 그 blob, 없으면 Canvas placeholder.

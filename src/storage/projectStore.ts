@@ -4,9 +4,6 @@ import type { Project, AssetMeta } from '../types';
 
 const PROJECT_KEY = 'novel-agent:project';
 const ASSETS_KEY = 'novel-agent:assets';
-// 이미지 생성 API 키(현재 NovelAI persistent token)를 담는다. 저장 문자열은 과거 OpenAI 시절
-// 잔재라 'openai-key' 지만, 기존 사용자 키 호환을 위해 값은 그대로 둔다(이름만 의미상 image key).
-const IMAGE_APIKEY_KEY = 'novel-agent:openai-key';
 
 export function saveProject(project: Project, assets: Record<string, AssetMeta>): void {
   try {
@@ -33,15 +30,6 @@ export function loadProject(): { project: Project; assets: Record<string, AssetM
   } catch {
     return null;
   }
-}
-
-export function saveApiKey(key: string): void {
-  if (key) localStorage.setItem(IMAGE_APIKEY_KEY, key);
-  else localStorage.removeItem(IMAGE_APIKEY_KEY);
-}
-
-export function loadApiKey(): string {
-  return localStorage.getItem(IMAGE_APIKEY_KEY) ?? '';
 }
 
 export function clearProject(): void {

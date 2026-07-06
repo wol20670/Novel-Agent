@@ -1,5 +1,5 @@
 // KO 원문 대사·지문 → EN/JA 자동 번역(비주얼노벨 로컬라이징).
-// promptCompiler 의 chat() 과 같은 fetch 패턴을 쓰되 번역 전용 system prompt + JSON I/O.
+// OpenAI Chat Completions 를 직접 호출하되 번역 전용 system prompt + JSON I/O.
 // 한 장면의 미번역 줄들을 배열로 묶어 1콜로 처리한다(콜 수 = 장면 수).
 
 import { aiConfig } from '../../config/aiConfig';

@@ -82,8 +82,9 @@ function silentWav(samples = 8000): Buffer {
   header.writeUInt32LE(data.length, 40);
   return Buffer.concat([header, data]);
 }
+// BGM 은 이제 업로드본만 있어(생성 폴백 없음) 보통 audio 참조가 없지만, 방어적으로 wav/mp3 모두 스텁한다.
 const wavRefs = new Set<string>();
-for (const m of allText.matchAll(/"(audio\/[^"]+\.wav)"/g)) wavRefs.add(m[1]);
+for (const m of allText.matchAll(/"(audio\/[^"]+\.(?:wav|mp3))"/g)) wavRefs.add(m[1]);
 for (const rel of wavRefs) {
   const p = join(GAME, rel);
   mkdirSync(dirname(p), { recursive: true });

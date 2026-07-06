@@ -6,32 +6,8 @@ export default defineConfig({
   server: {
     port: 5173,
     open: false,
-    // NovelAI 는 브라우저 직접 호출(CORS)을 허용하지 않을 수 있어, 개발 중엔 이 프록시로 우회한다.
-    // 코드에서 '/nai/ai/generate-image' 로 부르면 image.novelai.net 으로 전달된다(Authorization 헤더 보존).
-    proxy: {
-      // 주의: '/nai-api' 를 '/nai' 보다 먼저 둬야 한다('/nai' 가 '/nai-api/...' 까지 삼키는 것 방지).
-      // 업스케일(/ai/upscale) 등 일부는 Primary 호스트(api.novelai.net)에 있다.
-      '/nai-api': {
-        target: 'https://api.novelai.net',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/nai-api/, ''),
-      },
-      // 이미지 생성/증강(generate-image, augment-image, encode-vibe)은 image.novelai.net.
-      '/nai': {
-        target: 'https://image.novelai.net',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/nai/, ''),
-      },
-      // ElevenLabs Music(BGM)도 브라우저 직접 호출 시 CORS 가 막힐 수 있어 개발 중엔 이 프록시로 우회한다.
-      // 코드에서 '/eleven/v1/music' 로 부르면 api.elevenlabs.io 로 전달된다(xi-api-key 헤더 보존).
-      '/eleven': {
-        target: 'https://api.elevenlabs.io',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/eleven/, ''),
-      },
-    },
+    // 이미지(배경·캐릭터·CG)·음악(BGM)은 이제 앱이 생성하지 않는다(ChatGPT/Suno 등 외부 도구 →
+    // 업로드). 남은 유일한 외부 API 는 OpenAI(텍스트, gpt-4o-mini)이며 브라우저 직접 호출을
+    // 허용하므로 dev 프록시가 필요 없다.
   },
 });
