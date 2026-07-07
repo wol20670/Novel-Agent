@@ -95,10 +95,7 @@ interface State {
   clearAiTheme: () => void;
 
   // 캐릭터 의상(복장) — 의상마다 표정 세트를 따로 가진다. #복장 태그로 장면별 지정.
-  addOutfit: (charName: string, name: string, appearance?: string) => void;
-  setOutfitAppearance: (charName: string, name: string, appearance: string) => void;
-  /** 이 의상에서 빠져야 할 것(예: '재킷, 가방') — 기본 외형의 옷 누수 차단용(참고 메모, 생성 없이도 기록용). */
-  setOutfitExclude: (charName: string, name: string, exclude: string) => void;
+  addOutfit: (charName: string, name: string) => void;
   removeOutfit: (charName: string, name: string) => Promise<void>;
   /** 이 캐릭터의 모든 업로드 입화를 비운다(표정 세트는 유지, 다시 업로드 가능). */
   clearCharacterSprites: (name: string) => Promise<void>;
@@ -592,7 +589,7 @@ export const useStore = create<State>((set, get) => {
       flash(`'${name}' 표정을 삭제했습니다.`);
     },
 
-    addOutfit: (charName, name, appearance) => {
+    addOutfit: (charName, name) => {
       const n = name.trim();
       if (!n) return;
       if (n === '기본') return flash("'기본'은 예약된 의상 이름입니다.");
@@ -604,57 +601,13 @@ export const useStore = create<State>((set, get) => {
           ...s.project,
           characters: s.project.characters.map((c) =>
             c.name === charName
-              ? {
-                  ...c,
-                  outfits: [
-                    ...(c.outfits ?? []),
-                    { name: n, appearance: appearance?.trim() || undefined, expressions: {} },
-                  ],
-                }
+              ? { ...c, outfits: [...(c.outfits ?? []), { name: n, expressions: {} }] }
               : c,
           ),
         },
       }));
       autoSave();
       flash(`'${charName}'에 '${n}' 의상을 추가했습니다. 표정별 입화를 업로드하세요.`);
-    },
-
-    setOutfitAppearance: (charName, name, appearance) => {
-      set((s) => ({
-        project: {
-          ...s.project,
-          characters: s.project.characters.map((c) =>
-            c.name === charName
-              ? {
-                  ...c,
-                  outfits: (c.outfits ?? []).map((o) =>
-                    o.name === name ? { ...o, appearance } : o,
-                  ),
-                }
-              : c,
-          ),
-        },
-      }));
-      autoSave();
-    },
-
-    setOutfitExclude: (charName, name, exclude) => {
-      set((s) => ({
-        project: {
-          ...s.project,
-          characters: s.project.characters.map((c) =>
-            c.name === charName
-              ? {
-                  ...c,
-                  outfits: (c.outfits ?? []).map((o) =>
-                    o.name === name ? { ...o, exclude } : o,
-                  ),
-                }
-              : c,
-          ),
-        },
-      }));
-      autoSave();
     },
 
     setCharacterI18nName: (charName, locale, value) => {
@@ -1239,7 +1192,7 @@ function mergeChars(prev: Character[], next: Character[]): Character[] {
   const byName = new Map(prev.map((c) => [c.name, c]));
   return next.map((c) => {
     const old = byName.get(c.name);
-    // 색·스프라이트뿐 아니라 사용자가 입력한 외형·성격·내레이션 설정도 보존
+    // 색·스프라이트뿐 아니라 사용자가 입력한 내레이션 설정도 보존
     // (재분석/대본 수정 시 캐릭터 설정이 날아가지 않도록).
     return old
       ? {
@@ -1247,8 +1200,6 @@ function mergeChars(prev: Character[], next: Character[]): Character[] {
           color: old.color,
           expressions: old.expressions,
           outfits: old.outfits ?? c.outfits,
-          appearance: old.appearance ?? c.appearance,
-          personality: old.personality ?? c.personality,
           isProtagonist: old.isProtagonist ?? c.isProtagonist,
           i18nName: old.i18nName ?? c.i18nName,
         }

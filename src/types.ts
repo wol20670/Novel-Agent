@@ -103,13 +103,6 @@ export interface Scene {
 export interface Outfit {
   /** 의상 이름(예: '수영복', '교복'). '기본'은 예약어. */
   name: string;
-  /** 이 의상의 복장/외형 묘사. 기본 외형(appearance)에 덧붙여 생성에 반영된다. */
-  appearance?: string;
-  /**
-   * 이 의상에서 "빠져야 할" 것(예: 수영복의 '재킷, 가방'). 기본 외형(appearance)에 박힌 옷·소품이
-   * 이 의상까지 따라붙는 누수를 막는다 — 긍정 프롬프트에서 해당 태그를 빼고 네거티브로도 억제한다.
-   */
-  exclude?: string;
   /** 표정 → assetId (이 의상의 스프라이트 세트). */
   expressions: Partial<Record<Expression, string>>;
 }
@@ -121,16 +114,6 @@ export interface Character {
   expressions: Partial<Record<Expression, string>>;
   /** 추가 의상(선택). #복장 태그로 장면별 의상을 지정할 수 있다. */
   outfits?: Outfit[];
-  /**
-   * 외형 설명(선택) — GPT 스프라이트 생성 시 6종 표정 프롬프트에 공통 주입해
-   * 같은 인물로 보이게 한다. 예: "갈색 단발, 교복, 푸른 눈".
-   */
-  appearance?: string;
-  /**
-   * 성격·역할 설명(선택) — 그림의 분위기·표정·포즈에 참고로 주입한다.
-   * 예: "밝고 장난기 많은 카페 알바생, 17세". 외형(appearance)을 보조한다.
-   */
-  personality?: string;
   /**
    * 내레이션·대사 전용 화자(주인공 등). true 면 화면에 스프라이트를 세우지 않고
    * 에셋 창의 스프라이트 관리에서도 제외한다. 대사 이름표·분기에는 정상 참여.

@@ -329,8 +329,6 @@ function CharacterCard({ name }: { name: string }) {
   const importSprite = useStore((s) => s.importSprite);
   const clearAll = useStore((s) => s.clearCharacterSprites);
   const addOutfit = useStore((s) => s.addOutfit);
-  const setOutfitAppearance = useStore((s) => s.setOutfitAppearance);
-  const setOutfitExclude = useStore((s) => s.setOutfitExclude);
   const removeOutfit = useStore((s) => s.removeOutfit);
   const setI18nName = useStore((s) => s.setCharacterI18nName);
   const exprList = effectiveExpressions(useStore((s) => s.project.expressions));
@@ -367,21 +365,6 @@ function CharacterCard({ name }: { name: string }) {
           title={`${outfit === '기본' ? '' : outfit + ' '}기본 입화 이미지 업로드`}
         />
       </div>
-      <input
-        className="field text-xs mb-1.5"
-        placeholder="외형 (예: 갈색 단발, 교복, 푸른 눈) — ChatGPT 프롬프트 작성 참고용 메모"
-        value={c.appearance ?? ''}
-        onChange={(e) => updateChar(name, { appearance: e.target.value })}
-        title="ChatGPT 등에서 이 캐릭터 이미지를 만들 때 참고할 메모입니다."
-      />
-      <input
-        className="field text-xs mb-1.5"
-        placeholder="성격·역할 (예: 밝고 장난기 많은 카페 알바, 17세) — 참고용 메모"
-        value={c.personality ?? ''}
-        onChange={(e) => updateChar(name, { personality: e.target.value })}
-        title="그림 분위기를 ChatGPT 에 설명할 때 참고할 메모입니다."
-      />
-
       {/* 이름표 번역 — 자막 언어를 바꿨을 때 보일 이름. 비우면 원문(대본 그대로) 표시. */}
       {nameLocales.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
@@ -429,35 +412,19 @@ function CharacterCard({ name }: { name: string }) {
         </button>
       </div>
       {outfit !== '기본' && (
-        <div className="flex flex-col gap-1.5 mb-1.5">
-          <div className="flex items-center gap-1.5">
-            <input
-              className="field text-xs flex-1"
-              placeholder={`'${outfit}' 복장 묘사 (예: 흰 비키니 수영복, 맨발) — 참고용 메모`}
-              value={activeOutfit?.appearance ?? ''}
-              onChange={(e) => setOutfitAppearance(name, outfit, e.target.value)}
-              title="이 의상의 복장 묘사를 적어두면 ChatGPT 프롬프트 작성에 참고할 수 있습니다."
-            />
-            <button
-              className="text-[10px] text-gray-500 hover:text-rose-600 shrink-0"
-              title="이 의상과 그 입화를 삭제"
-              onClick={() => {
-                if (window.confirm(`'${name}'의 '${outfit}' 의상을 삭제할까요? 이 의상의 입화도 함께 삭제됩니다.`)) {
-                  removeOutfit(name, outfit);
-                  setOutfit('기본');
-                }
-              }}
-            >
-              의상 삭제
-            </button>
-          </div>
-          <input
-            className="field text-xs flex-1"
-            placeholder={`제외 메모 (예: 재킷, 가방) — 기본 외형과 겹치지 않게 참고`}
-            value={activeOutfit?.exclude ?? ''}
-            onChange={(e) => setOutfitExclude(name, outfit, e.target.value)}
-            title="기본 외형에 포함된 옷·소품 중 이 의상엔 빼야 할 것을 적어두는 메모입니다."
-          />
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <button
+            className="text-[10px] text-gray-500 hover:text-rose-600"
+            title="이 의상과 그 입화를 삭제"
+            onClick={() => {
+              if (window.confirm(`'${name}'의 '${outfit}' 의상을 삭제할까요? 이 의상의 입화도 함께 삭제됩니다.`)) {
+                removeOutfit(name, outfit);
+                setOutfit('기본');
+              }
+            }}
+          >
+            의상 삭제
+          </button>
         </div>
       )}
 
