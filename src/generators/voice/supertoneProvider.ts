@@ -36,8 +36,11 @@ export interface SupertoneVoice {
   models?: string[];
 }
 
-function proxyUrl(path: string): string {
-  return `${aiConfig.voice.proxyBase}/${path.replace(/^\/+/, '')}`;
+// 실제 Supertone 하위경로는 ?path= 쿼리로 넘긴다(고정 경로 하나만 씀 — api/supertone.ts 참고,
+// 다단계 catch-all 라우팅이 Vercel 배포에서 깨지는 걸 확인해 이 방식으로 통일했다).
+function proxyUrl(subpath: string, query?: Record<string, string>): string {
+  const qs = new URLSearchParams({ path: subpath, ...query });
+  return `${aiConfig.voice.proxyBase}?${qs.toString()}`;
 }
 
 async function errorMessage(res: Response): Promise<string> {
@@ -72,7 +75,7 @@ export async function supertoneTTS(params: TtsParams, apiKey: string): Promise<T
     };
   }
 
-  const res = await fetch(proxyUrl(`text-to-speech/${encodeURIComponent(voiceId)}`), {
+  const res = await fetch(proxyUrl(`text-to-speech/${voiceId}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-sup-api-key': apiKey },
     body: JSON.stringify(body),
@@ -88,12 +91,11 @@ export async function searchVoices(
   opts: { language?: Locale; style?: string; pageSize?: number },
   apiKey: string,
 ): Promise<SupertoneVoice[]> {
-  const qs = new URLSearchParams();
-  if (opts.language) qs.set('language', opts.language);
-  if (opts.style) qs.set('style', opts.style);
-  qs.set('page_size', String(opts.pageSize ?? 50));
+  const query: Record<string, string> = { page_size: String(opts.pageSize ?? 50) };
+  if (opts.language) query.language = opts.language;
+  if (opts.style) query.style = opts.style;
 
-  const res = await fetch(proxyUrl(`voices/search?${qs.toString()}`), {
+  const res = await fetch(proxyUrl('voices/search', query), {
     headers: { 'x-sup-api-key': apiKey },
   });
   if (!res.ok) throw new Error(await errorMessage(res));

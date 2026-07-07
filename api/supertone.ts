@@ -1,6 +1,11 @@
 // Vercel Edge 함수 — Supertone API(https://supertoneapi.com/v1) 프록시.
-// 브라우저 직접 호출은 CORS로 막힐 수 있어 같은 origin(/api/supertone/*)으로 중계만 한다.
+// 브라우저 직접 호출은 CORS로 막힐 수 있어 같은 origin(/api/supertone)으로 중계만 한다.
 // 키(x-sup-api-key)는 요청 헤더를 그대로 통과시킬 뿐 서버에 저장하지 않는다(BYO 키 원칙 유지).
+//
+// 실제 Supertone 하위경로는 ?path= 쿼리로 받는다(고정 경로 하나만 씀) — 원래
+// api/supertone/[...path].ts catch-all 로 만들었으나, 이 프로젝트(Vite, 비-Next.js)의 Vercel
+// 배포에서 경로 2단계 이상(예: voices/search)이 전부 404 나는 걸 실제 배포에서 확인해 이 방식으로
+// 바꿈(1단계 경로는 정상이었음 — catch-all 다단계 매칭만 깨져 있었다).
 
 export const config = { runtime: 'edge' };
 
@@ -8,7 +13,8 @@ const UPSTREAM = 'https://supertoneapi.com/v1';
 
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const path = url.pathname.replace(/^\/api\/supertone\/?/, '');
+  const path = url.searchParams.get('path') ?? '';
+  url.searchParams.delete('path');
   const target = `${UPSTREAM}/${path}${url.search}`;
 
   const apiKey = req.headers.get('x-sup-api-key');
