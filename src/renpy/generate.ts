@@ -543,6 +543,14 @@ function optionsRpy(project: Project): string {
           // 지운다(renpy/translation/__init__.py clean_data() — 실제 SDK 소스로 확인). 이 앱은
           // 플레이 중 언제든 언어를 바꿀 수 있어 그 기본값이 그대로 문제로 드러나므로 꺼둔다.
           'define config.clear_history_on_language_change = False  # 언어 전환해도 기록 유지',
+          'init python:',
+          '    def _dedup_history_on_language_switch(h):',
+          '        # 언어 전환 시 Ren\'Py 가 현재 문장을 재실행해(translation.check_language()) 기록에',
+          '        # 같은 줄이 한 번 더 쌓이는 걸 방지. 완전히 같은 kind/who/what 인 직전 항목만 지운다.',
+          '        hist = renpy.store._history_list',
+          '        if hist and hist[-1].kind == h.kind and hist[-1].who == h.who and hist[-1].what == h.what:',
+          '            hist.pop()',
+          '    config.history_callbacks.append(_dedup_history_on_language_switch)',
         ]
       : []),
     `define config.window_title = "${t}"`,
