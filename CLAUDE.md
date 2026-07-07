@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> 🔵 **[`HANDOFF.md`](./HANDOFF.md)** 를 먼저 읽으세요 — 2026-07-07 오후~저녁 세션 반영 사항(Supertone TTS 통합·voice() 버그·기록 삭제/중복 버그·에셋 해제 버튼·퀵메뉴 개편) + Ren'Py 유지 결정 배경. 다음 세션에서 최신 상태 확인 후 이 줄과 HANDOFF.md 삭제할 것.
+
 Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite + React + TS + zustand + Tailwind).
 100% 클라이언트(백엔드 없음), BYO 키. 한국어 코드베이스.
 

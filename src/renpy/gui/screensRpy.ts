@@ -356,38 +356,61 @@ screen quick_menu():
 
     if quick_menu:
 
-        hbox:
-            style_prefix "quick"
-            style "quick_menu"
+        # 우상단에 항상 떠 있는 톱니바퀴(메뉴) 버튼 — 누르면 바로 아래로 목록이 펼쳐진다.
+        # (진짜 원형 아이콘은 별도 PNG 에셋이 있어야 해서, 우선 둥근 느낌의 알약형 버튼으로 구현.)
+        textbutton _("메뉴"):
+            style "quick_gear_button"
+            xalign 1.0
+            yalign 0.0
+            action ToggleVariable("quick_menu_expanded")
 
-            textbutton _("뒤로") action Rollback()
-            textbutton _("기록") action ShowMenu('history')
-            textbutton _("스킵") action Skip() alternate Skip(fast=True, confirm=True)
-            textbutton _("자동") action Preference("auto-forward", "toggle")
-            textbutton _("저장") action ShowMenu('save')
-            textbutton _("빠른저장") action QuickSave()
-            textbutton _("빠른불러오기") action QuickLoad()
-            textbutton _("설정") action ShowMenu('preferences')
+        if quick_menu_expanded:
+            vbox:
+                style_prefix "quick"
+                style "quick_menu"
+                xalign 1.0
+                yalign 0.0
+
+                textbutton _("뒤로") action [Rollback(), SetVariable("quick_menu_expanded", False)]
+                textbutton _("기록") action [ShowMenu('history'), SetVariable("quick_menu_expanded", False)]
+                textbutton _("스킵") action [Skip(), SetVariable("quick_menu_expanded", False)] alternate Skip(fast=True, confirm=True)
+                textbutton _("자동") action [Preference("auto-forward", "toggle"), SetVariable("quick_menu_expanded", False)]
+                textbutton _("저장") action [ShowMenu('save'), SetVariable("quick_menu_expanded", False)]
+                textbutton _("빠른저장") action [QuickSave(), SetVariable("quick_menu_expanded", False)]
+                textbutton _("빠른불러오기") action [QuickLoad(), SetVariable("quick_menu_expanded", False)]
+                textbutton _("설정") action [ShowMenu('preferences'), SetVariable("quick_menu_expanded", False)]
 
 
 init python:
     config.overlay_screens.append("quick_menu")
 
 default quick_menu = True
+## 메뉴 펼침 상태(로컬 변수 아님 — 게임 진행 변수라 세이브/롤백에도 자연히 포함됨).
+default quick_menu_expanded = False
 
-style quick_menu is hbox
+style quick_menu is vbox
 style quick_button is default
 style quick_button_text is button_text
 
 style quick_menu:
-    xalign 0.5
-    yalign 1.0
+    xalign 1.0
+    yalign 0.0
+    yoffset gui.scale(56)
+    spacing gui.scale(2)
 
 style quick_button:
     properties gui.button_properties("quick_button")
 
 style quick_button_text:
     properties gui.text_properties("quick_button")
+
+## 톱니바퀴(메뉴) 토글 버튼 — quick_button 과 같은 색감, 위치만 화면 우상단 고정.
+style quick_gear_button is quick_button
+style quick_gear_button_text is quick_button_text
+
+style quick_gear_button:
+    xpadding gui.scale(16)
+    ypadding gui.scale(10)
 
 
 ################################################################################
