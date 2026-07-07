@@ -4,6 +4,7 @@ import { aiConfig } from '../config/aiConfig';
 import { supertoneTTS, searchVoices, type SupertoneVoice, type VoiceSettings } from '../generators/voice/supertoneProvider';
 import { LOCALE_LABEL, type Character, type Line, type Locale } from '../types';
 import Spinner from './Spinner';
+import UploadButton from './UploadButton';
 
 type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
 
@@ -98,11 +99,11 @@ export default function VoiceLab({
     updateChar(char.name, { voice: { voiceId, style: style || undefined, settings } });
   };
 
-  const attachToLine = async () => {
-    if (!audioBlob) return;
+  const attachToLine = async (blob: Blob = audioBlob!) => {
+    if (!blob) return;
     setAttaching(true);
     try {
-      await attachLineVoice(sceneId, lineIndex, lang, audioBlob, char.name);
+      await attachLineVoice(sceneId, lineIndex, lang, blob, char.name);
     } finally {
       setAttaching(false);
     }
@@ -215,13 +216,21 @@ export default function VoiceLab({
             <button
               className="btn-primary text-xs flex-1"
               disabled={!audioBlob || attaching}
-              onClick={attachToLine}
+              onClick={() => attachToLine()}
               title={`방금 생성한 음성을 ${LOCALE_LABEL[lang]} 언어로 이 대사에 매답니다(Ren'Py 내보내기에 실제 반영)`}
             >
               {attaching ? <Spinner /> : `🎬 ${LOCALE_LABEL[lang]}로 이 대사에 적용`}
             </button>
+            <UploadButton
+              accept="audio/*"
+              label={`📁 ${LOCALE_LABEL[lang]} 파일로 적용`}
+              className="btn-ghost text-xs shrink-0"
+              disabled={attaching}
+              onFile={(file) => attachToLine(file)}
+              title="이미 생성·다운로드해둔 mp3 등을 재생성 없이 바로 이 대사·언어에 적용(크레딧 소모 없음)"
+            />
             {attachedHere && (
-              <button className="btn-ghost text-xs" disabled={attaching} onClick={detachFromLine}>
+              <button className="btn-ghost text-xs shrink-0" disabled={attaching} onClick={detachFromLine}>
                 해제
               </button>
             )}
@@ -230,7 +239,8 @@ export default function VoiceLab({
           <p className="text-[10px] text-gray-500 leading-relaxed">
             "▶ 생성·재생"은 테스트용(저장 안 함). "💾 캐릭터에 저장"은 다음에 이 캐릭터 대사를 열 때
             프리필되는 설정 레시피만 남김. <b className="text-gray-400">실제로 게임에서 소리가 나게
-            하려면</b> 방금 생성한 음성을 "🎬 이 대사에 적용"으로 매달아야 합니다 — 언어별로 따로
+            하려면</b> 방금 생성한 음성(또는 이미 갖고 있는 파일)을 "🎬 적용"/"📁 파일로 적용"으로
+            매달아야 합니다 — 언어별로 따로
             매달 수 있고, 자막 언어와 무관하게 플레이어가 설정 화면에서 음성 언어만 골라 들을 수 있습니다.
           </p>
         </>
