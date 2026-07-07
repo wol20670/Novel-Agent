@@ -130,10 +130,16 @@ interface State {
 
   // 에셋 라이브러리 (이름 그룹 단위 — 같은 이름 장면 전체에 한 번에 적용)
   renameBackgroundGroup: (key: string, name: string) => void;
+  /** 이 배경 그룹(같은 이름 쓰는 모든 장면)의 업로드 해제 — Canvas 임시로 복귀. */
+  clearBackgroundGroup: (key: string) => Promise<void>;
   /** CG 컷 설명(라벨) 편집. */
   renameCgGroup: (oldDesc: string, newDesc: string) => void;
   importCgGroup: (desc: string, file: File) => Promise<void>;
   clearCgGroup: (desc: string) => Promise<void>;
+  /** 이 이름의 아이템 이미지 업로드 해제 — Canvas 임시로 복귀. */
+  removeItem: (name: string) => Promise<void>;
+  /** 이 BGM 그룹(같은 이름 쓰는 모든 장면)의 업로드 해제. */
+  clearBgmGroup: (key: string) => Promise<void>;
   importMenuArt: (which: 'main' | 'game', file: File) => Promise<void>;
   clearMenuArt: (which: 'main' | 'game') => Promise<void>;
 
@@ -726,6 +732,20 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    removeItem: async (name) => {
+      const key = name.trim();
+      const prev = get().project.itemAssetIds?.[key];
+      if (!prev) return;
+      set((s) => {
+        const itemAssetIds = { ...(s.project.itemAssetIds ?? {}) };
+        delete itemAssetIds[key];
+        return { project: { ...s.project, itemAssetIds } };
+      });
+      await deleteAsset(prev).catch(() => {});
+      autoSave();
+      flash(`'${key}' 아이템 이미지를 해제했습니다(Canvas 임시로 복귀).`);
+    },
+
     importCg: async (sceneId, index, file) => {
       const scene = get().project.scenes.find((s) => s.id === sceneId);
       if (!scene) return;
@@ -872,6 +892,36 @@ export const useStore = create<State>((set, get) => {
         },
       }));
       autoSave();
+    },
+
+    clearBackgroundGroup: async (key) => {
+      const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === key);
+      const prevs = new Set(targets.map((t) => t.backgroundAssetId).filter((x): x is string => !!x));
+      set((s) => ({
+        project: {
+          ...s.project,
+          scenes: s.project.scenes.map((sc) =>
+            backgroundKey(sc) === key ? { ...sc, backgroundAssetId: undefined } : sc,
+          ),
+        },
+      }));
+      autoSave();
+      for (const p of prevs) await deleteAsset(p).catch(() => {});
+      flash('배경 업로드를 해제했습니다(Canvas 임시로 복귀).');
+    },
+
+    clearBgmGroup: async (key) => {
+      const targets = get().project.scenes.filter((sc) => bgmKey(sc) === key);
+      const prevs = new Set(targets.map((t) => t.bgmAssetId).filter((x): x is string => !!x));
+      set((s) => ({
+        project: {
+          ...s.project,
+          scenes: s.project.scenes.map((sc) => (bgmKey(sc) === key ? { ...sc, bgmAssetId: undefined } : sc)),
+        },
+      }));
+      autoSave();
+      for (const p of prevs) await deleteAsset(p).catch(() => {});
+      flash('BGM 업로드를 해제했습니다.');
     },
 
     renameCgGroup: (oldDesc, newDesc) => {

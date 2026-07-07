@@ -530,6 +530,7 @@ function ExpressionThumb({
 function BgGroupRow({ group }: { group: Group }) {
   const rename = useStore((s) => s.renameBackgroundGroup);
   const importBg = useStore((s) => s.importBackground);
+  const clearBg = useStore((s) => s.clearBackgroundGroup);
   const url = useAssetUrl(group.repAssetId);
   const [draft, setDraft] = useState(group.name);
   const rep = group.sceneIds[0];
@@ -553,12 +554,19 @@ function BgGroupRow({ group }: { group: Group }) {
           onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
         />
       </div>
-      <UploadButton
-        onFile={(f) => importBg(rep, f)}
-        label={url ? '↥ 교체' : '↥ 업로드'}
-        className="btn-ghost shrink-0"
-        title={`${group.count}개 장면에 적용`}
-      />
+      <div className="flex flex-col gap-1 shrink-0 w-24">
+        <UploadButton
+          onFile={(f) => importBg(rep, f)}
+          label={url ? '↥ 교체' : '↥ 업로드'}
+          className="btn-ghost text-[11px]"
+          title={`${group.count}개 장면에 적용`}
+        />
+        {url && (
+          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => clearBg(group.key)}>
+            해제
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -574,6 +582,7 @@ function itemNames(scenes: Scene[]): string[] {
 /** 아이템(소품) 한 종 — 투명 컷아웃 업로드. 이름 기준 공유(project.itemAssetIds). */
 function ItemGroupRow({ name }: { name: string }) {
   const upload = useStore((s) => s.uploadItem);
+  const remove = useStore((s) => s.removeItem);
   const assetId = useStore((s) => s.project.itemAssetIds?.[name]);
   const url = useAssetUrl(assetId);
   return (
@@ -584,7 +593,14 @@ function ItemGroupRow({ name }: { name: string }) {
       <div className="flex-1 min-w-0">
         <span className="text-sm text-gray-200">🎁 {name}</span>
       </div>
-      <UploadButton onFile={(f) => upload(name, f)} label={url ? '↥ 교체' : '↥ 업로드'} className="btn-ghost text-[11px] shrink-0" />
+      <div className="flex flex-col gap-1 shrink-0 w-24">
+        <UploadButton onFile={(f) => upload(name, f)} label={url ? '↥ 교체' : '↥ 업로드'} className="btn-ghost text-[11px]" />
+        {url && (
+          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => remove(name)}>
+            해제
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -633,6 +649,7 @@ function CgGroupRow({ group }: { group: CgGroup }) {
 
 function BgmGroupRow({ group }: { group: Group }) {
   const importBgm = useStore((s) => s.importBgm);
+  const clearBgm = useStore((s) => s.clearBgmGroup);
   const url = useAssetUrl(group.repAssetId);
   const rep = group.sceneIds[0];
 
@@ -650,6 +667,11 @@ function BgmGroupRow({ group }: { group: Group }) {
           accept="audio/*"
           title={`${group.count}개 장면에 적용`}
         />
+        {url && (
+          <button className="text-[10px] text-gray-500 hover:text-rose-600 shrink-0" onClick={() => clearBgm(group.key)}>
+            해제
+          </button>
+        )}
       </div>
       {url && <audio src={url} controls className="w-full h-8" />}
     </div>
