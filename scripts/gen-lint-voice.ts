@@ -23,8 +23,8 @@ const project = {
   ...emptyProject(),
   genre: 'romance' as const,
   baseLocale: 'ko' as const,
-  textLocales: ['ko'] as const,
-  voiceLocales: ['ko', 'ja'] as const, // 자막은 ko 단일, 음성은 ko/ja 두 개(교차 선택 시나리오).
+  textLocales: ['ko', 'en'] as const, // 자막 다국어(config.clear_history_on_language_change 검증용)
+  voiceLocales: ['ko', 'ja'] as const, // 음성은 ko/ja 두 개(자막과 독립 교차 선택 시나리오).
   scenes: scenes.map((s) => ({
     ...s,
     status: 'approved' as const,

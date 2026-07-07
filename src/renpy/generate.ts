@@ -536,7 +536,15 @@ function optionsRpy(project: Project): string {
     `define config.has_sound = True`,
     `define config.has_music = True`,
     `define config.has_voice = True`,
-    ...(multiText ? ['define config.language = None  # 기본 언어(대본 원문). 설정에서 자막 언어 전환.'] : []),
+    ...(multiText
+      ? [
+          'define config.language = None  # 기본 언어(대본 원문). 설정에서 자막 언어 전환.',
+          // Ren'Py 기본값(True)은 자막 언어를 바꿀 때마다 "기록"(History) 화면 내용을 통째로
+          // 지운다(renpy/translation/__init__.py clean_data() — 실제 SDK 소스로 확인). 이 앱은
+          // 플레이 중 언제든 언어를 바꿀 수 있어 그 기본값이 그대로 문제로 드러나므로 꺼둔다.
+          'define config.clear_history_on_language_change = False  # 언어 전환해도 기록 유지',
+        ]
+      : []),
     `define config.window_title = "${t}"`,
     `define gui.about = _("제작: ${esc(project.author)}")`,
     '',
