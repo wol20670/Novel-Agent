@@ -125,6 +125,21 @@ export interface Character {
    * 에셋 탭의 캐릭터 카드에서 편집(다른 자막 언어가 켜져 있을 때만 입력칸이 보인다).
    */
   i18nName?: I18nText;
+  /**
+   * Supertone 성우 설정(선택) — 멘트별 보이스 테스트에서 마음에 든 값을 저장해두는 참고용
+   * 프리필(주인공·나레이션은 성우가 필요 없어 보통 비워둔다). 오디오 자체는 저장하지 않는다.
+   */
+  voice?: {
+    voiceId: string;
+    model?: string;
+    style?: string;
+    settings?: {
+      speed?: number;
+      pitchShift?: number;
+      pitchVariance?: number;
+      textGuidance?: number;
+    };
+  };
 }
 
 export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice' | 'item';

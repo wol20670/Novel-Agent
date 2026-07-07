@@ -4,6 +4,7 @@ import { SCENE_STATUS_LABEL, effectiveExpressions, emojiFor, baseLocaleOf, LOCAL
 import { inferEmotion } from '../generators/emotion';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
+import VoiceLab from './VoiceLab';
 
 const STATUS_BTN: Record<SceneStatus, { on: string; dot: string }> = {
   review: { on: 'bg-gray-500/15 text-gray-300 border-gray-400', dot: 'bg-gray-400' },
@@ -196,11 +197,17 @@ function LineRow({
   direction: string[];
 }) {
   const [editing, setEditing] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const setText = useStore((s) => s.setLineText);
   const setTr = useStore((s) => s.setLineTranslation);
   const base = useStore((s) => baseLocaleOf(s.project));
+  const characters = useStore((s) => s.project.characters);
   // 번역 대상 = base 를 제외한 지원 로케일(en·ja) — 엑셀 C/D열과 동일.
   const targets = (Object.keys(LOCALE_LABEL) as Locale[]).filter((l) => l !== base);
+  // 성우 테스트는 단일 화자 대사 + 그 화자가 주인공(내레이션 전용)이 아닐 때만(히로인 등).
+  const isSingleSpeaker = line.kind === 'dialogue' && !line.members?.length;
+  const speakerChar = isSingleSpeaker ? characters.find((c) => c.name === (line as DialogueLine).speaker) : undefined;
+  const canVoice = !!speakerChar && !speakerChar.isProtagonist;
 
   // 아이템(소품) 팝업 라인 — 편집/번역/표정 없이 칩으로만 표시.
   if (line.kind === 'item') {
@@ -218,71 +225,92 @@ function LineRow({
   const isDlg = line.kind === 'dialogue';
 
   return (
-    <div className="flex items-start gap-1.5">
-      {editing ? (
-        <div className="flex-1 min-w-0 space-y-1 py-0.5" onClick={(e) => e.stopPropagation()}>
-          {isDlg && <b className="text-accent text-xs">{(line as DialogueLine).speaker}</b>}
-          <textarea
-            className="field w-full text-sm resize-y min-h-[2.2rem] leading-snug"
-            value={line.text}
-            onChange={(e) => setText(sceneId, index, e.target.value)}
-            placeholder="멘트(원문)"
-            autoFocus
-          />
-          {targets.map((loc) => (
-            <div key={loc} className="flex items-center gap-1.5">
-              <span className="text-[10px] text-gray-500 w-7 shrink-0 uppercase">{loc}</span>
-              <input
-                className="field flex-1 text-xs"
-                value={line.i18n?.[loc] ?? ''}
-                onChange={(e) => setTr(sceneId, index, loc, e.target.value)}
-                placeholder={`${LOCALE_LABEL[loc]} 번역`}
-              />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="flex-1 min-w-0">
-          {isDlg ? (
-            <p>
-              <b className="text-accent">{(line as DialogueLine).speaker}</b>{' '}
-              <span className="text-gray-200">{line.text}</span>
-            </p>
-          ) : (
-            <p className="text-gray-400 italic">{line.text}</p>
-          )}
-          {targets.map((loc) =>
-            line.i18n?.[loc] ? (
-              <p key={loc} className="text-[11px] text-gray-500 pl-1">
-                <span className="uppercase text-gray-600 mr-1">{loc}</span>
-                {line.i18n[loc]}
+    <div>
+      <div className="flex items-start gap-1.5">
+        {editing ? (
+          <div className="flex-1 min-w-0 space-y-1 py-0.5" onClick={(e) => e.stopPropagation()}>
+            {isDlg && <b className="text-accent text-xs">{(line as DialogueLine).speaker}</b>}
+            <textarea
+              className="field w-full text-sm resize-y min-h-[2.2rem] leading-snug"
+              value={line.text}
+              onChange={(e) => setText(sceneId, index, e.target.value)}
+              placeholder="멘트(원문)"
+              autoFocus
+            />
+            {targets.map((loc) => (
+              <div key={loc} className="flex items-center gap-1.5">
+                <span className="text-[10px] text-gray-500 w-7 shrink-0 uppercase">{loc}</span>
+                <input
+                  className="field flex-1 text-xs"
+                  value={line.i18n?.[loc] ?? ''}
+                  onChange={(e) => setTr(sceneId, index, loc, e.target.value)}
+                  placeholder={`${LOCALE_LABEL[loc]} 번역`}
+                />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex-1 min-w-0">
+            {isDlg ? (
+              <p>
+                <b className="text-accent">{(line as DialogueLine).speaker}</b>{' '}
+                <span className="text-gray-200">{line.text}</span>
               </p>
-            ) : null,
-          )}
-        </div>
-      )}
+            ) : (
+              <p className="text-gray-400 italic">{line.text}</p>
+            )}
+            {targets.map((loc) =>
+              line.i18n?.[loc] ? (
+                <p key={loc} className="text-[11px] text-gray-500 pl-1">
+                  <span className="uppercase text-gray-600 mr-1">{loc}</span>
+                  {line.i18n[loc]}
+                </p>
+              ) : null,
+            )}
+          </div>
+        )}
 
-      <button
-        className={`text-[11px] rounded px-1 py-0.5 shrink-0 border outline-none ${
-          editing ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-400 bg-panel2 hover:text-gray-200'
-        }`}
-        onClick={(e) => {
-          e.stopPropagation();
-          setEditing((v) => !v);
-        }}
-        title="멘트·번역 편집"
-      >
-        {editing ? '완료' : '✏️'}
-      </button>
+        {canVoice && (
+          <button
+            className={`text-[11px] rounded px-1 py-0.5 shrink-0 border outline-none ${
+              voiceOpen ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-400 bg-panel2 hover:text-gray-200'
+            }`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setVoiceOpen((v) => !v);
+            }}
+            title="성우 음성 테스트(Supertone)"
+          >
+            🎙
+          </button>
+        )}
 
-      {isDlg && (
-        <LineEmotion
-          sceneId={sceneId}
-          index={index}
-          line={line as DialogueLine}
-          background={background}
-          direction={direction}
-        />
+        <button
+          className={`text-[11px] rounded px-1 py-0.5 shrink-0 border outline-none ${
+            editing ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-400 bg-panel2 hover:text-gray-200'
+          }`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setEditing((v) => !v);
+          }}
+          title="멘트·번역 편집"
+        >
+          {editing ? '완료' : '✏️'}
+        </button>
+
+        {isDlg && (
+          <LineEmotion
+            sceneId={sceneId}
+            index={index}
+            line={line as DialogueLine}
+            background={background}
+            direction={direction}
+          />
+        )}
+      </div>
+
+      {voiceOpen && speakerChar && (
+        <VoiceLab char={speakerChar} line={line as DialogueLine} baseLocale={base} />
       )}
     </div>
   );

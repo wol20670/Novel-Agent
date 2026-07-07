@@ -137,6 +137,10 @@ interface State {
   openaiKey: string;
   setOpenaiKey: (key: string) => void;
 
+  /** Supertone 키(선택) — 성우 TTS 테스트용. 브라우저에만 저장, /api/supertone 프록시로만 통과. */
+  supertoneKey: string;
+  setSupertoneKey: (key: string) => void;
+
   /**
    * 협업(실시간 공유, 가벼운 버전) — 2인 전제. Supabase 접속 정보(URL·anon key)는 빌드에
    * 내장되어 있어 사용자는 "방 코드"(6자리)와 이름만 다룬다. ⚠️ 보안 경계 아님: 방 코드를 아는
@@ -274,6 +278,7 @@ export const useStore = create<State>((set, get) => {
     project: emptyProject(),
     assets: {},
     openaiKey: '',
+    supertoneKey: '',
     collabEnabled: false,
     collabRoom: '',
     collabName: '',
@@ -904,6 +909,15 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    setSupertoneKey: (key) => {
+      set({ supertoneKey: key });
+      try {
+        localStorage.setItem('na_supertone_key', key);
+      } catch {
+        /* ignore */
+      }
+    },
+
     save: () => {
       const { project, assets } = get();
       try {
@@ -923,7 +937,14 @@ export const useStore = create<State>((set, get) => {
           return '';
         }
       })();
-      set({ openaiKey });
+      const supertoneKey = (() => {
+        try {
+          return localStorage.getItem('na_supertone_key') ?? '';
+        } catch {
+          return '';
+        }
+      })();
+      set({ openaiKey, supertoneKey });
       if (loaded) {
         set({ project: loaded.project, assets: loaded.assets, selectedSceneId: loaded.project.scenes[0]?.id ?? null });
       }
@@ -1202,6 +1223,7 @@ function mergeChars(prev: Character[], next: Character[]): Character[] {
           outfits: old.outfits ?? c.outfits,
           isProtagonist: old.isProtagonist ?? c.isProtagonist,
           i18nName: old.i18nName ?? c.i18nName,
+          voice: old.voice ?? c.voice,
         }
       : c;
   });

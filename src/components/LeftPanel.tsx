@@ -23,6 +23,8 @@ export default function LeftPanel() {
   const clearGenerated = useStore((s) => s.clearGeneratedAssets);
   const openaiKey = useStore((s) => s.openaiKey);
   const setOpenaiKey = useStore((s) => s.setOpenaiKey);
+  const supertoneKey = useStore((s) => s.supertoneKey);
+  const setSupertoneKey = useStore((s) => s.setSupertoneKey);
   const translateMode = translateModeOf(project);
   const setTranslateMode = useStore((s) => s.setTranslateMode);
   const exportProject = useStore((s) => s.exportProject);
@@ -31,6 +33,7 @@ export default function LeftPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const projFileRef = useRef<HTMLInputElement>(null);
   const [showOaiKey, setShowOaiKey] = useState(false);
+  const [showSupertoneKey, setShowSupertoneKey] = useState(false);
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -219,6 +222,36 @@ export default function LeftPanel() {
               장면 탭 상단의 <b>🌐 전체 자동 번역</b> 버튼으로 실행됩니다(빈 칸만 채움, OpenAI 키 필요).
             </p>
           )}
+        </div>
+      </section>
+
+      <Divider />
+
+      {/* Supertone 키 — 히로인 대사 성우(TTS) 테스트용. CORS 때문에 /api/supertone 프록시를 거친다. */}
+      <section className="flex flex-col gap-2">
+        <h2 className="section-title">Supertone 키 · 선택 (성우 TTS 테스트)</h2>
+        <p className="text-[11px] text-gray-500 leading-snug">
+          히로인 대사 옆 🎙 버튼으로 실제 음성을 생성·재생해볼 수 있습니다(주인공·나레이션은 성우 없음).{' '}
+          <b className="text-gray-400">키는 이 브라우저에만 저장</b>되며, 호출은 CORS 우회용 프록시(
+          <code className="text-accent">/api/supertone</code>)를 거칠 뿐 서버에 저장되지 않습니다.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type={showSupertoneKey ? 'text' : 'password'}
+            className="field flex-1"
+            placeholder="Supertone API 키"
+            value={supertoneKey}
+            onChange={(e) => setSupertoneKey(e.target.value)}
+          />
+          <button className="btn-ghost" onClick={() => setShowSupertoneKey((v) => !v)}>
+            {showSupertoneKey ? '숨김' : '표시'}
+          </button>
+        </div>
+        <div
+          className={`text-[11px] flex items-center gap-1.5 ${supertoneKey ? 'text-emerald-600' : 'text-gray-500'}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${supertoneKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
+          {supertoneKey ? '키 저장됨 · 성우 테스트 켜짐' : '키 없음 · 성우 테스트 꺼짐'}
         </div>
       </section>
 

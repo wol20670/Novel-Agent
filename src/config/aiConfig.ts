@@ -20,6 +20,15 @@ export interface AiConfig {
     /** 창의성. 0=결정적, 1=다양. */
     temperature: number;
   };
+  /**
+   * 성우(TTS) — Supertone. CORS 문제로 브라우저 직접 호출 대신 같은 origin의
+   * Vercel Edge 함수(api/supertone, 로컬은 vite dev 프록시)를 통해 중계한다.
+   * 키(x-sup-api-key)는 프록시가 저장 없이 그대로 통과시킨다(BYO 키 원칙 유지).
+   */
+  voice: {
+    proxyBase: string;
+    defaultModel: string;
+  };
 }
 
 export const aiConfig: AiConfig = {
@@ -28,5 +37,9 @@ export const aiConfig: AiConfig = {
     themeModel: 'gpt-4o-mini',
     emotionModel: 'gpt-4o-mini',
     temperature: 0.8,
+  },
+  voice: {
+    proxyBase: '/api/supertone',
+    defaultModel: 'sona_speech_2',
   },
 };
