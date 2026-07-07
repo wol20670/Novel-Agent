@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-> 🔵 **[`HANDOFF.md`](./HANDOFF.md)** 를 먼저 읽으세요 — 2026-07-07 세션 반영 사항(협업 버그·폰트 프리셋·이름표 번역·Ren'Py 버그) + 낡은 `feat/cg-i18n-docs-refresh` 브랜치 무시 안내. 다음 세션에서 최신 상태 확인 후 이 줄과 HANDOFF.md 삭제할 것.
-
 Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite + React + TS + zustand + Tailwind).
 100% 클라이언트(백엔드 없음), BYO 키. 한국어 코드베이스.
 
