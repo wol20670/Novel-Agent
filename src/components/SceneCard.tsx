@@ -310,7 +310,7 @@ function LineRow({
       </div>
 
       {voiceOpen && speakerChar && (
-        <VoiceLab char={speakerChar} line={line as DialogueLine} baseLocale={base} />
+        <VoiceLab sceneId={sceneId} lineIndex={index} char={speakerChar} line={line as DialogueLine} baseLocale={base} />
       )}
     </div>
   );

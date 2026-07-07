@@ -14,8 +14,11 @@ export interface RenpyFile {
   content: string;
 }
 
-/** Ren'Py 참조용 결정적 base 이름(언어·확장자 없음). vo("...") 와 업로드 음성 파일 경로가 이걸 공유한다. */
-function voiceBaseName(charId: string, sceneLabel: string, lineIdx: number): string {
+/**
+ * Ren'Py 참조용 결정적 base 이름(언어·확장자 없음). vo("...") 와 buildZip 이 채우는 실제 음성
+ * 파일 경로가 이 함수 하나를 공유해야 어긋나지 않는다(export 해서 zip/buildZip.ts 가 재사용).
+ */
+export function voiceBaseName(charId: string, sceneLabel: string, lineIdx: number): string {
   return `${charId}_${sceneLabel}_${String(lineIdx).padStart(3, '0')}`;
 }
 

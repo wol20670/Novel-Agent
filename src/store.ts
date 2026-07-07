@@ -120,6 +120,14 @@ interface State {
   /** 이 장면(그룹)의 BGM 업로드 해제. */
   clearBgm: (sceneId: string) => Promise<void>;
 
+  /**
+   * VoiceLab(🎙)에서 생성한 음성을 이 대사·언어에 매단다(voices.rpy 의 vo() 가 내보내기 때
+   * game/voices/{lang}/*.mp3 로 실제 반영). project.voiceLocales 에 해당 언어가 없으면 자동 추가.
+   */
+  attachLineVoice: (sceneId: string, lineIndex: number, locale: Locale, blob: Blob, charName: string) => Promise<void>;
+  /** 이 대사·언어의 매단 음성을 해제. */
+  detachLineVoice: (sceneId: string, lineIndex: number, locale: Locale) => Promise<void>;
+
   // 에셋 라이브러리 (이름 그룹 단위 — 같은 이름 장면 전체에 한 번에 적용)
   renameBackgroundGroup: (key: string, name: string) => void;
   /** CG 컷 설명(라벨) 편집. */
@@ -785,6 +793,74 @@ export const useStore = create<State>((set, get) => {
       get().updateScene(sceneId, { bgmAssetId: undefined });
       await deleteAsset(prev).catch(() => {});
       flash('BGM 업로드를 해제했습니다.');
+    },
+
+    attachLineVoice: async (sceneId, lineIndex, locale, blob, charName) => {
+      const scene = get().project.scenes.find((s) => s.id === sceneId);
+      const line = scene?.lines[lineIndex];
+      if (!scene || !line || line.kind !== 'dialogue') return;
+      try {
+        const file = new File([blob], `voice_${safeFileName(charName)}_${lineIndex}_${locale}.mp3`, {
+          type: 'audio/mpeg',
+        });
+        const id = await uploadAsset(file, 'voice', file.name);
+        const prev = line.voiceAssetIds?.[locale];
+        set((s) => ({
+          project: {
+            ...s.project,
+            voiceLocales: s.project.voiceLocales?.includes(locale)
+              ? s.project.voiceLocales
+              : [...(s.project.voiceLocales ?? []), locale],
+            scenes: s.project.scenes.map((sc) =>
+              sc.id === sceneId
+                ? {
+                    ...sc,
+                    lines: sc.lines.map((l, i) =>
+                      i === lineIndex && l.kind === 'dialogue'
+                        ? { ...l, voiced: true, voiceAssetIds: { ...l.voiceAssetIds, [locale]: id } }
+                        : l,
+                    ),
+                  }
+                : sc,
+            ),
+          },
+        }));
+        if (prev) await deleteAsset(prev).catch(() => {});
+        autoSave();
+        flash(`이 대사에 ${locale.toUpperCase()} 음성을 적용했습니다 — Ren'Py 내보내기에 반영됩니다.`);
+      } catch (e) {
+        flash((e as Error).message, 'error');
+      }
+    },
+
+    detachLineVoice: async (sceneId, lineIndex, locale) => {
+      const scene = get().project.scenes.find((s) => s.id === sceneId);
+      const line = scene?.lines[lineIndex];
+      if (!scene || !line || line.kind !== 'dialogue') return;
+      const prev = line.voiceAssetIds?.[locale];
+      if (!prev) return;
+      set((s) => ({
+        project: {
+          ...s.project,
+          scenes: s.project.scenes.map((sc) =>
+            sc.id === sceneId
+              ? {
+                  ...sc,
+                  lines: sc.lines.map((l, i) => {
+                    if (i !== lineIndex || l.kind !== 'dialogue') return l;
+                    const next = { ...l.voiceAssetIds };
+                    delete next[locale];
+                    const stillVoiced = Object.keys(next).length > 0;
+                    return { ...l, voiceAssetIds: next, voiced: stillVoiced };
+                  }),
+                }
+              : sc,
+          ),
+        },
+      }));
+      await deleteAsset(prev).catch(() => {});
+      autoSave();
+      flash(`${locale.toUpperCase()} 음성을 해제했습니다.`);
     },
 
     // 같은 배경 이름을 쓰는 모든 장면의 배경 이름을 한 번에 변경(라이브러리 편집).

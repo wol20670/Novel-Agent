@@ -8,20 +8,28 @@ import Spinner from './Spinner';
 type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
 
 /**
- * 히로인 대사 한 줄의 Supertone 성우 테스트 패널. 감정·속도·억양 등을 바꿔가며 생성·재생만 하고
- * 오디오 자체는 저장하지 않는다 — 마음에 든 설정만 "캐릭터에 저장"으로 남긴다(추후 일괄생성 몫).
+ * 히로인 대사 한 줄의 Supertone 성우 테스트 패널. 감정·속도·억양 등을 바꿔가며 생성·재생해보고,
+ * 마음에 들면 두 곳에 남길 수 있다 — "💾 캐릭터에 저장"(다른 대사 열 때 프리필되는 레시피) /
+ * "🎬 이 언어로 대사에 적용"(실제 오디오 파일을 이 대사·이 언어에 매달아 Ren'Py 내보내기에 반영,
+ * voices.rpy 의 vo() 가 자막 언어와 무관하게 음성 언어별로 재생해준다).
  */
 export default function VoiceLab({
+  sceneId,
+  lineIndex,
   char,
   line,
   baseLocale,
 }: {
+  sceneId: string;
+  lineIndex: number;
   char: Character;
   line: DialogueLine;
   baseLocale: Locale;
 }) {
   const supertoneKey = useStore((s) => s.supertoneKey);
   const updateChar = useStore((s) => s.updateCharacter);
+  const attachLineVoice = useStore((s) => s.attachLineVoice);
+  const detachLineVoice = useStore((s) => s.detachLineVoice);
 
   const [lang, setLang] = useState<Locale>(baseLocale);
   const [voiceId, setVoiceId] = useState(char.voice?.voiceId ?? '');
@@ -33,13 +41,18 @@ export default function VoiceLab({
 
   const [voices, setVoices] = useState<SupertoneVoice[]>([]);
   const [loadingVoices, setLoadingVoices] = useState(false);
+  const [audioBlob, setAudioBlob] = useState<Blob>();
   const [audioUrl, setAudioUrl] = useState<string>();
   const [seconds, setSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [attaching, setAttaching] = useState(false);
   const [error, setError] = useState('');
 
-  // 언마운트·재생성 시 이전 object URL 정리(오디오 영구 저장 안 함).
+  // 언마운트·재생성 시 이전 object URL 정리(오디오 영구 저장 안 함 — 첨부 전까지는 순수 테스트).
   useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
+
+  const attachedLangs = (Object.keys(line.voiceAssetIds ?? {}) as Locale[]);
+  const attachedHere = !!line.voiceAssetIds?.[lang];
 
   const selectedVoice = voices.find((v) => v.voiceId === voiceId);
   const styleOptions = selectedVoice?.styles ?? [];
@@ -71,6 +84,7 @@ export default function VoiceLab({
       );
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       setAudioUrl(URL.createObjectURL(result.blob));
+      setAudioBlob(result.blob);
       setSeconds(result.seconds);
     } catch (e) {
       setError((e as Error).message);
@@ -84,6 +98,24 @@ export default function VoiceLab({
     updateChar(char.name, { voice: { voiceId, style: style || undefined, settings } });
   };
 
+  const attachToLine = async () => {
+    if (!audioBlob) return;
+    setAttaching(true);
+    try {
+      await attachLineVoice(sceneId, lineIndex, lang, audioBlob, char.name);
+    } finally {
+      setAttaching(false);
+    }
+  };
+  const detachFromLine = async () => {
+    setAttaching(true);
+    try {
+      await detachLineVoice(sceneId, lineIndex, lang);
+    } finally {
+      setAttaching(false);
+    }
+  };
+
   return (
     <div className="card border-edge p-2.5 mt-1.5 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center justify-between">
@@ -92,6 +124,11 @@ export default function VoiceLab({
           <span className="text-[10px] text-amber-600">키 없음 — 왼쪽 패널에서 입력하세요</span>
         )}
       </div>
+      {attachedLangs.length > 0 && (
+        <p className="text-[10px] text-emerald-600">
+          ✅ 이 대사에 적용된 음성 언어: {attachedLangs.map((l) => LOCALE_LABEL[l]).join(', ')}
+        </p>
+      )}
 
       {supertoneKey && (
         <>
@@ -174,9 +211,27 @@ export default function VoiceLab({
             </div>
           )}
 
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-primary text-xs flex-1"
+              disabled={!audioBlob || attaching}
+              onClick={attachToLine}
+              title={`방금 생성한 음성을 ${LOCALE_LABEL[lang]} 언어로 이 대사에 매답니다(Ren'Py 내보내기에 실제 반영)`}
+            >
+              {attaching ? <Spinner /> : `🎬 ${LOCALE_LABEL[lang]}로 이 대사에 적용`}
+            </button>
+            {attachedHere && (
+              <button className="btn-ghost text-xs" disabled={attaching} onClick={detachFromLine}>
+                해제
+              </button>
+            )}
+          </div>
+
           <p className="text-[10px] text-gray-500 leading-relaxed">
-            생성한 음성은 테스트 재생만 하고 저장하지 않습니다. 마음에 든 설정만 "💾 캐릭터에 저장"으로
-            남겨두면 다음에 이 캐릭터 대사를 열 때 자동으로 채워집니다.
+            "▶ 생성·재생"은 테스트용(저장 안 함). "💾 캐릭터에 저장"은 다음에 이 캐릭터 대사를 열 때
+            프리필되는 설정 레시피만 남김. <b className="text-gray-400">실제로 게임에서 소리가 나게
+            하려면</b> 방금 생성한 음성을 "🎬 이 대사에 적용"으로 매달아야 합니다 — 언어별로 따로
+            매달 수 있고, 자막 언어와 무관하게 플레이어가 설정 화면에서 음성 언어만 골라 들을 수 있습니다.
           </p>
         </>
       )}

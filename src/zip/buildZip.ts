@@ -4,7 +4,7 @@
 
 import type { Project } from '../types';
 import { effectiveTextLocales, effectiveVoiceLocales } from '../types';
-import { generateRenpyFiles, resolveItems } from '../renpy/generate';
+import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
@@ -126,6 +126,29 @@ export async function collectProjectFiles(
   for (const [file, p] of bgmByFile) {
     const bgm = await blobForBgm(p.assetId);
     if (bgm) out.push({ path: `game/audio/${file}`, data: bgm }); // 없으면 건너뜀(방어적 — 정상 경로에선 항상 있음)
+  }
+
+  // 성우 음성(VoiceLab 로 매단 언어별 mp3) — voices.rpy 의 vo() 가 런타임에 찾는 결정적 경로
+  // game/voices/{lang}/{charId}_{sceneLabel}_{lineIdx}.mp3 그대로 채운다(같은 refs·charIdMap 사용
+  // → generate.ts 가 emit 한 $ vo("...") 인자와 항상 일치). 합동 대사(members)는 generate.ts 도
+  // vo() 를 안 내므로 여기서도 건너뛴다.
+  const charIds = charIdMap(project);
+  const voiceJobs: { path: string; assetId: string }[] = [];
+  for (const ref of refs) {
+    ref.scene.lines.forEach((line, lineIdx) => {
+      if (line.kind !== 'dialogue' || (line.members && line.members.length) || !line.voiceAssetIds) return;
+      const charId = charIds.get(line.speaker);
+      if (!charId) return;
+      const base = voiceBaseName(charId, ref.label, lineIdx);
+      for (const [locale, assetId] of Object.entries(line.voiceAssetIds)) {
+        if (!assetId) continue;
+        voiceJobs.push({ path: `game/voices/${locale}/${base}.mp3`, assetId });
+      }
+    });
+  }
+  for (const job of voiceJobs) {
+    const blob = await getAsset(job.assetId);
+    if (blob) out.push({ path: job.path, data: blob }); // 없으면 건너뜀(vo() 가 무음 폴백)
   }
 
   // 아이템(소품) 팝업 이미지 — 이름 기준 공유. assetId 있으면 그 blob, 없으면 Canvas placeholder.

@@ -65,6 +65,12 @@ export type Line =
       i18n?: I18nText;
       /** 이 라인에 성우 음성을 생성할지(opt-in). 크레딧 폭탄 방지로 기본은 미생성. */
       voiced?: boolean;
+      /**
+       * 로케일별 성우 음성 에셋(선택) — VoiceLab(🎙)의 "이 언어로 적용"으로 설정된다. 자막 언어와
+       * 완전 독립인 voices.rpy 의 vo() 런타임 분기(persistent.voice_language)가 그대로 이 값을
+       * 쓴다 — 언어마다 다른 배우를 붙여도 자막 언어와 상관없이 플레이어가 음성 언어만 따로 고를 수 있다.
+       */
+      voiceAssetIds?: Partial<Record<Locale, string>>;
     }
   | { kind: 'narration'; text: string; i18n?: I18nText; voiced?: boolean }
   /**
