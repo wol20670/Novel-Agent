@@ -134,7 +134,7 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
                 )}
               </div>
             )}
-            <div className="text-gray-100 text-sm leading-snug">{curText}</div>
+            <div className="text-white text-sm leading-snug">{curText}</div>
           </div>
         )}
       </div>
