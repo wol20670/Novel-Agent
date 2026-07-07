@@ -696,7 +696,9 @@ function voicesRpy(project: Project): string {
     '        # base = "c_1_scene_3_002"(언어·확장자 없음). 음성 언어는 persistent 로 자막과 독립 선택.',
     '        path = "voices/%s/%s.mp3" % (persistent.voice_language, base)',
     '        if renpy.loadable(path):',
-    '            renpy.voice(path)   # 다음 say 에 음성 부착. 파일 없으면 조용히 스킵(무음).',
+    // voice() 는 renpy.exports 소속이 아니라 Ren'Py 내장 00voice.rpy 가 store(전역)에 정의한
+    // 일반 함수다 — renpy.voice(...)로 부르면 AttributeError(실제 SDK 실행으로 확인, lint는 못 잡음).
+    '            voice(path)   # 다음 say 에 음성 부착. 파일 없으면 조용히 스킵(무음).',
     '',
   ].join('\n');
 }
