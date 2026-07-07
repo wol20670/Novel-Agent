@@ -26,6 +26,7 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
 
   return (
     <div
+      id={`scene-${sceneId}`}
       onClick={() => select(sceneId)}
       className={`card p-4 cursor-default scroll-mt-4 ${
         selected ? 'border-accent shadow-lg shadow-accent2/10' : 'border-edge hover:border-edge/80'

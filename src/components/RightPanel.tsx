@@ -7,12 +7,33 @@ import ScenePlayer from './ScenePlayer';
 
 export default function RightPanel() {
   const sceneId = useStore((s) => s.selectedSceneId);
+  const scenes = useStore((s) => s.project.scenes);
   const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId) ?? null);
+  const select = useStore((s) => s.selectScene);
+  const setActiveTab = useStore((s) => s.setActiveTab);
   const importBg = useStore((s) => s.importBackground);
   const importBgm = useStore((s) => s.importBgm);
   const clearBgm = useStore((s) => s.clearBgm);
   const bgUrl = useAssetUrl(scene?.backgroundAssetId);
   const bgmUrl = useAssetUrl(scene?.bgmAssetId);
+
+  // 리모컨 — 장면 목록을 스크롤로 훑는 대신 원하는 장면으로 바로 이동(내 화면에만 적용,
+  // 협업자의 스크롤 위치는 건드리지 않는다 — presence(누가 이 장면을 보는지)는 선택 시 기존과
+  // 동일하게 반영되지만 스크롤 자체는 로컬 DOM 동작이라 동기화 대상이 아니다).
+  const jumpToScene = (id: string) => {
+    if (!id) return;
+    select(id);
+    setActiveTab('scenes');
+    requestAnimationFrame(() => {
+      document.getElementById(`scene-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  };
+  const curIdx = scenes.findIndex((s) => s.id === sceneId);
+  const jumpBy = (delta: number) => {
+    if (scenes.length === 0) return;
+    const next = curIdx < 0 ? 0 : Math.min(Math.max(curIdx + delta, 0), scenes.length - 1);
+    jumpToScene(scenes[next].id);
+  };
 
   const saveBgm = async () => {
     if (!scene?.bgmAssetId) return;
@@ -30,6 +51,51 @@ export default function RightPanel() {
   return (
     <div className="p-3.5 flex flex-col gap-4 text-sm">
       <h2 className="section-title">👁 미리보기</h2>
+
+      {scenes.length > 0 && (
+        <div className="card border-edge p-2.5">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="label">🎮 장면 리모컨</span>
+            <span className="text-[10px] text-gray-500">
+              {curIdx >= 0 ? `${curIdx + 1} / ${scenes.length}` : `${scenes.length}개`}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              className="btn-ghost shrink-0"
+              disabled={curIdx <= 0}
+              onClick={() => jumpBy(-1)}
+              title="이전 장면으로 이동"
+            >
+              ◀
+            </button>
+            <select
+              className="field flex-1 text-xs min-w-0"
+              value={sceneId ?? ''}
+              onChange={(e) => jumpToScene(e.target.value)}
+              title="장면을 선택하면 내 화면만 그 장면으로 스크롤됩니다(협업자에겐 영향 없음)"
+            >
+              <option value="" disabled>
+                장면 선택…
+              </option>
+              {scenes.map((s, i) => (
+                <option key={s.id} value={s.id}>
+                  {i + 1}. {s.title || '(제목 없음)'}
+                </option>
+              ))}
+            </select>
+            <button
+              className="btn-ghost shrink-0"
+              disabled={curIdx < 0 ? scenes.length <= 1 : curIdx >= scenes.length - 1}
+              onClick={() => jumpBy(1)}
+              title="다음 장면으로 이동"
+            >
+              ▶
+            </button>
+          </div>
+        </div>
+      )}
+
       {!scene && (
         <div className="text-center text-gray-600 text-xs mt-10 leading-relaxed">
           <div className="text-4xl mb-3 opacity-50">🖼</div>
