@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { generateRenpyFiles } from '../renpy/generate';
 import { buildRenpyZip, downloadBlob } from '../zip/buildZip';
+import { isNaverWhale } from '../project/folderSync';
 import Spinner from './Spinner';
 
 export default function RenpyTab() {
@@ -97,8 +98,17 @@ function FolderSync({ approvedCount }: { approvedCount: number }) {
   if (!supported) {
     return (
       <div className="card border-edge p-3 mb-4 text-xs text-gray-500">
-        ⚡ <b className="text-gray-400">폴더 직접 쓰기</b>는 Chrome/Edge 데스크톱에서 지원됩니다. 현재 브라우저는
-        미지원이라 ZIP 다운로드를 사용하세요.
+        ⚡ <b className="text-gray-400">폴더 직접 쓰기</b>는 Chrome/Edge 데스크톱에서 지원됩니다.
+        {isNaverWhale() ? (
+          <>
+            {' '}
+            <b className="text-gray-400">네이버 웨일</b>은 폴더 직접 쓰기 API 자체 버그로 클릭 시 탭이
+            꺼질 수 있어 이 앱에서는 미지원 처리했습니다. Chrome/Edge 를 쓰거나 아래 ZIP 다운로드를
+            사용하세요.
+          </>
+        ) : (
+          ' 현재 브라우저는 미지원이라 ZIP 다운로드를 사용하세요.'
+        )}
       </div>
     );
   }

@@ -17,8 +17,15 @@ const HANDLE_KEY = 'project-dir';
 
 let cached: DirHandle | null = null;
 
+/** 네이버 웨일: Chromium 기반이라 showDirectoryPicker 는 있지만 File System Access '쓰기'
+ *  구현에 버그가 있어 폴더 직접 쓰기 시 탭이 통째로 크래시한다(try/catch 로도 못 잡음, 에러 로그도
+ *  안 남음 — 실사용 중 발견). 그래서 미지원으로 취급해 크래시 지점 자체에 도달하지 않게 막는다. */
+export function isNaverWhale(): boolean {
+  return typeof navigator !== 'undefined' && /\bWhale\//.test(navigator.userAgent);
+}
+
 export function isFolderSyncSupported(): boolean {
-  return typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+  return typeof window !== 'undefined' && 'showDirectoryPicker' in window && !isNaverWhale();
 }
 
 function openDb(): Promise<IDBDatabase> {
