@@ -10,10 +10,11 @@ import { useAssetUrl } from './useAssetUrl';
 type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
 
 /**
- * 히로인 대사 한 줄의 Supertone 성우 테스트 패널. 감정·속도·억양 등을 바꿔가며 생성·재생해보고,
- * 마음에 들면 두 곳에 남길 수 있다 — "💾 캐릭터에 저장"(다른 대사 열 때 프리필되는 레시피) /
- * "🎬 이 언어로 대사에 적용"(실제 오디오 파일을 이 대사·이 언어에 매달아 Ren'Py 내보내기에 반영,
- * voices.rpy 의 vo() 가 자막 언어와 무관하게 음성 언어별로 재생해준다).
+ * 히로인 대사 한 줄의 Supertone 성우 테스트 패널. 감정·속도·억양 등을 바꿔가며 "▶ 생성"하면
+ * 그 결과가 **자동으로** 이 대사·이 언어에 바로 적용된다(별도 "적용" 클릭 필요 없음 — 예전엔
+ * 생성 결과가 컴포넌트 로컬 state에만 있어서 적용 버튼을 안 누르고 새로고침하면 크레딧 써서 만든
+ * 오디오가 그냥 사라지는 문제가 있었음). "💾 캐릭터에 저장"은 별개로, 다른 대사를 열 때 프리필되는
+ * 보이스 설정 레시피만 남긴다(배치 생성이 이 레시피를 씀 — 오디오 자체와는 무관, 그래서 자동화 안 함).
  */
 export default function VoiceLab({
   sceneId,
@@ -43,7 +44,6 @@ export default function VoiceLab({
 
   const [voices, setVoices] = useState<SupertoneVoice[]>([]);
   const [loadingVoices, setLoadingVoices] = useState(false);
-  const [audioBlob, setAudioBlob] = useState<Blob>();
   const [audioUrl, setAudioUrl] = useState<string>();
   const [seconds, setSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -89,8 +89,10 @@ export default function VoiceLab({
       );
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       setAudioUrl(URL.createObjectURL(result.blob));
-      setAudioBlob(result.blob);
       setSeconds(result.seconds);
+      // 생성 즉시 이 대사·언어에 자동 적용 — 별도 "적용" 클릭을 기다리다 새로고침으로 날리는 일이
+      // 없게(크레딧 써서 만든 오디오라 손실이 특히 아까움).
+      await attachLineVoice(sceneId, lineIndex, lang, result.blob, char.name);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -103,8 +105,7 @@ export default function VoiceLab({
     updateChar(char.name, { voice: { voiceId, style: style || undefined, settings } });
   };
 
-  const attachToLine = async (blob: Blob = audioBlob!) => {
-    if (!blob) return;
+  const attachToLine = async (blob: Blob) => {
     setAttaching(true);
     try {
       await attachLineVoice(sceneId, lineIndex, lang, blob, char.name);
@@ -208,7 +209,7 @@ export default function VoiceLab({
 
           <div className="flex items-center gap-2">
             <button className="btn-primary text-xs flex-1" disabled={!voiceId || busy} onClick={generate}>
-              {busy ? <Spinner /> : '▶ 생성·재생'}
+              {busy ? <Spinner /> : `▶ ${LOCALE_LABEL[lang]}로 생성(자동 적용)`}
             </button>
             <button className="btn-ghost text-xs" disabled={!voiceId} onClick={saveToCharacter}>
               💾 캐릭터에 저장
@@ -223,14 +224,6 @@ export default function VoiceLab({
           )}
 
           <div className="flex items-center gap-2">
-            <button
-              className="btn-primary text-xs flex-1"
-              disabled={!audioBlob || attaching}
-              onClick={() => attachToLine()}
-              title={`방금 생성한 음성을 ${LOCALE_LABEL[lang]} 언어로 이 대사에 매답니다(Ren'Py 내보내기에 실제 반영)`}
-            >
-              {attaching ? <Spinner /> : `🎬 ${LOCALE_LABEL[lang]}로 이 대사에 적용`}
-            </button>
             <UploadButton
               accept="audio/*"
               label={`📁 ${LOCALE_LABEL[lang]} 파일로 적용`}
@@ -247,11 +240,11 @@ export default function VoiceLab({
           </div>
 
           <p className="text-[10px] text-gray-500 leading-relaxed">
-            "▶ 생성·재생"은 테스트용(저장 안 함). "💾 캐릭터에 저장"은 다음에 이 캐릭터 대사를 열 때
-            프리필되는 설정 레시피만 남김. <b className="text-gray-400">실제로 게임에서 소리가 나게
-            하려면</b> 방금 생성한 음성(또는 이미 갖고 있는 파일)을 "🎬 적용"/"📁 파일로 적용"으로
-            매달아야 합니다 — 언어별로 따로
-            매달 수 있고, 자막 언어와 무관하게 플레이어가 설정 화면에서 음성 언어만 골라 들을 수 있습니다.
+            "▶ 생성"을 누르면 그 결과가 <b className="text-gray-400">자동으로 이 대사·이 언어에
+            바로 적용</b>됩니다(별도로 누를 버튼 없음 — Ren'Py 내보내기에 그대로 반영). 다시 생성하면
+            직전 것을 교체합니다. "💾 캐릭터에 저장"은 오디오와 무관하게, 다음에 이 캐릭터 대사를 열 때
+            프리필되는 보이스 설정 레시피만 남깁니다(전체 대사 일괄 생성이 이 레시피를 씀). 언어별로
+            따로 적용되고, 자막 언어와 무관하게 플레이어가 설정 화면에서 음성 언어만 골라 들을 수 있습니다.
           </p>
         </>
       )}

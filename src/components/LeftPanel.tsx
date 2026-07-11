@@ -9,6 +9,7 @@ import { hasEnvCredentials, generateRoomCode } from '../collab';
 import { DEFAULT_FONT, getCachedCatalog, loadFontCatalog } from '../fonts/fontCatalog';
 import type { FontPreset } from '../fonts/fontCatalog';
 import { loadFontFace } from '../fonts/fontCache';
+import { getCredits } from '../generators/voice/supertoneProvider';
 import Spinner from './Spinner';
 import UploadButton from './UploadButton';
 
@@ -34,6 +35,9 @@ export default function LeftPanel() {
   const projFileRef = useRef<HTMLInputElement>(null);
   const [showOaiKey, setShowOaiKey] = useState(false);
   const [showSupertoneKey, setShowSupertoneKey] = useState(false);
+  const [credits, setCredits] = useState<number>();
+  const [creditsError, setCreditsError] = useState('');
+  const [checkingCredits, setCheckingCredits] = useState(false);
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -48,6 +52,20 @@ export default function LeftPanel() {
     if (!file) return;
     await importProject(file);
     if (projFileRef.current) projFileRef.current.value = '';
+  };
+
+  // 일괄 생성 전에 잔량을 미리 보고 감을 잡을 수 있도록(자동 폴링은 안 함 — 클릭 시에만 호출).
+  const checkCredits = async () => {
+    if (!supertoneKey) return;
+    setCheckingCredits(true);
+    setCreditsError('');
+    try {
+      setCredits(await getCredits(supertoneKey));
+    } catch (e) {
+      setCreditsError((e as Error).message);
+    } finally {
+      setCheckingCredits(false);
+    }
   };
 
   const onReset = () => {
@@ -253,6 +271,15 @@ export default function LeftPanel() {
           <span className={`w-1.5 h-1.5 rounded-full ${supertoneKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
           {supertoneKey ? '키 저장됨 · 성우 테스트 켜짐' : '키 없음 · 성우 테스트 꺼짐'}
         </div>
+        {supertoneKey && (
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <button className="btn-ghost !py-0.5" disabled={checkingCredits} onClick={checkCredits}>
+              {checkingCredits ? <Spinner /> : '🔍 크레딧 확인'}
+            </button>
+            {credits !== undefined && <span className="text-gray-400">잔여 크레딧: {credits}</span>}
+            {creditsError && <span className="text-rose-500">{creditsError}</span>}
+          </div>
+        )}
       </section>
 
       <Divider />

@@ -4,7 +4,7 @@ import { emptyProject, effectiveExpressions, baseLocaleOf, translateModeOf, tran
 import { collectUntranslated } from './generators/translate/collect';
 import { translateBatch } from './generators/translate';
 import { collectVoiceTargets } from './generators/voice/collectByCharacter';
-import { supertoneTTS } from './generators/voice/supertoneProvider';
+import { supertoneTTS, getCredits } from './generators/voice/supertoneProvider';
 import { aiConfig } from './config/aiConfig';
 import { parseText, parseWorkbook } from './parser';
 import type { ScriptMeta } from './parser';
@@ -928,6 +928,9 @@ export const useStore = create<State>((set, get) => {
       }
       const busyKey = `batch:voice:${charName}`;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      // 대사 하나당 크레딧이 얼마나 드는지 감을 잡을 수 있게, 배치 전후로 잔량을 재서 완료 메시지에
+      // 소진량을 같이 보여준다(베스트에포트 — 조회 실패해도 배치 자체엔 영향 없음, 조용히 생략).
+      const creditsBefore = await getCredits(key).catch(() => undefined);
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
       // 연속 호출을 곧바로 이어 붙이면 매 줄이 레이트리밋(429)에 걸림(실사용에서 확인) — 요청 사이에
       // 일정 간격을 두고, 그래도 429 나면 지수 백오프(2s→4s→8s)로 최대 3회 재시도한다.
@@ -977,8 +980,15 @@ export const useStore = create<State>((set, get) => {
         set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
       }
       autoSave();
+      const creditsAfter = await getCredits(key).catch(() => undefined);
+      const creditsNote =
+        creditsBefore !== undefined && creditsAfter !== undefined
+          ? ` · 크레딧 ${creditsBefore - creditsAfter} 소진(잔여 ${creditsAfter})`
+          : '';
       const msg =
-        `${charName} 보이스 일괄 생성 완료 — ${done}건 적용` + (failed ? ` · ${failed}건 실패(재시도 가능)` : '');
+        `${charName} 보이스 일괄 생성 완료 — ${done}건 적용` +
+        (failed ? ` · ${failed}건 실패(재시도 가능)` : '') +
+        creditsNote;
       flash(msg, failed ? 'error' : 'success');
     },
 
