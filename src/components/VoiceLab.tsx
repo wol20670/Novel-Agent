@@ -5,6 +5,7 @@ import { supertoneTTS, searchVoices, type SupertoneVoice, type VoiceSettings } f
 import { LOCALE_LABEL, type Character, type Line, type Locale } from '../types';
 import Spinner from './Spinner';
 import UploadButton from './UploadButton';
+import { useAssetUrl } from './useAssetUrl';
 
 type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
 
@@ -53,7 +54,10 @@ export default function VoiceLab({
   useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
 
   const attachedLangs = (Object.keys(line.voiceAssetIds ?? {}) as Locale[]);
-  const attachedHere = !!line.voiceAssetIds?.[lang];
+  const attachedId = line.voiceAssetIds?.[lang];
+  const attachedHere = !!attachedId;
+  // 이미 이 언어에 적용된 파일 재생(생성 미리듣기와 별개 — BGM 미리듣기와 동일한 useAssetUrl 패턴).
+  const attachedUrl = useAssetUrl(attachedId);
 
   const selectedVoice = voices.find((v) => v.voiceId === voiceId);
   const styleOptions = selectedVoice?.styles ?? [];
@@ -129,6 +133,12 @@ export default function VoiceLab({
         <p className="text-[10px] text-emerald-600">
           ✅ 이 대사에 적용된 음성 언어: {attachedLangs.map((l) => LOCALE_LABEL[l]).join(', ')}
         </p>
+      )}
+      {attachedUrl && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-gray-500 w-11 shrink-0">적용됨</span>
+          <audio src={attachedUrl} controls className="flex-1 h-8" />
+        </div>
       )}
 
       {supertoneKey && (

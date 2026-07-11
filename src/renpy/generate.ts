@@ -22,6 +22,16 @@ export function voiceBaseName(charId: string, sceneLabel: string, lineIdx: numbe
   return `${charId}_${sceneLabel}_${String(lineIdx).padStart(3, '0')}`;
 }
 
+/**
+ * 오디오 blob 의 실제 MIME → 확장자. 성우 음성은 TTS 생성(Supertone, mp3 요청)뿐 아니라 사용자가
+ * "📁 파일로 적용"으로 임의 포맷(wav 등)을 올릴 수도 있어, BGM 처럼 확장자를 mp3 로 무조건 고정하면
+ * 안 됨(고정하면 Ren'Py 가 다른 포맷 바이트를 mp3 로 잘못 디코드 시도해 무음/오류가 날 수 있음).
+ * 알 수 없는 타입은 mp3 로 폴백(기존 동작 유지, Supertone 기본 요청 포맷).
+ */
+export function extFromMime(mime: string | undefined): 'mp3' | 'wav' {
+  return mime?.includes('wav') ? 'wav' : 'mp3';
+}
+
 /** 한글 표정 → Ren'Py 이미지 속성(ASCII). 이미지 attribute 는 ASCII 가 안전. */
 export const EXPR_ATTR: Record<Expression, string> = {
   기본: 'neutral',
@@ -448,8 +458,12 @@ function scriptBody(
     out.push(`label ${r.label}:`);
     out.push(`${indent(1)}scene ${r.bgTag} at vn_bg with ${transition}`);
     if (r.bgmFile) out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
-    // CG 컷
+    // CG 컷 — 표시 후 클릭 한 번(pause)을 기다렸다가 dissolve 로 닫는다(계속 화면에 남던 버그 수정).
     r.cgTags.forEach((tag) => out.push(`${indent(1)}show ${tag} at vn_cg with dissolve`));
+    if (r.cgTags.length) {
+      out.push(`${indent(1)}pause`);
+      r.cgTags.forEach((tag) => out.push(`${indent(1)}hide ${tag} with dissolve`));
+    }
     if (s.direction.length) out.push(`${indent(1)}# 연출: ${s.direction.join(' / ')}`);
 
     // 아이템 팝업은 화면(screen)으로 띄운다. 장면을 넘어가면 남지 않도록 장면 끝에서 반드시 닫는다.
@@ -719,11 +733,16 @@ function voicesRpy(project: Project): string {
     'init python:',
     '    def vo(base):',
     '        # base = "c_1_scene_3_002"(언어·확장자 없음). 음성 언어는 persistent 로 자막과 독립 선택.',
-    '        path = "voices/%s/%s.mp3" % (persistent.voice_language, base)',
-    '        if renpy.loadable(path):',
+    '        # 실제 저장 확장자는 원본 업로드/생성 포맷에 따라 mp3 또는 wav 일 수 있어(extFromMime,',
+    '        # generate.ts) 스크립트 쪽에선 미리 알 수 없다 — 둘 다 순서대로 확인.',
+    '        for ext in ("mp3", "wav"):',
+    '            path = "voices/%s/%s.%s" % (persistent.voice_language, base, ext)',
+    '            if renpy.loadable(path):',
     // voice() 는 renpy.exports 소속이 아니라 Ren'Py 내장 00voice.rpy 가 store(전역)에 정의한
     // 일반 함수다 — renpy.voice(...)로 부르면 AttributeError(실제 SDK 실행으로 확인, lint는 못 잡음).
-    '            voice(path)   # 다음 say 에 음성 부착. 파일 없으면 조용히 스킵(무음).',
+    '                voice(path)   # 다음 say 에 음성 부착.',
+    '                return',
+    '        # 어떤 확장자로도 못 찾으면 조용히 스킵(무음).',
     '',
   ].join('\n');
 }

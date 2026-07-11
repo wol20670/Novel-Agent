@@ -11,7 +11,7 @@ import { SAMPLE_STORY } from './sample';
 import { exportProjectFile, importProjectFile } from './project/transfer';
 import { downloadBlob } from './zip/buildZip';
 import { generateTheme } from './generators/theme';
-import { backgroundKey, bgmKey } from './renpy/generate';
+import { backgroundKey, bgmKey, extFromMime } from './renpy/generate';
 import {
   isFolderSyncSupported,
   connectProjectFolder,
@@ -820,8 +820,12 @@ export const useStore = create<State>((set, get) => {
       const line = scene?.lines[lineIndex];
       if (!scene || !line || line.kind !== 'dialogue') return;
       try {
-        const file = new File([blob], `voice_${safeFileName(charName)}_${lineIndex}_${locale}.mp3`, {
-          type: 'audio/mpeg',
+        // 실제 blob 의 MIME 을 신뢰(TTS 생성분·업로드분 모두 wav 일 수 있음) — BGM 처럼 확장자를
+        // mp3 로 무조건 고정하면 Ren'Py 가 다른 포맷을 mp3 로 잘못 디코드해 무음이 나는 버그가 있었음.
+        const mime = blob.type || 'audio/mpeg';
+        const ext = extFromMime(blob.type);
+        const file = new File([blob], `voice_${safeFileName(charName)}_${lineIndex}_${locale}.${ext}`, {
+          type: mime,
         });
         const id = await uploadAsset(file, 'voice', file.name);
         const prev = line.voiceAssetIds?.[locale];

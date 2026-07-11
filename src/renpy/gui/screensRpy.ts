@@ -65,7 +65,10 @@ const ITEM_SCREENS = String.raw`
 
 ## 인게임 팝업 — 배경 살짝 딤 + 중앙 컷아웃(이름 캡션은 표시 안 함, 이미지 자체에 라벨 포함).
 ## zorder 를 대사창(say=0)보다 낮게 둬서 배경·인물만 어둡게 덮고 대사 글자는 안 가린다.
+## modal True 로 닫기 전까진 대사 진행이 막힌다(안 그러면 대사창의 클릭-진행 레이어가 닫기 버튼
+## 클릭을 먼저 가로챌 위험 — item_lightbox 로 이미 검증된 패턴).
 screen item_popup(img, caption):
+    modal True
     zorder -5
     add Solid("#00000073")
     add img at transform:
@@ -75,6 +78,11 @@ screen item_popup(img, caption):
         pos (0.5, 0.42)
         alpha 0.0 zoom 0.9
         easein 0.22 alpha 1.0 zoom 1.0
+    textbutton _("✕"):
+        xalign 0.96
+        ypos int(config.screen_height * 0.14)
+        action Hide("item_popup")
+    key "game_menu" action Hide("item_popup")
 
 ## 보관함에서 다시보기 — 모달 라이트박스(닫기/Esc 로 종료). tag 없음 = 갤러리 위에 겹쳐 뜬다.
 screen item_lightbox(img, caption):
