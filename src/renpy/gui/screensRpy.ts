@@ -409,6 +409,10 @@ style quick_button:
     selected_background Frame("gui/quickpill_hover.png", gui.scale(20), gui.scale(14))
     xpadding gui.scale(24)
     ypadding gui.scale(12)
+    # vbox 안에서 버튼별 xalign 미지정 시 기본(왼쪽 정렬)이라, 짧은 라벨("기록"/"저장" 등)이
+    # 긴 라벨("빠른불러오기") 기준 vbox 폭 안에서 왼쪽에 붙어 들쭉날쭉해 보이던 버그 — 전부 오른쪽
+    # 끝에 맞춤(vbox 자체는 이미 xalign 1.0 으로 화면 우측에 앵커돼 있음).
+    xalign 1.0
 
 style quick_button_text:
     properties gui.text_properties("quick_button")

@@ -380,25 +380,17 @@ export function spreadPositions(n: number): number[] {
 }
 
 /**
- * 한 장면에서 "화면에 세울 캐릭터"(스프라이트 보유)들의 가로 위치(%)를 배정.
- * 내레이션 전용(주인공)·스프라이트 없는 화자는 자리 계산에서 빠진다(겹침/빈자리 방지).
- * 혼자 등장하면 side 와 무관하게 항상 중앙. 2인 이상이면 side='left'/'right' 고정 캐릭터를
- * 각 끝 슬롯부터, 'auto'(미지정 포함)는 남는 가운데 슬롯을 등장 순서대로 채운다(같은 side끼리는
- * 등장 순서로 tie-break — 먼저 등장이 더 바깥쪽).
+ * "지금까지 등장한(스프라이트 보유) 캐릭터" 목록을 가로 위치(%)로 배정.
+ * 혼자면 side 와 무관하게 항상 중앙. 2인 이상이면 side='left'/'right' 고정 캐릭터를 각 끝
+ * 슬롯부터, 'auto'(미지정 포함)는 남는 가운데 슬롯을 등장 순서대로 채운다(같은 side끼리는
+ * 등장 순서로 tie-break — 먼저 등장이 더 바깥쪽). scriptBody 가 장면 안에서 새 캐릭터가 등장할
+ * 때마다(점진적으로 커지는 order 로) 다시 호출해, 혼자일 땐 중앙 → 2번째 등장 시 고정 위치로
+ * 스냅 이동하는 게 자연히 성립한다.
  */
-function scenePositions(
-  scene: Scene,
-  ids: Map<string, string>,
-  shown: Set<string>,
+function arrangePositions(
+  order: string[],
   sideById: Map<string, 'left' | 'right' | 'auto'>,
 ): Map<string, number> {
-  const order: string[] = [];
-  for (const line of scene.lines) {
-    if (line.kind !== 'dialogue') continue;
-    for (const id of lineSpeakerIds(line, ids)) {
-      if (shown.has(id) && !order.includes(id)) order.push(id);
-    }
-  }
   const xs = spreadPositions(order.length);
   const pos = new Map<string, number>();
   if (order.length <= 1) {
@@ -430,7 +422,6 @@ function scriptBody(
   for (const sp of sprites) {
     (spritesByChar.get(sp.charId) ?? spritesByChar.set(sp.charId, []).get(sp.charId)!).push(sp);
   }
-  const shown = new Set(spritesByChar.keys());
   // 캐릭터 키 높이 = 화면의 90%(머리 잘림 방지). 원본 해상도 무관하게 fit 으로 정규화.
   const charH = Math.round(screenH * 0.9);
   const out: string[] = [];
@@ -467,7 +458,10 @@ function scriptBody(
 
   for (const r of refs) {
     const s = r.scene;
-    const pos = scenePositions(s, ids, shown, sideById);
+    // 장면 안에서 새 캐릭터가 등장할 때마다 점진적으로 커지는 상태(장면마다 리셋) — 혼자일 땐
+    // 중앙, 2번째가 등장하는 순간 arrangePositions 로 다시 배치해 이미 서 있던 캐릭터도 스냅 이동.
+    const revealedOrder: string[] = [];
+    let currentPos = new Map<string, number>();
     out.push(`# ── ${s.title} ──`);
     out.push(`label ${r.label}:`);
     out.push(`${indent(1)}scene ${r.bgTag} at vn_bg with ${transition}`);
@@ -502,6 +496,24 @@ function scriptBody(
       }
       if (line.kind === 'dialogue') {
         const speakerIds = lineSpeakerIds(line, ids);
+        // 이번 줄에서 처음 등장하는(스프라이트 보유) 화자를 한 번에 모아 추가 — 합동 대사로 여럿이
+        // 동시에 처음 등장해도 재배치가 한 번만 일어나게. 새 등장이 있으면 전체를 다시 배치하고,
+        // 이번 줄 화자가 아니면서 이미 서 있던 캐릭터 중 위치가 바뀐 쪽만 스냅 이동시킨다(속성 생략
+        // — Ren'Py는 태그의 마지막 표시 속성을 유지하므로 표정·의상 재지정 불필요).
+        const newlyRevealed = speakerIds.filter((id) => spritesByChar.has(id) && !revealedOrder.includes(id));
+        if (newlyRevealed.length) {
+          const prevPos = currentPos;
+          revealedOrder.push(...newlyRevealed);
+          currentPos = arrangePositions(revealedOrder, sideById);
+          for (const id of revealedOrder) {
+            if (speakerIds.includes(id)) continue;
+            const oldX = prevPos.get(id);
+            const newX = currentPos.get(id);
+            if (oldX !== undefined && newX !== undefined && oldX !== newX) {
+              out.push(`${indent(1)}show ${id} at vn_char(${newX})`);
+            }
+          }
+        }
         const want = attrFor(effectiveEmotion(line, s));
         // 스프라이트가 있는 화자(들) 등장 — 합동 대사면 멤버 전원이 함께 선다.
         for (const sid of speakerIds) {
@@ -516,7 +528,7 @@ function scriptBody(
           const attr =
             (pool.some((o) => o.attr === want) && want) ||
             (pool.some((o) => o.attr === 'neutral') ? 'neutral' : pool[0].attr);
-          out.push(`${indent(1)}show ${sid} ${outfitAttr} ${attr} at vn_char(${pos.get(sid) ?? 50})`);
+          out.push(`${indent(1)}show ${sid} ${outfitAttr} ${attr} at vn_char(${currentPos.get(sid) ?? 50})`);
         }
         // 말하는 주체: 합동이면 묶음 Character, 아니면 단일 화자.
         const voiceId =
