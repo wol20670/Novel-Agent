@@ -56,12 +56,6 @@ function normalizeI18n(i18n?: I18nText): I18nText | undefined {
   return Object.keys(out).length ? out : undefined;
 }
 
-/** 정규화된 한 행. speaker 가 있으면 대사, 없으면 본문(지문/태그)이다. */
-export interface Row {
-  speaker?: string;
-  body: string;
-}
-
 /** 대본 메타태그(#설정_*)로 지정된 프로젝트 레벨 다국어 설정. 없는 값은 undefined(프로젝트 기본 유지). */
 export interface ScriptMeta {
   baseLocale?: Locale;

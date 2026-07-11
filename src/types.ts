@@ -244,11 +244,6 @@ export function effectiveExpressions(list?: string[]): string[] {
   return base.includes('기본') ? base : ['기본', ...base];
 }
 
-/** 프로젝트 객체에서 유효 표정 목록을 구한다. */
-export function projectExpressions(p: Project): string[] {
-  return effectiveExpressions(p.expressions);
-}
-
 /** 캐릭터의 의상 이름 목록('기본'을 항상 맨 앞에 포함). */
 export function characterOutfits(c: Character): string[] {
   return ['기본', ...(c.outfits?.map((o) => o.name) ?? [])];

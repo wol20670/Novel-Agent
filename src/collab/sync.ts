@@ -18,11 +18,6 @@ export interface RemoteProjectPayload {
 let localVersion = 0;
 let applyingRemote = false;
 
-/** 지금 원격→로컬 반영 중인지(이 사이의 pushProject 호출은 store 쪽에서 건너뛰어야 한다). */
-export function isApplyingRemote(): boolean {
-  return applyingRemote;
-}
-
 export function withApplyingRemoteGuard<T>(fn: () => T): T {
   applyingRemote = true;
   try {
