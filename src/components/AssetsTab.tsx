@@ -361,22 +361,27 @@ function CharacterCard({ name }: { name: string }) {
         <span className="font-semibold text-sm flex-1 truncate" style={{ color: c.color }}>
           {name}
         </span>
-        <select
-          className="field text-xs shrink-0"
-          value={c.side ?? 'auto'}
-          onChange={(e) => updateChar(name, { side: e.target.value as 'left' | 'right' | 'auto' })}
-          title="장면 내 좌우 고정 위치(등장 순서와 무관, 혼자 등장하면 항상 중앙)"
-        >
-          <option value="auto">위치: 자동(등장순)</option>
-          <option value="left">위치: 왼쪽 고정</option>
-          <option value="right">위치: 오른쪽 고정</option>
-        </select>
         <UploadButton
           onFile={(f) => importSprite(name, '기본' as Expression, f, outfit)}
           label="🖼 기본 입화 업로드"
           className="btn-primary !px-2 !py-1 text-xs shrink-0"
           title={`${outfit === '기본' ? '' : outfit + ' '}기본 입화 이미지 업로드`}
         />
+      </div>
+      {/* 좌우 고정 위치 — 헤더 줄에 같이 두면 select 폭 때문에 카드 밖으로 버튼이 밀려나가서
+          별도 줄로 뺌(다른 설정 줄들과 같은 레이아웃). */}
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span className="text-[10px] text-gray-500 mr-0.5">📍 위치</span>
+        <select
+          className="field text-xs"
+          value={c.side ?? 'auto'}
+          onChange={(e) => updateChar(name, { side: e.target.value as 'left' | 'right' | 'auto' })}
+          title="장면 내 좌우 고정 위치(등장 순서와 무관, 혼자 등장하면 항상 중앙)"
+        >
+          <option value="auto">자동(등장순)</option>
+          <option value="left">왼쪽 고정</option>
+          <option value="right">오른쪽 고정</option>
+        </select>
       </div>
       {/* 보이스 일괄 생성 — VoiceLab 에서 저장해둔 프리셋(c.voice)으로 이 캐릭터의 모든 대사를
           순차 생성·적용(이미 있는 언어 음성은 건너뜀). 대본이 수백 줄이어도 하나하나 안 해도 됨 —

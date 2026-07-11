@@ -928,10 +928,16 @@ export const useStore = create<State>((set, get) => {
       }
       const busyKey = `batch:voice:${charName}`;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      // 연속 호출을 곧바로 이어 붙이면 매 줄이 레이트리밋(429)에 걸림(실사용에서 확인) — 요청 사이에
+      // 일정 간격을 두고, 그래도 429 나면 지수 백오프(2s→4s→8s)로 최대 3회 재시도한다.
+      const PACE_MS = 900;
       let done = 0;
       let failed = 0;
       try {
-        for (const item of items) {
+        for (let idx = 0; idx < items.length; idx++) {
+          const item = items[idx];
+          if (idx > 0) await sleep(PACE_MS);
           const params = {
             voiceId: voicePreset.voiceId,
             text: item.text,
@@ -941,23 +947,23 @@ export const useStore = create<State>((set, get) => {
             settings: voicePreset.settings,
           };
           let result;
-          try {
-            result = await supertoneTTS(params, key);
-          } catch (e) {
-            if (!/레이트 리밋/.test((e as Error).message)) {
-              failed++;
-              console.warn('[보이스 일괄생성] 실패:', item.sceneId, item.lineIndex, e);
-              continue;
-            }
-            // 레이트리밋이면 잠깐 쉬었다가 한 번만 재시도.
-            await new Promise((r) => setTimeout(r, 1500));
+          let lastErr: unknown;
+          for (let attempt = 0; attempt <= 3; attempt++) {
             try {
               result = await supertoneTTS(params, key);
-            } catch (e2) {
-              failed++;
-              console.warn('[보이스 일괄생성] 재시도 실패:', item.sceneId, item.lineIndex, e2);
-              continue;
+              lastErr = undefined;
+              break;
+            } catch (e) {
+              lastErr = e;
+              const isRateLimit = /레이트 리밋/.test((e as Error).message);
+              if (!isRateLimit || attempt === 3) break; // 레이트리밋 아니면 즉시 포기, 마지막 시도면 종료
+              await sleep(2000 * 2 ** attempt); // 2s, 4s, 8s
             }
+          }
+          if (!result) {
+            failed++;
+            console.warn('[보이스 일괄생성] 실패:', item.sceneId, item.lineIndex, lastErr);
+            continue;
           }
           try {
             await attachVoiceQuiet(item.sceneId, item.lineIndex, locale, result.blob, charName);
