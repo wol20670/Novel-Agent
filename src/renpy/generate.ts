@@ -427,6 +427,15 @@ function scriptBody(
   out.push(`${indent(1)}xysize (config.screen_width, config.screen_height)`);
   out.push(`${indent(1)}align (0.5, 0.5)`);
   out.push('');
+  // CG(이벤트 일러스트): 전체가 다 보이도록 fit contain(비율 유지·잘림 없음). 트랜스폼 없이 show 하면
+  // Ren'Py가 원본 픽셀 크기 그대로 중앙 표시해 화면보다 큰 CG는 머리·가장자리가 잘린다(실사용 버그였음).
+  // 화면과 비율이 다른 CG는 여백에 뒤 배경이 비친다.
+  out.push('# CG: 전체가 다 보이도록 fit contain(비율 유지·잘림 없음, 비율 다르면 뒤 배경이 여백에 비침)');
+  out.push('transform vn_cg:');
+  out.push(`${indent(1)}fit "contain"`);
+  out.push(`${indent(1)}xysize (config.screen_width, config.screen_height)`);
+  out.push(`${indent(1)}align (0.5, 0.5)`);
+  out.push('');
   out.push('label start:');
   if (refs.length > 0) out.push(`    jump ${refs[0].label}`);
   else out.push('    "승인된 장면이 없습니다."', '    return');
@@ -440,7 +449,7 @@ function scriptBody(
     out.push(`${indent(1)}scene ${r.bgTag} at vn_bg with ${transition}`);
     if (r.bgmFile) out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
     // CG 컷
-    r.cgTags.forEach((tag) => out.push(`${indent(1)}show ${tag} with dissolve`));
+    r.cgTags.forEach((tag) => out.push(`${indent(1)}show ${tag} at vn_cg with dissolve`));
     if (s.direction.length) out.push(`${indent(1)}# 연출: ${s.direction.join(' / ')}`);
 
     // 아이템 팝업은 화면(screen)으로 띄운다. 장면을 넘어가면 남지 않도록 장면 끝에서 반드시 닫는다.
