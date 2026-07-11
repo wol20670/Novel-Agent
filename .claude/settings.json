@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo SESSION START - read HANDOFF.md, verify its Done section against git log and delete reflected items, then continue from the Next section. Keep HANDOFF short - git log is the history."
+          }
+        ]
+      }
+    ]
+  }
+}

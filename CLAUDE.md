@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> 🔵 진행 중 인수인계가 있으면 [`HANDOFF.md`](./HANDOFF.md) 먼저 확인(현재: 2026-07-11 코드 정리 세션). 반영 끝나면 이 줄·HANDOFF 삭제.
+> 🔵 **세션 시작 시 [`HANDOFF.md`](./HANDOFF.md) 먼저 확인** — 짧은 살아있는 상태 문서(🎯 다음 할 일 + ✅ 방금 반영됨). 관리 규칙은 아래 워크플로우.
 
 Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite + React + TS + zustand + Tailwind). BYO 키, 한국어 코드베이스.
 이미지·BGM은 **앱이 생성하지 않음** — 외부 도구(ChatGPT/Suno)에서 만들어 에셋 탭에 업로드. 앱의 AI는 텍스트·보이스 전용(OpenAI `gpt-4o-mini`): 대본 번역(영/일), GUI 테마, Supertone TTS.
@@ -33,3 +33,6 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 - `main`에서 작업하면 새 브랜치부터.
 - 변경 후 `npm run typecheck`로 검증(가능하면 OneDrive 밖 빌드로 한 번 더).
 - 커밋 메시지는 한국어 + conventional prefix(`feat`/`fix`/`perf`/`chore`/`ux`). 기존 코드 스타일 맞추기.
+- **HANDOFF.md 인수인계**(삭제 금지·짧게 유지): 세션 시작 시 `✅ 방금 반영됨` 항목이 git log에 실제
+  있는지 확인 후 그 줄 삭제. 작업 끝엔 완료분을 `✅ 방금 반영됨`에 한 줄, 남은·새 일을 `🎯 다음 할 일`에
+  갱신(서술 금지 — 이력은 git log).
