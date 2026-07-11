@@ -63,7 +63,7 @@ const ITEM_SCREENS = String.raw`
 ## 아이템(소품) 팝업 + 발견한 아이템 보관함
 ################################################################################
 
-## 인게임 팝업 — 배경 살짝 딤 + 중앙 컷아웃 + 이름 캡션.
+## 인게임 팝업 — 배경 살짝 딤 + 중앙 컷아웃(이름 캡션은 표시 안 함, 이미지 자체에 라벨 포함).
 ## zorder 를 대사창(say=0)보다 낮게 둬서 배경·인물만 어둡게 덮고 대사 글자는 안 가린다.
 screen item_popup(img, caption):
     zorder -5
@@ -75,12 +75,6 @@ screen item_popup(img, caption):
         pos (0.5, 0.42)
         alpha 0.0 zoom 0.9
         easein 0.22 alpha 1.0 zoom 1.0
-    text caption:
-        xalign 0.5
-        ypos 0.72
-        size gui.name_text_size
-        color gui.accent_color
-        outlines [ (absolute(2), "#000000", absolute(0), absolute(0)) ]
 
 ## 보관함에서 다시보기 — 모달 라이트박스(닫기/Esc 로 종료). tag 없음 = 갤러리 위에 겹쳐 뜬다.
 screen item_lightbox(img, caption):
@@ -395,14 +389,27 @@ style quick_button_text is button_text
 style quick_menu:
     xalign 1.0
     yalign 0.0
+    xoffset -gui.scale(12)
     yoffset gui.scale(56)
-    spacing gui.scale(2)
+    spacing gui.scale(8)
 
 style quick_button:
     properties gui.button_properties("quick_button")
+    # 밝은 알약 프레임(Canvas 생성, buildZip.ts 의 quickPillAssets) — 제네릭 버튼 배경(투명)이
+    # 원인이던 가시성 문제를 여기서만 덮어써 해결. 다른 버튼 종류는 영향 없음.
+    idle_background Frame("gui/quickpill_idle.png", gui.scale(20), gui.scale(14))
+    hover_background Frame("gui/quickpill_hover.png", gui.scale(20), gui.scale(14))
+    selected_background Frame("gui/quickpill_hover.png", gui.scale(20), gui.scale(14))
+    xpadding gui.scale(24)
+    ypadding gui.scale(12)
 
 style quick_button_text:
     properties gui.text_properties("quick_button")
+    # 밝은 알약 배경 위에서 항상 읽히도록 진한 색으로 고정(테마 accent_color 는 밝은 배경에 대비가 약함).
+    xalign 0.5
+    idle_color "#3a2540"
+    hover_color "#3a2540"
+    selected_color "#3a2540"
 
 ## 톱니바퀴(메뉴) 토글 버튼 — quick_button 과 같은 색감, 위치만 화면 우상단 고정.
 style quick_gear_button is quick_button

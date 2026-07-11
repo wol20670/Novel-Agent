@@ -195,6 +195,53 @@ export function solidPng(color: string, w = 24, h = 24): Promise<Blob> {
 }
 
 /**
+ * 퀵메뉴(우상단 드롭다운) 전용 알약(pill) 프레임 PNG. 9-patch 로 Frame() 늘려 쓰므로
+ * 작은 크기(64×48)에 모서리만 확실히 둥글면 된다. 밝은 반투명 채움 + 옅은 테두리로
+ * 어떤 장면 배경 위에서도 버튼 경계와 글자 대비가 확보되도록 한다(투명 idle 배경이
+ * 원인이던 가시성 문제 해결, 2026-07-10).
+ */
+export function roundedPillPng(fill: string, border: string, w = 64, h = 48, radius = 20): Promise<Blob> {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, w, h);
+  const r = Math.min(radius, w / 2, h / 2);
+  const path = () => {
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.arcTo(w, 0, w, h, r);
+    ctx.arcTo(w, h, 0, h, r);
+    ctx.arcTo(0, h, 0, 0, r);
+    ctx.arcTo(0, 0, w, 0, r);
+    ctx.closePath();
+  };
+  path();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = border;
+  path();
+  ctx.stroke();
+  return new Promise((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
+}
+
+/**
+ * 퀵메뉴 알약 PNG 2종(idle/hover)의 색 — 테마 강조색을 살짝 섞은 밝은 톤이라 어떤 장면
+ * 배경 위에서도 항상 밝고, 진한 텍스트(quick_button_text)와 대비가 확보된다.
+ * idle: 거의 흰색(테마 강조색 아주 옅게 섞음) / hover·selected: 강조색을 더 섞어 살짝 진해짐.
+ */
+export function quickPillAssets(theme: GuiTheme): { name: string; fill: string; border: string }[] {
+  const { r, g, b } = rgbOf(theme.accent);
+  const tint = (amount: number, alpha: number) =>
+    `rgba(${Math.round(255 * (1 - amount) + r * amount)},${Math.round(255 * (1 - amount) + g * amount)},${Math.round(255 * (1 - amount) + b * amount)},${alpha})`;
+  return [
+    { name: 'quickpill_idle.png', fill: tint(0.08, 0.9), border: tint(0.35, 0.6) },
+    { name: 'quickpill_hover.png', fill: tint(0.2, 0.95), border: tint(0.5, 0.75) },
+  ];
+}
+
+/**
  * gui.button_properties() 가 요구하는 제네릭 버튼 배경 PNG 목록.
  * Ren'Py 는 `gui/button/[prefix_]background.png` 를 prefix(idle/hover/insensitive/selected) 검색하므로
  * 제네릭만 있으면 모든 버튼 종류(navigation/page/radio/check/help/quick/confirm/slider)가 폴백으로 해결된다.

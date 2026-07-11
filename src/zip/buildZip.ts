@@ -8,7 +8,7 @@ import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName } from '../r
 import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
-import { canvasMenuArt, solidPng, buttonBgAssets, textboxGradientPng } from '../generators/image/canvasMenu';
+import { canvasMenuArt, solidPng, buttonBgAssets, textboxGradientPng, roundedPillPng, quickPillAssets } from '../generators/image/canvasMenu';
 import { resolveTheme } from '../renpy/gui';
 import { loadFontCatalog, fontById, DEFAULT_FONT } from '../fonts/fontCatalog';
 import { ensureFontBlob, ensureFontLicense } from '../fonts/fontCache';
@@ -177,6 +177,12 @@ export async function collectProjectFiles(
   // 버튼 배경 PNG(gui.button_properties 요구) — 제네릭 prefix 세트.
   for (const b of buttonBgAssets(theme)) {
     out.push({ path: `game/gui/button/${b.name}`, data: await solidPng(b.color) });
+  }
+
+  // 퀵메뉴(우상단 드롭다운) 알약 배경 — 제네릭 버튼 배경(투명)을 quick_button 스타일에서만
+  // 덮어써 가독성을 확보한다(screensRpy.ts 의 style quick_button 참고).
+  for (const p of quickPillAssets(theme)) {
+    out.push({ path: `game/gui/${p.name}`, data: await roundedPillPng(p.fill, p.border) });
   }
 
   // 대사창 그라데이션(투명) 켜짐 → 세로 그라데이션 텍스트박스 PNG 생성(색·불투명도는 사용자 조정값).
