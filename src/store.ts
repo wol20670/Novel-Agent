@@ -3,6 +3,9 @@ import type { Project, Scene, AssetMeta, Character, Expression, Locale, Translat
 import { emptyProject, effectiveExpressions, baseLocaleOf, translateModeOf, translateModelFor } from './types';
 import { collectUntranslated } from './generators/translate/collect';
 import { translateBatch } from './generators/translate';
+import { collectVoiceTargets } from './generators/voice/collectByCharacter';
+import { supertoneTTS } from './generators/voice/supertoneProvider';
+import { aiConfig } from './config/aiConfig';
 import { parseText, parseWorkbook } from './parser';
 import type { ScriptMeta } from './parser';
 import { putAsset, getAsset, deleteAsset, clearAssets } from './storage/assetStore';
@@ -127,6 +130,12 @@ interface State {
   attachLineVoice: (sceneId: string, lineIndex: number, locale: Locale, blob: Blob, charName: string) => Promise<void>;
   /** 이 대사·언어의 매단 음성을 해제. */
   detachLineVoice: (sceneId: string, lineIndex: number, locale: Locale) => Promise<void>;
+  /**
+   * 캐릭터의 저장된 보이스 프리셋(char.voice)으로, 이 캐릭터가 말하는(합동 제외) 이 언어 음성이
+   * 아직 없는 대사를 전부 순차 생성·적용한다(이미 있는 줄은 건너뜀 — 개별 미세조정 보존). 대본이
+   * 수백 줄이어도 하나하나 손으로 안 해도 되게 하는 일괄 기능. 진행 중엔 busy['batch:voice:'+charName].
+   */
+  batchVoiceCharacter: (charName: string, locale: Locale) => Promise<void>;
 
   // 에셋 라이브러리 (이름 그룹 단위 — 같은 이름 장면 전체에 한 번에 적용)
   renameBackgroundGroup: (key: string, name: string) => void;
@@ -286,6 +295,49 @@ export const useStore = create<State>((set, get) => {
     };
     set((s) => ({ assets: { ...s.assets, [id]: meta } }));
     return id;
+  };
+
+  // attachLineVoice 의 핵심 로직만 분리(autoSave/flash 없음) — 일괄 생성(batchVoiceCharacter)이
+  // 수백 줄을 반복 호출할 때 매번 저장·토스트가 튀지 않도록, 루프 안에선 이걸로 조용히 누적하고
+  // autoSave()/flash() 는 호출측이 끝나고 한 번만 부른다. 단일 적용(attachLineVoice)도 이걸 재사용.
+  const attachVoiceQuiet = async (
+    sceneId: string,
+    lineIndex: number,
+    locale: Locale,
+    blob: Blob,
+    charName: string,
+  ): Promise<void> => {
+    const scene = get().project.scenes.find((s) => s.id === sceneId);
+    const line = scene?.lines[lineIndex];
+    if (!scene || !line || line.kind !== 'dialogue') return;
+    const mime = blob.type || 'audio/mpeg';
+    const ext = extFromMime(blob.type);
+    const file = new File([blob], `voice_${safeFileName(charName)}_${lineIndex}_${locale}.${ext}`, {
+      type: mime,
+    });
+    const id = await uploadAsset(file, 'voice', file.name);
+    const prev = line.voiceAssetIds?.[locale];
+    set((s) => ({
+      project: {
+        ...s.project,
+        voiceLocales: s.project.voiceLocales?.includes(locale)
+          ? s.project.voiceLocales
+          : [...(s.project.voiceLocales ?? []), locale],
+        scenes: s.project.scenes.map((sc) =>
+          sc.id === sceneId
+            ? {
+                ...sc,
+                lines: sc.lines.map((l, i) =>
+                  i === lineIndex && l.kind === 'dialogue'
+                    ? { ...l, voiced: true, voiceAssetIds: { ...l.voiceAssetIds, [locale]: id } }
+                    : l,
+                ),
+              }
+            : sc,
+        ),
+      },
+    }));
+    if (prev) await deleteAsset(prev).catch(() => {});
   };
 
   return {
@@ -816,40 +868,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     attachLineVoice: async (sceneId, lineIndex, locale, blob, charName) => {
-      const scene = get().project.scenes.find((s) => s.id === sceneId);
-      const line = scene?.lines[lineIndex];
-      if (!scene || !line || line.kind !== 'dialogue') return;
       try {
-        // 실제 blob 의 MIME 을 신뢰(TTS 생성분·업로드분 모두 wav 일 수 있음) — BGM 처럼 확장자를
-        // mp3 로 무조건 고정하면 Ren'Py 가 다른 포맷을 mp3 로 잘못 디코드해 무음이 나는 버그가 있었음.
-        const mime = blob.type || 'audio/mpeg';
-        const ext = extFromMime(blob.type);
-        const file = new File([blob], `voice_${safeFileName(charName)}_${lineIndex}_${locale}.${ext}`, {
-          type: mime,
-        });
-        const id = await uploadAsset(file, 'voice', file.name);
-        const prev = line.voiceAssetIds?.[locale];
-        set((s) => ({
-          project: {
-            ...s.project,
-            voiceLocales: s.project.voiceLocales?.includes(locale)
-              ? s.project.voiceLocales
-              : [...(s.project.voiceLocales ?? []), locale],
-            scenes: s.project.scenes.map((sc) =>
-              sc.id === sceneId
-                ? {
-                    ...sc,
-                    lines: sc.lines.map((l, i) =>
-                      i === lineIndex && l.kind === 'dialogue'
-                        ? { ...l, voiced: true, voiceAssetIds: { ...l.voiceAssetIds, [locale]: id } }
-                        : l,
-                    ),
-                  }
-                : sc,
-            ),
-          },
-        }));
-        if (prev) await deleteAsset(prev).catch(() => {});
+        await attachVoiceQuiet(sceneId, lineIndex, locale, blob, charName);
         autoSave();
         flash(`이 대사에 ${locale.toUpperCase()} 음성을 적용했습니다 — Ren'Py 내보내기에 반영됩니다.`);
       } catch (e) {
@@ -885,6 +905,75 @@ export const useStore = create<State>((set, get) => {
       await deleteAsset(prev).catch(() => {});
       autoSave();
       flash(`${locale.toUpperCase()} 음성을 해제했습니다.`);
+    },
+
+    batchVoiceCharacter: async (charName, locale) => {
+      const project = get().project;
+      const char = project.characters.find((c) => c.name === charName);
+      const voicePreset = char?.voice;
+      if (!voicePreset) {
+        flash('먼저 이 캐릭터의 보이스를 골라 "💾 캐릭터에 저장"하세요.', 'error');
+        return;
+      }
+      const key = get().supertoneKey.trim();
+      if (!key) {
+        flash('Supertone 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
+        return;
+      }
+      const base = baseLocaleOf(project);
+      const items = collectVoiceTargets(project, charName, locale, base);
+      if (!items.length) {
+        flash('일괄 생성할 빈 대사가 없습니다(이미 모두 채워짐).');
+        return;
+      }
+      const busyKey = `batch:voice:${charName}`;
+      set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      let done = 0;
+      let failed = 0;
+      try {
+        for (const item of items) {
+          const params = {
+            voiceId: voicePreset.voiceId,
+            text: item.text,
+            language: locale,
+            model: voicePreset.model || aiConfig.voice.defaultModel,
+            style: voicePreset.style,
+            settings: voicePreset.settings,
+          };
+          let result;
+          try {
+            result = await supertoneTTS(params, key);
+          } catch (e) {
+            if (!/레이트 리밋/.test((e as Error).message)) {
+              failed++;
+              console.warn('[보이스 일괄생성] 실패:', item.sceneId, item.lineIndex, e);
+              continue;
+            }
+            // 레이트리밋이면 잠깐 쉬었다가 한 번만 재시도.
+            await new Promise((r) => setTimeout(r, 1500));
+            try {
+              result = await supertoneTTS(params, key);
+            } catch (e2) {
+              failed++;
+              console.warn('[보이스 일괄생성] 재시도 실패:', item.sceneId, item.lineIndex, e2);
+              continue;
+            }
+          }
+          try {
+            await attachVoiceQuiet(item.sceneId, item.lineIndex, locale, result.blob, charName);
+            done++;
+          } catch (e) {
+            failed++;
+            console.warn('[보이스 일괄생성] 적용 실패:', item.sceneId, item.lineIndex, e);
+          }
+        }
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
+      }
+      autoSave();
+      const msg =
+        `${charName} 보이스 일괄 생성 완료 — ${done}건 적용` + (failed ? ` · ${failed}건 실패(재시도 가능)` : '');
+      flash(msg, failed ? 'error' : 'success');
     },
 
     // 같은 배경 이름을 쓰는 모든 장면의 배경 이름을 한 번에 변경(라이브러리 편집).

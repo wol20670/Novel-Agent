@@ -13,6 +13,7 @@ import {
 import { backgroundKey, bgmKey, hasBgm } from '../renpy/generate';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
+import Spinner from './Spinner';
 
 // ── 이름(의미) 기준 그룹화 — 같은 이름 = 하나의 에셋(업로드 1회, 모든 장면 공유) ──
 
@@ -331,6 +332,8 @@ function CharacterCard({ name }: { name: string }) {
   const addOutfit = useStore((s) => s.addOutfit);
   const removeOutfit = useStore((s) => s.removeOutfit);
   const setI18nName = useStore((s) => s.setCharacterI18nName);
+  const batchVoiceCharacter = useStore((s) => s.batchVoiceCharacter);
+  const voiceBatchBusy = useStore((s) => !!s.busy[`batch:voice:${name}`]);
   const exprList = effectiveExpressions(useStore((s) => s.project.expressions));
   // 이름표 번역칸은 자막 언어가(원문 외에) 실제로 켜져 있을 때만 보인다 — 꺼져 있으면 내보내기에
   // 반영될 곳이 없어 입력칸만 있어도 혼란스럽다(자동 번역 켜면 자연히 나타남).
@@ -358,12 +361,40 @@ function CharacterCard({ name }: { name: string }) {
         <span className="font-semibold text-sm flex-1 truncate" style={{ color: c.color }}>
           {name}
         </span>
+        <select
+          className="field text-xs shrink-0"
+          value={c.side ?? 'auto'}
+          onChange={(e) => updateChar(name, { side: e.target.value as 'left' | 'right' | 'auto' })}
+          title="장면 내 좌우 고정 위치(등장 순서와 무관, 혼자 등장하면 항상 중앙)"
+        >
+          <option value="auto">위치: 자동(등장순)</option>
+          <option value="left">위치: 왼쪽 고정</option>
+          <option value="right">위치: 오른쪽 고정</option>
+        </select>
         <UploadButton
           onFile={(f) => importSprite(name, '기본' as Expression, f, outfit)}
           label="🖼 기본 입화 업로드"
           className="btn-primary !px-2 !py-1 text-xs shrink-0"
           title={`${outfit === '기본' ? '' : outfit + ' '}기본 입화 이미지 업로드`}
         />
+      </div>
+      {/* 보이스 일괄 생성 — VoiceLab 에서 저장해둔 프리셋(c.voice)으로 이 캐릭터의 모든 대사를
+          순차 생성·적용(이미 있는 언어 음성은 건너뜀). 대본이 수백 줄이어도 하나하나 안 해도 됨 —
+          마음에 안 드는 특정 줄은 그 대사의 VoiceLab 에서 개별로 다시 만지면 된다. */}
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span className="text-[10px] text-gray-500 mr-0.5">🎙 일괄</span>
+        <button
+          className="btn-ghost text-xs"
+          disabled={!c.voice || voiceBatchBusy}
+          onClick={() => batchVoiceCharacter(name, baseLocaleOf(project))}
+          title={
+            c.voice
+              ? `${name} 이 말하는 모든 대사 중 아직 음성 없는 줄을 저장된 보이스 프리셋으로 일괄 생성`
+              : '먼저 대사의 🎙 VoiceLab에서 보이스를 고르고 "💾 캐릭터에 저장"하세요'
+          }
+        >
+          {voiceBatchBusy ? <Spinner /> : '전체 대사 일괄 생성'}
+        </button>
       </div>
       {/* 이름표 번역 — 자막 언어를 바꿨을 때 보일 이름. 비우면 원문(대본 그대로) 표시. */}
       {nameLocales.length > 0 && (

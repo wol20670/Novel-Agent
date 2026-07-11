@@ -146,6 +146,12 @@ export interface Character {
       textGuidance?: number;
     };
   };
+  /**
+   * 장면 내 좌우 고정 위치(선택, 기본 'auto'). 등장 순서와 무관하게 항상 왼쪽/오른쪽에 세우고
+   * 싶을 때 지정 — 미지정(undefined)은 'auto'와 동일(기존 등장 순서 기반 배치, 하위호환).
+   * 혼자 등장하면 side 와 무관하게 항상 중앙(scenePositions 참고).
+   */
+  side?: 'left' | 'right' | 'auto';
 }
 
 export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice' | 'item';

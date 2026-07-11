@@ -380,13 +380,17 @@ export function spreadPositions(n: number): number[] {
 }
 
 /**
- * 한 장면에서 "화면에 세울 캐릭터"(스프라이트 보유)들의 가로 위치(%)를 등장 순서대로 배정.
+ * 한 장면에서 "화면에 세울 캐릭터"(스프라이트 보유)들의 가로 위치(%)를 배정.
  * 내레이션 전용(주인공)·스프라이트 없는 화자는 자리 계산에서 빠진다(겹침/빈자리 방지).
+ * 혼자 등장하면 side 와 무관하게 항상 중앙. 2인 이상이면 side='left'/'right' 고정 캐릭터를
+ * 각 끝 슬롯부터, 'auto'(미지정 포함)는 남는 가운데 슬롯을 등장 순서대로 채운다(같은 side끼리는
+ * 등장 순서로 tie-break — 먼저 등장이 더 바깥쪽).
  */
 function scenePositions(
   scene: Scene,
   ids: Map<string, string>,
   shown: Set<string>,
+  sideById: Map<string, 'left' | 'right' | 'auto'>,
 ): Map<string, number> {
   const order: string[] = [];
   for (const line of scene.lines) {
@@ -397,7 +401,16 @@ function scenePositions(
   }
   const xs = spreadPositions(order.length);
   const pos = new Map<string, number>();
-  order.forEach((id, i) => pos.set(id, xs[i] ?? 50));
+  if (order.length <= 1) {
+    order.forEach((id, i) => pos.set(id, xs[i] ?? 50));
+    return pos;
+  }
+  const sideOf = (id: string) => sideById.get(id) ?? 'auto';
+  const lefts = order.filter((id) => sideOf(id) === 'left');
+  const rights = order.filter((id) => sideOf(id) === 'right');
+  const autos = order.filter((id) => sideOf(id) === 'auto');
+  const arranged = [...lefts, ...autos, ...rights];
+  arranged.forEach((id, i) => pos.set(id, xs[i] ?? 50));
   return pos;
 }
 
@@ -409,6 +422,7 @@ function scriptBody(
   joints: Map<string, JointSpeaker>,
   screenH: number,
   items: ItemRef[],
+  sideById: Map<string, 'left' | 'right' | 'auto'>,
 ): string {
   const resolve = makeResolver(refs);
   const itemTag = new Map(items.map((it) => [it.name, it.tag]));
@@ -453,7 +467,7 @@ function scriptBody(
 
   for (const r of refs) {
     const s = r.scene;
-    const pos = scenePositions(s, ids, shown);
+    const pos = scenePositions(s, ids, shown, sideById);
     out.push(`# ── ${s.title} ──`);
     out.push(`label ${r.label}:`);
     out.push(`${indent(1)}scene ${r.bgTag} at vn_bg with ${transition}`);
@@ -852,6 +866,12 @@ export function generateRenpyFiles(project: Project): {
 } {
   const refs = resolveSceneAssets(project);
   const ids = charIdMap(project);
+  // 캐릭터별 좌우 고정 위치(선택) — id 기준 맵으로 변환해 scenePositions 에 전달.
+  const sideById = new Map<string, 'left' | 'right' | 'auto'>();
+  for (const c of project.characters) {
+    const id = ids.get(c.name);
+    if (id) sideById.set(id, c.side ?? 'auto');
+  }
   const plan = expressionPlan(project, ids);
   const sprites = resolveSprites(project, ids, plan);
   const joints = resolveJointSpeakers(project);
@@ -864,7 +884,7 @@ export function generateRenpyFiles(project: Project): {
   const items = resolveItems(project);
 
   const files: RenpyFile[] = [
-    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items) },
+    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById) },
     { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites, items) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
