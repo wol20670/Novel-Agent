@@ -1,4 +1,21 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git branch)",
+      "Bash(git branch -a)",
+      "Bash(git branch --show-current)",
+      "Bash(git branch --merged*)",
+      "Bash(git checkout main)",
+      "Bash(git switch main)",
+      "Bash(git merge --ff-only *)",
+      "Bash(git push origin main)",
+      "Bash(git branch -d *)",
+      "Bash(git push origin --delete *)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
