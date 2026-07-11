@@ -3,11 +3,11 @@
 > 🔵 **[`HANDOFF.md`](./HANDOFF.md)** 를 먼저 읽으세요 — 2026-07-07 오후~저녁 세션 반영 사항(Supertone TTS 통합·voice() 버그·기록 삭제/중복 버그·에셋 해제 버튼·퀵메뉴 개편) + Ren'Py 유지 결정 배경. 다음 세션에서 최신 상태 확인 후 이 줄과 HANDOFF.md 삭제할 것.
 
 Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite + React + TS + zustand + Tailwind).
-100% 클라이언트(백엔드 없음), BYO 키. 한국어 코드베이스.
+BYO 키. 한국어 코드베이스.
 
 이미지(배경·캐릭터 입화·CG)와 음악(BGM)은 **앱이 생성하지 않는다** — ChatGPT/Suno 등 외부 도구에서
-만든 파일을 앱에 **업로드**하는 워크플로우다(2026-07 전면 개편). 앱에 남은 AI 기능은 전부 텍스트
-전용(OpenAI `gpt-4o-mini`): 대본 자동 번역(영/일), AI GUI 테마 생성.
+만든 파일을 앱에 **업로드**하는 워크플로우다. 앱에 남은 AI 기능은 전부 텍스트, 보이스
+전용(OpenAI `gpt-4o-mini`): 대본 자동 번역(영/일), AI GUI 테마 생성, Supertone TTS 통합·voice()
 
 ## 명령
 - `npm run dev` — 개발 서버(http://localhost:5173).
@@ -21,26 +21,20 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 
 ## 에셋 워크플로우 (배경·캐릭터·CG·BGM)
 - 사용자가 ChatGPT(이미지) / Suno(음악) 등 외부 사이트에서 직접 생성 → 앱의 **에셋 탭**에서 업로드.
-- 업로드 안 한 에셋은 오프라인 Canvas 플레이스홀더(`src/generators/image/canvas*.ts`)로 자동 채워져
-  ZIP·미리보기가 항상 동작한다. 단 **BGM 은 플레이스홀더가 없다** — 업로드 안 한 씬은 `play music`
-  자체가 방출되지 않는다(`src/renpy/generate.ts` 의 `scene.bgmAssetId` 게이팅).
-- BGM 파일명은 항상 `.mp3` 로 고정(Suno 기본 출력 포맷 기준, `src/renpy/generate.ts`). wav 등 다른
-  포맷을 올리면 확장자만 mp3 로 저장되니 주의(재생 자체는 대체로 문제없음).
+- 업로드 안 한 에셋은 오프라인 Canvas 플레이스홀더(`src/generators/image/canvas*.ts`)로 자동 채워져 ZIP·미리보기가 항상 동작한다. 단 **BGM 은 플레이스홀더가 없다**
+— 업로드 안 한 씬은 `play music` 자체가 방출되지 않는다(`src/renpy/generate.ts` 의 `scene.bgmAssetId` 게이팅).
+- BGM 파일명은 항상 `.mp3` 로 고정(Suno 기본 출력 포맷 기준, `src/renpy/generate.ts`). wav 등 다른 포맷을 올리면 확장자만 mp3 로 저장되니 주의(재생 자체는 대체로 문제없음).
 - 성우(TTS) 파이프라인은 **골격만 유지**(`Project.voiceLocales`, `voices.rpy` 출력, 업로드 mp3 재생
-  경로) — 실제 생성/업로드 UI는 미구현. Supertone(공식 API 확인됨: `docs.supertoneapi.com`, 호스트
-  `https://supertoneapi.com/v1`, 헤더 `x-sup-api-key`, `POST /text-to-speech/{VOICE_ID}`) 연동은 후속 작업.
+  경로) - Supertone(공식 API 확인됨: `docs.supertoneapi.com`, 호스트 `https://supertoneapi.com/v1`, 헤더 `x-sup-api-key`, `POST /text-to-speech/{VOICE_ID}`) 연동 완료.
 
 ## 협업(실시간 공유, 2인 전제 — src/collab/)
-- **"100% 클라이언트(백엔드 없음)" 원칙의 유일한 예외.** Supabase(무료 티어)를 저장 시점(자동저장
-  600ms 디바운스)마다 동기화하는 가벼운 relay 로 쓴다 — 키 입력마다 반영되는 구글독스식 동시편집이
+- Supabase(무료 티어)를 저장 시점(자동저장, 600ms 디바운스)마다 동기화하는 가벼운 relay 로 쓴다 — 키 입력마다 반영되는 구글독스식 동시편집이
   아니라, last-write-wins(나중 저장이 이김) + 프레즌스("친구가 지금 이 장면 보는 중")로 충돌을 피함.
 - **URL·anon key는 빌드에 내장**(`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`, `.env.example` 참고
   — anon key는 원래 공개돼도 되는 값, 진짜 보안은 Supabase RLS). 사용자는 **6자리 방 코드**(새로
   만들면 자동 생성, 참가는 그 코드 입력)와 이름만 다룬다. ⚠️ 방 코드를 아는 사람은 누구나 읽고
   쓸 수 있음(보안 경계 아님, 2인 신뢰 전제) — 이 사실을 UI 문구에서 절대 빼지 말 것.
-- 로컬 개발 시 `.env.example`을 `.env.local`로 복사해 값 채우기(gitignore 됨). 배포(Vercel 등)는
-  프로젝트 환경변수 설정에 같은 두 값을 넣으면 됨(`vercel.json`은 SPA rewrite만 담당, 이 앱은
-  라우팅이 없어 필수는 아니지만 방어적으로 있음).
+- 이 앱은 라우팅이 없어 필수는 아니지만 방어적으로 있음.
 - Supabase 쪽 필요 설정(테이블 스키마·Storage 버킷·RLS off·Realtime publication)은 대시보드에서
   수동으로 해야 함 — 자동화 불가. 정확한 SQL·순서는 세션 히스토리(또는 사용자에게 문의) 참고.
   **`projects` 테이블은 RLS off로 충분하지만 Storage `assets` 버킷은 RLS를 끌 수 없다**
@@ -48,13 +42,10 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
   에셋 업로드·다운로드가 됨(안 하면 콘솔에 `new row violates row-level security policy` 400).
 - 프레즌스(`src/collab/presence.ts`)의 clientId는 localStorage 에 영속화돼 있다 — 새로고침마다
   새 id를 뽑으면 이전 세션이 "나"로 제외되지 못해 유령 접속자가 누적되는 버그가 있었음(수정됨).
-- 협업을 끄고 같은 방 코드로 재입장하면 이전 프로젝트가 그대로 복원된다 — **의도된 동작**(방 데이터가
-  방 코드를 PK로 서버에 저장돼 있음, 끄기는 채널 해제일 뿐 방 삭제가 아님). 방을 비우려면 대시보드에서
+- 협업을 끄고 같은 방 코드로 재입장하면 이전 프로젝트가 그대로 복원된다 — **의도된 동작**(방 데이터가 방 코드를 PK로 서버에 저장돼 있음, 끄기는 채널 해제일 뿐 방 삭제가 아님). 방을 비우려면 대시보드에서
   해당 room 행/에셋을 직접 지워야 함(앱에 초기화 UI 없음).
-- 에코(무한루프) 방지가 `src/collab/sync.ts`의 핵심 — 버전 카운터로 자기 자신이 보낸 변경을
-  걸러낸다. 이 로직 건드릴 땐 반드시 실제 네트워크 오류 상황(가짜 URL 등)으로 상태 배지가
-  "연결 실패"로 정확히 뜨는지 재확인할 것(과거 여기서 버그 있었음 — Supabase 클라이언트가 네트워크
-  오류를 조용히 `{error}` 로 반환하고 throw 하지 않아서 상태가 잘못 "연결됨"으로 뜬 적 있음).
+- 에코(무한루프) 방지가 `src/collab/sync.ts`의 핵심 — 버전 카운터로 자기 자신이 보낸 변경을 걸러낸다. 이 로직 건드릴 땐 반드시 실제 네트워크 오류 상황(가짜 URL 등)으로 상태 배지가
+  "연결 실패"로 정확히 뜨는지 재확인할 것(과거 여기서 버그 있었음 — Supabase 클라이언트가 네트워크 오류를 조용히 `{error}` 로 반환하고 throw 하지 않아서 상태가 잘못 "연결됨"으로 뜬 적 있음).
 
 ## 폰트 프리셋(본문/이름 폰트 선택 — src/fonts/)
 - 폰트는 앱에 번들하지 않고 **사용자 소유 GCS 공개 버킷**에서 온디맨드로 받아 IndexedDB에 캐싱한다
