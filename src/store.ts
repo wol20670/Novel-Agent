@@ -443,7 +443,7 @@ export const useStore = create<State>((set, get) => {
         get().project.scenes.map((sc) => {
           if (sc.id !== sceneId) return sc;
           const lines = sc.lines.map((l, i) => {
-            if (i !== lineIndex || l.kind === 'item') return l; // 아이템 라인은 번역 없음
+            if (i !== lineIndex || l.kind === 'item' || l.kind === 'cg') return l; // 아이템·CG 라인은 번역 없음
             const i18n = { ...(l.i18n ?? {}) };
             if (hasContent) i18n[locale] = text;
             else delete i18n[locale];

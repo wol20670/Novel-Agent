@@ -209,6 +209,15 @@ function LineRow({
   const speakerChar = isSingleSpeaker ? characters.find((c) => c.name === (line as DialogueLine).speaker) : undefined;
   const canVoice = !!speakerChar && !speakerChar.isProtagonist;
 
+  // CG 배경 전환 라인 — 이 지점부터 배경이 CG 로 바뀌고 등장인물이 사라진다(장면 끝까지).
+  if (line.kind === 'cg') {
+    return (
+      <div className="flex items-center gap-1.5 py-0.5 text-xs">
+        <span className="rounded px-1.5 py-0.5 border border-violet-500/40 text-violet-400 bg-violet-500/5 shrink-0">🖼 CG 전환</span>
+        <span className="text-gray-300">{line.desc || '(설명 없음)'}</span>
+      </div>
+    );
+  }
   // 아이템(소품) 팝업 라인 — 편집/번역/표정 없이 칩으로만 표시.
   if (line.kind === 'item') {
     return (

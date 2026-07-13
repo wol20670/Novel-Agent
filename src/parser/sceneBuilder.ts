@@ -216,8 +216,12 @@ export class SceneBuilder {
   addDirection(note: string) {
     this.ensureScene().direction.push(note.trim());
   }
+  /** #CG <설명> — 에셋 목록(scene.cg)에 등록하고, 라인 흐름 "그 위치"에 배경 전환 마커도 꽂는다. */
   addCg(desc: string) {
-    this.ensureScene().cg.push(desc.trim());
+    const sc = this.ensureScene();
+    const v = desc.trim();
+    sc.cg.push(v);
+    sc.lines.push({ kind: 'cg', desc: v });
   }
   addChoice(choice: Choice) {
     this.ensureScene().choices.push(choice);

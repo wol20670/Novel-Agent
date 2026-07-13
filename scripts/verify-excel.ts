@@ -23,7 +23,7 @@ const ws = XLSX.utils.aoa_to_sheet(aoa);
 const wb = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(wb, ws, 'S');
 const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-const { scenes, characters } = parseWorkbook(buf as ArrayBuffer);
+const { scenes, characters } = await parseWorkbook(buf as ArrayBuffer);
 console.log('장면:', scenes.length, '| 캐릭터:', characters.map(c=>c.name).join(','));
 for (const s of scenes) console.log(` "${s.title}" bg=${s.background??'-'} bgm=${s.bgm??'-'} 대사=${s.lines.length} CG=${s.cg.length} 선택지=${s.choices.length} 점프=${s.jumpTo??'-'}`);
 const ok = scenes.length===3 && scenes[0].bgm==='piano_soft' && scenes[1].choices.length===2 && scenes[2].jumpTo==='밤, 상가거리';

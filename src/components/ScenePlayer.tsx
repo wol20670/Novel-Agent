@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { inferEmotion } from '../generators/emotion';
 import { canvasSprite } from '../generators/image/canvasSprite';
+import { canvasImage } from '../generators/image/canvasProvider';
 import { getAsset } from '../storage/assetStore';
 import { spreadPositions } from '../renpy/generate';
 import { emojiFor, spriteAssetId, type Scene, type Character, type Expression, type Line } from '../types';
@@ -79,6 +80,46 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
   const total = scene.lines.length;
   const i = Math.min(step, Math.max(0, total - 1));
   const cur = scene.lines[i] as Line | undefined;
+  const projW = useStore((s) => s.project.width);
+  const projH = useStore((s) => s.project.height);
+
+  // CG 배경 전환(generate.ts 와 동일 규칙): 현재 줄까지 나온 마지막 kind:'cg' 라인의 CG 가 배경이
+  // 되고 스프라이트는 숨긴다. 위치 마커가 없는 기존 데이터는 첫 CG 를 장면 시작부터 배경으로 폴백.
+  const activeCgIdx = useMemo(() => {
+    if (!scene.cg.length) return -1;
+    if (!scene.lines.some((l) => l.kind === 'cg')) return 0;
+    let idx = -1;
+    for (let k = 0; k <= i && k < total; k++) {
+      const l = scene.lines[k];
+      if (l.kind !== 'cg') continue;
+      const j = scene.cg.findIndex((d) => d.trim() === l.desc);
+      if (j >= 0) idx = j;
+    }
+    return idx;
+  }, [scene, i, total]);
+  const cgAssetId = activeCgIdx >= 0 ? scene.cgAssetIds?.[activeCgIdx] : undefined;
+  const cgDesc = activeCgIdx >= 0 ? scene.cg[activeCgIdx] : undefined;
+  const [cgUrl, setCgUrl] = useState<string>();
+  useEffect(() => {
+    let alive = true;
+    let obj: string | undefined;
+    if (cgDesc === undefined) {
+      setCgUrl(undefined);
+      return;
+    }
+    (async () => {
+      let blob: Blob | undefined;
+      if (cgAssetId) blob = await getAsset(cgAssetId);
+      if (!blob) blob = await canvasImage(cgDesc, `CG: ${cgDesc}`, projW, projH);
+      if (!alive) return;
+      obj = URL.createObjectURL(blob);
+      setCgUrl(obj);
+    })();
+    return () => {
+      alive = false;
+      if (obj) URL.revokeObjectURL(obj);
+    };
+  }, [cgAssetId, cgDesc, projW, projH]);
 
   // 현재 줄까지 각 캐릭터의 "최신 표정"(Ren'Py 처럼 마지막 표정 유지).
   const visible = new Map<string, Expression>();
@@ -104,19 +145,27 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
       ? cur.name
         ? `🎁 아이템 팝업: ${cur.name}`
         : '🎁 아이템 닫기'
-      : cur.text;
+      : cur.kind === 'cg'
+        ? `🖼 CG 배경 전환: ${cur.desc || '(설명 없음)'}`
+        : cur.text;
 
   return (
     <div>
       <div className="relative aspect-video rounded-xl border border-edge bg-ink overflow-hidden">
-        {bgUrl ? (
+        {cgUrl ? (
+          // CG 배경: 뒤판 = cover+blur 확대(여백 채움), 앞판 = contain 원본(Ren'Py 출력과 동일 연출)
+          <>
+            <img src={cgUrl} className="absolute inset-0 w-full h-full object-cover blur-lg scale-110" />
+            <img src={cgUrl} className="absolute inset-0 w-full h-full object-contain" />
+          </>
+        ) : bgUrl ? (
           <img src={bgUrl} className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-600">
             배경 미생성
           </div>
         )}
-        {[...visible].map(([nm, ex]) => {
+        {activeCgIdx < 0 && [...visible].map(([nm, ex]) => {
           const c = charByName.get(nm);
           return c ? (
             <PreviewSprite key={nm} char={c} expr={ex} outfit={scene.outfits?.[nm]} xpct={xpos.get(nm) ?? 50} />

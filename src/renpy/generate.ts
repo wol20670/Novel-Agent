@@ -354,6 +354,11 @@ function assetDefs(refs: SceneAssetRef[], sprites: SpriteRef[], items: ItemRef[]
       if (seen.has(tag)) return;
       seen.add(tag);
       lines.push(`image ${tag} = "images/${r.cgFiles[j]}"`);
+      // CG 배경 합성판: 뒤 = cover+blur 확대(여백 채움), 앞 = contain 원본. scene 문으로 배경 교체에 쓴다.
+      // (transform 문은 init 0, image 문은 init 500 에 실행되므로 파일이 달라도 참조 순서는 안전.)
+      lines.push(
+        `image ${tag}_scene = Fixed(At("images/${r.cgFiles[j]}", vn_cg_backdrop), At("images/${r.cgFiles[j]}", vn_cg_fit))`,
+      );
     });
   }
   if (sprites.length) {
@@ -442,11 +447,17 @@ function scriptBody(
   out.push(`${indent(1)}xysize (config.screen_width, config.screen_height)`);
   out.push(`${indent(1)}align (0.5, 0.5)`);
   out.push('');
-  // CG(이벤트 일러스트): 전체가 다 보이도록 fit contain(비율 유지·잘림 없음). 트랜스폼 없이 show 하면
-  // Ren'Py가 원본 픽셀 크기 그대로 중앙 표시해 화면보다 큰 CG는 머리·가장자리가 잘린다(실사용 버그였음).
-  // 화면과 비율이 다른 CG는 여백에 뒤 배경이 비친다.
-  out.push('# CG: 전체가 다 보이도록 fit contain(비율 유지·잘림 없음, 비율 다르면 뒤 배경이 여백에 비침)');
-  out.push('transform vn_cg:');
+  // CG(이벤트 일러스트): 그 지점부터 장면 "배경"으로 쓴다(스프라이트는 scene 문이 지움).
+  // 원본은 fit contain(비율 유지·잘림 없음 — 화면보다 큰 CG의 머리 잘림이 실사용 버그였음),
+  // 비율이 달라 생기는 여백은 같은 CG를 cover+blur 로 확대해 깔아 채운다(블러 백드롭).
+  // blur 는 GL2 렌더러(Ren'Py 7.4+) 속성 — assetDefs 의 <tag>_scene 합성 이미지가 이 둘을 겹친다.
+  out.push('# CG 배경: 뒤판 = cover+blur 확대(여백 채움), 앞판 = contain 원본(잘림 없음)');
+  out.push('transform vn_cg_backdrop:');
+  out.push(`${indent(1)}fit "cover"`);
+  out.push(`${indent(1)}xysize (config.screen_width, config.screen_height)`);
+  out.push(`${indent(1)}align (0.5, 0.5)`);
+  out.push(`${indent(1)}blur 24`);
+  out.push('transform vn_cg_fit:');
   out.push(`${indent(1)}fit "contain"`);
   out.push(`${indent(1)}xysize (config.screen_width, config.screen_height)`);
   out.push(`${indent(1)}align (0.5, 0.5)`);
@@ -466,11 +477,12 @@ function scriptBody(
     out.push(`label ${r.label}:`);
     out.push(`${indent(1)}scene ${r.bgTag} at vn_bg with ${transition}`);
     if (r.bgmFile) out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
-    // CG 컷 — 표시 후 클릭 한 번(pause)을 기다렸다가 dissolve 로 닫는다(계속 화면에 남던 버그 수정).
-    r.cgTags.forEach((tag) => out.push(`${indent(1)}show ${tag} at vn_cg with dissolve`));
-    if (r.cgTags.length) {
-      out.push(`${indent(1)}pause`);
-      r.cgTags.forEach((tag) => out.push(`${indent(1)}hide ${tag} with dissolve`));
+    // CG 배경 전환: kind:'cg' 라인 위치에서 발동 — 그 지점부터 배경=CG, 스프라이트 숨김(장면 끝까지),
+    // 대사창·TTS 는 계속. 위치 마커가 없는 기존 저장 데이터(재파싱 전)는 첫 CG 를 장면 시작부터 배경으로 폴백.
+    let cgActive = false;
+    if (r.cgTags.length && !s.lines.some((l) => l.kind === 'cg')) {
+      out.push(`${indent(1)}scene ${r.cgTags[0]}_scene with dissolve`);
+      cgActive = true;
     }
     if (s.direction.length) out.push(`${indent(1)}# 연출: ${s.direction.join(' / ')}`);
 
@@ -494,13 +506,26 @@ function scriptBody(
         }
         continue;
       }
+      if (line.kind === 'cg') {
+        // 배경을 CG 합성판(<tag>_scene)으로 교체 — scene 문이 서 있던 스프라이트를 전부 지운다(개별 hide 불필요).
+        // 같은 장면에 CG 가 또 나오면 배경만 다음 CG 로 다시 교체된다.
+        const cgIdx = s.cg.findIndex((d) => d.trim() === line.desc);
+        if (cgIdx >= 0 && r.cgTags[cgIdx]) {
+          out.push(`${indent(1)}scene ${r.cgTags[cgIdx]}_scene with dissolve`);
+          cgActive = true;
+        }
+        continue;
+      }
       if (line.kind === 'dialogue') {
         const speakerIds = lineSpeakerIds(line, ids);
         // 이번 줄에서 처음 등장하는(스프라이트 보유) 화자를 한 번에 모아 추가 — 합동 대사로 여럿이
         // 동시에 처음 등장해도 재배치가 한 번만 일어나게. 새 등장이 있으면 전체를 다시 배치하고,
         // 이번 줄 화자가 아니면서 이미 서 있던 캐릭터 중 위치가 바뀐 쪽만 스냅 이동시킨다(속성 생략
         // — Ren'Py는 태그의 마지막 표시 속성을 유지하므로 표정·의상 재지정 불필요).
-        const newlyRevealed = speakerIds.filter((id) => spritesByChar.has(id) && !revealedOrder.includes(id));
+        // CG 배경이 켜진 뒤에는 스프라이트 등장·재배치를 전부 억제(장면 끝까지 인물 없음).
+        const newlyRevealed = cgActive
+          ? []
+          : speakerIds.filter((id) => spritesByChar.has(id) && !revealedOrder.includes(id));
         if (newlyRevealed.length) {
           const prevPos = currentPos;
           revealedOrder.push(...newlyRevealed);
@@ -515,8 +540,8 @@ function scriptBody(
           }
         }
         const want = attrFor(effectiveEmotion(line, s));
-        // 스프라이트가 있는 화자(들) 등장 — 합동 대사면 멤버 전원이 함께 선다.
-        for (const sid of speakerIds) {
+        // 스프라이트가 있는 화자(들) 등장 — 합동 대사면 멤버 전원이 함께 선다. CG 배경 중엔 세우지 않음.
+        for (const sid of cgActive ? [] : speakerIds) {
           const owned = spritesByChar.get(sid);
           if (!owned || !owned.length) continue;
           // 이 장면에서 입을 의상(없으면 기본). 해당 의상 스프라이트가 없으면 기본 의상으로 폴백.
@@ -791,7 +816,7 @@ function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] 
     const body: string[] = [];
     for (const r of refs) {
       for (const line of r.scene.lines) {
-        if (line.kind === 'item') continue; // 아이템 라인은 자막 없음
+        if (line.kind === 'item' || line.kind === 'cg') continue; // 아이템·CG 라인은 자막 없음
         const tr = line.i18n?.[loc];
         if (!tr) continue;
         const key = esc(line.text);

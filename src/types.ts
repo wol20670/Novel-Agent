@@ -77,7 +77,12 @@ export type Line =
    * 아이템(소품) 팝업 인라인 이벤트. 태그 위치(그 순간)에 사물을 라이트박스로 잠깐 띄운다.
    * name === '' 이면 hide 마커(#아이템끝). 이미지는 프로젝트 공유(Project.itemAssetIds[name]).
    */
-  | { kind: 'item'; name: string };
+  | { kind: 'item'; name: string }
+  /**
+   * CG 배경 전환 인라인 이벤트. 이 지점부터 장면 배경을 CG로 바꾸고 스프라이트를 모두 숨긴다
+   * (장면 끝까지 유지, 대사창·TTS 는 계속). desc 는 Scene.cg 항목과 트림 기준으로 매칭된다.
+   */
+  | { kind: 'cg'; desc: string };
 
 export interface Choice {
   text: string;
@@ -297,7 +302,7 @@ export function effectiveTextLocales(p: Project): Locale[] {
   for (const sc of p.scenes) {
     // ② 번역(i18n)이 실제로 들어 있는 언어를 자동 포함
     for (const line of sc.lines) {
-      if (line.kind === 'item' || !line.i18n) continue; // 아이템 라인은 번역 대상 아님
+      if (line.kind === 'item' || line.kind === 'cg' || !line.i18n) continue; // 아이템·CG 라인은 번역 대상 아님
       for (const [loc, v] of Object.entries(line.i18n) as [Locale, string | undefined][]) {
         if (v && v.trim()) set.add(loc);
       }
