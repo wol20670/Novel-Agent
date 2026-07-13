@@ -366,21 +366,23 @@ screen quick_menu():
             action ToggleVariable("quick_menu_expanded")
 
         if quick_menu_expanded:
-            frame:
-                style "quick_dropdown"
+            # 개별 알약 버튼을 세로로 붙여 쌓는다 — 공용 style quick_menu(xoffset -12, spacing 8,
+            # 터치 variant 가 사용)는 쓰지 않고 인라인 속성으로 메뉴 버튼과 우측 끝을 맞춘다.
+            vbox:
+                style_prefix "quick"
+                xalign 1.0
+                yalign 0.0
+                yoffset gui.scale(56)
+                spacing 0
 
-                vbox:
-                    style_prefix "quick_item"
-                    spacing 0
-
-                    textbutton _("뒤로") action [Rollback(), SetVariable("quick_menu_expanded", False)]
-                    textbutton _("기록") action [ShowMenu('history'), SetVariable("quick_menu_expanded", False)]
-                    textbutton _("스킵") action [Skip(), SetVariable("quick_menu_expanded", False)] alternate Skip(fast=True, confirm=True)
-                    textbutton _("자동") action [Preference("auto-forward", "toggle"), SetVariable("quick_menu_expanded", False)]
-                    textbutton _("저장") action [ShowMenu('save'), SetVariable("quick_menu_expanded", False)]
-                    textbutton _("빠른저장") action [QuickSave(), SetVariable("quick_menu_expanded", False)]
-                    textbutton _("빠른불러오기") action [QuickLoad(), SetVariable("quick_menu_expanded", False)]
-                    textbutton _("설정") action [ShowMenu('preferences'), SetVariable("quick_menu_expanded", False)]
+                textbutton _("뒤로") action [Rollback(), SetVariable("quick_menu_expanded", False)]
+                textbutton _("기록") action [ShowMenu('history'), SetVariable("quick_menu_expanded", False)]
+                textbutton _("스킵") action [Skip(), SetVariable("quick_menu_expanded", False)] alternate Skip(fast=True, confirm=True)
+                textbutton _("자동") action [Preference("auto-forward", "toggle"), SetVariable("quick_menu_expanded", False)]
+                textbutton _("저장") action [ShowMenu('save'), SetVariable("quick_menu_expanded", False)]
+                textbutton _("빠른저장") action [QuickSave(), SetVariable("quick_menu_expanded", False)]
+                textbutton _("빠른불러오기") action [QuickLoad(), SetVariable("quick_menu_expanded", False)]
+                textbutton _("설정") action [ShowMenu('preferences'), SetVariable("quick_menu_expanded", False)]
 
 
 init python:
@@ -390,8 +392,8 @@ default quick_menu = True
 ## 메뉴 펼침 상태(로컬 변수 아님 — 게임 진행 변수라 세이브/롤백에도 자연히 포함됨).
 default quick_menu_expanded = False
 
-## quick_menu 스타일은 터치 variant(1380행 부근, hbox style_prefix "quick")가 그대로 쓰고 있어
-## 여긴 손대지 않는다 — 데스크톱 드롭다운은 아래 quick_dropdown/quick_item_* 전용 스타일 사용.
+## quick_menu 스타일은 터치 variant(hbox style_prefix "quick")가 그대로 쓴다 —
+## 데스크톱 드롭다운 vbox 는 인라인 속성으로 우측 끝 정렬(xoffset 0)·spacing 0 을 따로 지정.
 style quick_menu is vbox
 style quick_button is default
 style quick_button_text is button_text
@@ -422,36 +424,6 @@ style quick_button:
 style quick_button_text:
     properties gui.text_properties("quick_button")
     # 밝은 알약 배경 위에서 항상 읽히도록 진한 색으로 고정(테마 accent_color 는 밝은 배경에 대비가 약함).
-    xalign 0.5
-    idle_color "#3a2540"
-    hover_color "#3a2540"
-    selected_color "#3a2540"
-
-## 데스크톱 퀵메뉴 드롭다운 카드 — 하나의 둥근 패널 안에 같은 폭 버튼을 여백 0으로 쌓고,
-## 패널 우측 끝을 톱니(메뉴) 버튼 우측 끝과 맞춘다(개별 알약이 라벨 길이만큼 들쭉날쭉하던 문제 해결).
-style quick_dropdown is empty
-style quick_item_button is default
-style quick_item_button_text is button_text
-
-style quick_dropdown:
-    xalign 1.0
-    yalign 0.0
-    yoffset gui.scale(56)
-    background Frame("gui/quickpill_idle.png", gui.scale(20), gui.scale(14))
-    padding (gui.scale(10), gui.scale(10))
-
-style quick_item_button:
-    properties gui.button_properties("quick_button")
-    idle_background None
-    hover_background Frame("gui/quickpill_hover.png", gui.scale(20), gui.scale(14))
-    selected_background Frame("gui/quickpill_hover.png", gui.scale(20), gui.scale(14))
-    insensitive_background None
-    xfill True
-    xpadding gui.scale(24)
-    ypadding gui.scale(8)
-
-style quick_item_button_text:
-    properties gui.text_properties("quick_button")
     xalign 0.5
     idle_color "#3a2540"
     hover_color "#3a2540"
