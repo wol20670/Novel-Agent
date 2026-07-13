@@ -15,8 +15,6 @@ export interface AiConfig {
     endpoint: string;
     /** GUI 테마(색 팔레트) 생성 모델. */
     themeModel: string;
-    /** (선택·추후) 대사→표정 LLM 분류 모델. 미연동 시 오프라인 휴리스틱이 동작. */
-    emotionModel: string;
     /** 창의성. 0=결정적, 1=다양. */
     temperature: number;
   };
@@ -35,7 +33,6 @@ export const aiConfig: AiConfig = {
   chat: {
     endpoint: 'https://api.openai.com/v1/chat/completions',
     themeModel: 'gpt-4o-mini',
-    emotionModel: 'gpt-4o-mini',
     temperature: 0.8,
   },
   voice: {
