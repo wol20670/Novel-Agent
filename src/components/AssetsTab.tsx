@@ -174,7 +174,26 @@ export default function AssetsTab() {
           </div>
         )}
       </section>
+
+      <CleanupSection />
     </div>
+  );
+}
+
+/** 어디서도 참조되지 않는 IndexedDB 에셋 blob 을 정리 — 확인·토스트는 액션 안에서 처리. */
+function CleanupSection() {
+  const cleanupOrphanAssets = useStore((s) => s.cleanupOrphanAssets);
+  return (
+    <section>
+      <h3 className="section-title mb-1">🧹 저장소 정리</h3>
+      <p className="text-xs text-gray-500 mb-3">
+        옛 업로드를 다른 파일로 교체하거나 캐릭터·장면을 지우면, 더는 어디서도 쓰이지 않는 파일이 브라우저 저장소에
+        남을 수 있습니다. 지금은 아무 데도 연결되지 않은 파일만 찾아 지웁니다.
+      </p>
+      <button className="btn-ghost text-[11px] text-gray-400 hover:text-rose-500" onClick={() => void cleanupOrphanAssets()}>
+        참조되지 않는 에셋 정리
+      </button>
+    </section>
   );
 }
 

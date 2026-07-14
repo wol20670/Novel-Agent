@@ -26,6 +26,8 @@ export interface CollabHooks {
   setPeers: (peers: PeerPresence[]) => void;
   /** 프레즌스 최초 방송값(내 이름·현재 탭·선택 장면). */
   getPresenceSelf: () => Omit<PeerPresence, 'clientId'>;
+  /** 디바운스 저장(autoSave) 대기 중 여부 — true 면 곧 내 push 가 이길 것이므로 원격 갱신 반영을 유예한다. */
+  hasPendingLocalSave(): boolean;
 }
 
 let unsubscribeProject: (() => void) | null = null;
@@ -80,7 +82,8 @@ export async function startCollab(hooks: CollabHooks): Promise<void> {
   }
 
   unsubscribeProject = subscribeProject((payload) => {
-    markApplied(payload.version);
+    markApplied(payload.version); // 버전 카운터는 유지 — 내 다음 push가 더 높은 version을 갖게
+    if (hooks.hasPendingLocalSave()) return; // 내 편집이 디바운스 대기 중 — 곧 내 push가 이기므로 반영 유예
     withApplyingRemoteGuard(() => hooks.applyRemoteProject(payload.data));
   });
   unsubscribePresence = startPresence(hooks.getPresenceSelf(), (peers) => hooks.setPeers(peers));

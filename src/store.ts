@@ -8,7 +8,8 @@ import { supertoneTTS, getCredits } from './generators/voice/supertoneProvider';
 import { aiConfig } from './config/aiConfig';
 import type { ScriptMeta, BuildResult } from './parser';
 import { mergeScenes, type AnalyzeMode } from './project/mergeScenes';
-import { putAsset, getAsset, deleteAsset, deleteAssets, clearAssets } from './storage/assetStore';
+import { putAsset, getAsset, deleteAsset, deleteAssets, clearAssets, getAllAssetKeys } from './storage/assetStore';
+import { collectReferencedAssetIds } from './assetRefs';
 import { saveProject, loadProject, clearProject } from './storage/projectStore';
 import { SAMPLE_STORY } from './sample';
 import { exportProjectFile, importProjectFile } from './project/transfer';
@@ -188,6 +189,11 @@ interface State {
   resetAll: () => void;
   /** 업로드한 에셋(배경·입화·CG·메뉴·BGM·아이템)을 모두 비운다. 대본·캐릭터 설정은 유지. */
   clearGeneratedAssets: () => Promise<void>;
+  /**
+   * 어디서도 참조되지 않는 IndexedDB 에셋 blob 을 정리한다(옛 업로드 교체·삭제된 캐릭터/장면 등으로
+   * 남은 고아 데이터). 확인 후 되돌릴 수 없이 삭제 — 성우 음성도 참조 집합에 포함해 실수로 지우지 않는다.
+   */
+  cleanupOrphanAssets: () => Promise<void>;
   setToast: (msg: string | null) => void;
 
   // 프로젝트 파일 (기기 간 이동)
@@ -210,6 +216,7 @@ export const useStore = create<State>((set, get) => {
   const autoSave = () => {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
+      saveTimer = null; // ⚠️ 먼저 비워야 함 — 안 그러면 "저장 대기 중" 상태(hasPendingLocalSave)가 영원히 true 로 남아 원격 갱신이 계속 막힘.
       const { project, assets } = get();
       try {
         saveProject(project, assets);
@@ -255,6 +262,9 @@ export const useStore = create<State>((set, get) => {
     setStatus: (status) => set({ collabStatus: status }),
     setPeers: (peers) => set({ collabPeers: peers }),
     getPresenceSelf: presenceSelf,
+    // 디바운스 저장(600ms) 대기 중인지 — 대기 중이면 곧 내 push 가 더 높은 version 으로 이길 것이므로
+    // 그 사이 들어온 원격 갱신은 반영을 유예한다(수신 즉시 덮으면 방금 한 내 편집이 순간적으로 사라져 보임).
+    hasPendingLocalSave: () => saveTimer !== null,
   });
 
   const setScenes = (scenes: Scene[]) => {
@@ -1234,22 +1244,7 @@ export const useStore = create<State>((set, get) => {
 
     clearGeneratedAssets: async () => {
       const { project } = get();
-      const ids = new Set<string>();
-      const add = (id?: string) => {
-        if (id) ids.add(id);
-      };
-      for (const sc of project.scenes) {
-        add(sc.backgroundAssetId);
-        add(sc.bgmAssetId);
-        sc.cgAssetIds?.forEach(add);
-      }
-      for (const c of project.characters) {
-        Object.values(c.expressions).forEach(add);
-        c.outfits?.forEach((o) => Object.values(o.expressions).forEach(add));
-      }
-      Object.values(project.itemAssetIds ?? {}).forEach(add);
-      add(project.menuArt?.main);
-      add(project.menuArt?.game);
+      const ids = collectReferencedAssetIds(project, { includeVoice: false });
       if (ids.size === 0) return flash('비울 에셋이 없습니다.');
       // 참조만 비우고 대본·캐릭터 설정(외형·성격·의상 정의·표정 목록)·GUI 는 유지.
       set((s) => ({
@@ -1275,6 +1270,21 @@ export const useStore = create<State>((set, get) => {
       await deleteAssets([...ids]).catch(() => {}); // 단일 트랜잭션(건당 트랜잭션 순차 호출 대체)
       autoSave();
       flash(`업로드한 에셋 ${ids.size}개를 비웠습니다. 대본·캐릭터 설정은 유지됩니다.`);
+    },
+
+    cleanupOrphanAssets: async () => {
+      // ⚠️ 성우 음성도 반드시 포함해야 한다 — 빠뜨리면 실제로 재생 중인 TTS 오디오까지 고아로 오판해 삭제됨.
+      const referenced = collectReferencedAssetIds(get().project, { includeVoice: true });
+      const idbKeys = await getAllAssetKeys();
+      const orphans = [...new Set([...idbKeys, ...Object.keys(get().assets)])].filter((id) => !referenced.has(id));
+      if (orphans.length === 0) return flash('고아 에셋이 없습니다.');
+      if (!window.confirm(`어디서도 참조되지 않는 에셋 ${orphans.length}개를 삭제할까요? 되돌릴 수 없습니다.`)) return;
+      await deleteAssets(orphans);
+      set((s) => ({
+        assets: Object.fromEntries(Object.entries(s.assets).filter(([id]) => !orphans.includes(id))),
+      }));
+      autoSave();
+      flash(`고아 에셋 ${orphans.length}개를 삭제했습니다.`, 'success');
     },
 
     setToast: (msg) => {

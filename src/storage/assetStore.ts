@@ -83,6 +83,16 @@ export async function deleteAssets(ids: string[]): Promise<void> {
   });
 }
 
+/** 저장된 모든 에셋 id 목록(고아 에셋 정리용 — 참조 집합과 대조해 차집합을 구한다). */
+export async function getAllAssetKeys(): Promise<string[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const r = tx(db, 'readonly').getAllKeys();
+    r.onsuccess = () => resolve(r.result as string[]);
+    r.onerror = () => reject(r.error);
+  });
+}
+
 export async function clearAssets(): Promise<void> {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
