@@ -1,10 +1,14 @@
 // 프로젝트 JSON 전체를 저장 시점(store.ts 의 autoSave 600ms 디바운스)마다 Supabase 에 밀어넣고,
 // 상대방의 변경을 구독해 받아온다. 충돌 처리는 last-write-wins(합의된 "가벼운 공유" 범위).
 //
-// 에코 방지가 핵심: 모듈 스코프 localVersion 을 두고, 들어온 이벤트의 version 이 내 localVersion
-// 이하면 무시한다(자기 자신이 방금 보낸 것이거나 이미 반영한 오래된 이벤트). 원격을 반영할 때는
-// withApplyingRemoteGuard 로 감싸 store 의 반영 경로가 다시 autoSave→pushProject 를 트리거하지
-// 않도록 한다(무한 루프 방지, 실제 가드는 store.ts/index.ts 쪽에서 이 플래그를 확인해서 건다).
+// 에코 방지가 핵심: 예전엔 모듈 스코프 localVersion 을 두고 "들어온 이벤트의 version 이 내
+// localVersion 이하면 무시"했지만, A·B 가 같은 버전에서 동시에 편집하면 둘 다 "다음 버전"을
+// 발행해 서로의 진짜 변경을 자기 에코로 오판 → 조용히 유실·영구 분기하는 버그가 있었다.
+// 지금은 세션마다 고유한 clientId 로 에코를 판정한다: 들어온 행의 client_id 가 내 clientId 와
+// 같으면 방금 내가 보낸 것(에코) → 무시, 다르면 항상 적용한다. version 은 순서 참고용으로만 남김.
+// 원격을 반영할 때는 withApplyingRemoteGuard 로 감싸 store 의 반영 경로가 다시
+// autoSave→pushProject 를 트리거하지 않도록 한다(무한 루프 방지, 실제 가드는 store.ts/index.ts
+// 쪽에서 이 플래그를 확인해서 건다).
 
 import type { Project } from '../types';
 import { getSupabaseClient, getCollabConfig, roomKey } from './supabaseClient';
@@ -15,8 +19,15 @@ export interface RemoteProjectPayload {
   updatedBy: string | null;
 }
 
+/** push 성공/실패를 store 의 collabStatus 뱃지에 반영하기 위한 콜백(순환 import 방지, index.ts 가 연결). */
+export type PushStatusHandler = (status: 'online' | 'error') => void;
+
+// 세션(탭)마다 고유 — 이 값을 실은 채로 보낸 변경은 구독 쪽에서 "내가 방금 보낸 것"으로 판정한다.
+const clientId = crypto.randomUUID();
+
 let localVersion = 0;
 let applyingRemote = false;
+let pushStatusHandler: PushStatusHandler | null = null;
 
 export function withApplyingRemoteGuard<T>(fn: () => T): T {
   applyingRemote = true;
@@ -25,6 +36,11 @@ export function withApplyingRemoteGuard<T>(fn: () => T): T {
   } finally {
     applyingRemote = false;
   }
+}
+
+/** startCollab/stopCollab 이 push 성공·실패를 collabStatus 에 반영할 콜백을 등록/해제한다. */
+export function setPushStatusHandler(handler: PushStatusHandler | null): void {
+  pushStatusHandler = handler;
 }
 
 /** 로컬 프로젝트를 원격에 반영(upsert). collab 미준비/원격 적용 중이면 조용히 아무 것도 안 한다. */
@@ -41,12 +57,15 @@ export async function pushProject(project: Project): Promise<void> {
     version: nextVersion,
     updated_by: displayName || null,
     updated_at: new Date().toISOString(),
+    client_id: clientId,
   });
   if (error) {
     console.warn('[collab] 프로젝트 동기화 실패(다음 저장 때 재시도됨):', error.message);
+    pushStatusHandler?.('error');
     return;
   }
   localVersion = nextVersion;
+  pushStatusHandler?.('online');
 }
 
 /**
@@ -81,10 +100,11 @@ export function subscribeProject(onRemote: (payload: RemoteProjectPayload) => vo
       { event: '*', schema: 'public', table: 'projects', filter: `room=eq.${room}` },
       (payload) => {
         const row = (payload.new ?? payload.old) as
-          | { data: Project; version: number; updated_by: string | null }
+          | { data: Project; version: number; updated_by: string | null; client_id: string | null }
           | undefined;
         if (!row || typeof row.version !== 'number') return;
-        if (row.version <= localVersion) return; // 자기 에코이거나 이미 반영한 버전
+        if (row.client_id === clientId) return; // 방금 내가 보낸 것(에코) — version 동률과 무관하게 판정
+        localVersion = Math.max(localVersion, row.version); // 순서 참고용 카운터만 갱신
         onRemote({ data: row.data, version: row.version, updatedBy: row.updated_by ?? null });
       },
     )

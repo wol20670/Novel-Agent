@@ -3,13 +3,14 @@ import { useStore } from '../store';
 const STEPS = ['스토리 입력', '장면 분석', '에셋 생성', '검토·승인', 'ZIP 출력'];
 
 export default function Stepper() {
-  const project = useStore((s) => s.project);
-  const assets = useStore((s) => s.assets);
-
-  const hasInput = project.rawInput.trim().length > 0 || project.scenes.length > 0;
-  const analyzed = project.scenes.length > 0;
-  const hasAsset = Object.keys(assets).length > 0;
-  const approved = analyzed && project.scenes.every((s) => s.status === 'approved');
+  // 전체 project/assets 객체 대신 실제로 쓰는 파생 boolean 만 구독 — 둘 다 원시값(boolean)이라
+  // 값 비교로 안전하고, project/assets 안의 무관한 변경(대사 편집 등)마다 리렌더되지 않는다.
+  const hasInput = useStore((s) => s.project.rawInput.trim().length > 0 || s.project.scenes.length > 0);
+  const analyzed = useStore((s) => s.project.scenes.length > 0);
+  const hasAsset = useStore((s) => Object.keys(s.assets).length > 0);
+  const approved = useStore(
+    (s) => s.project.scenes.length > 0 && s.project.scenes.every((sc) => sc.status === 'approved'),
+  );
 
   const done = [hasInput, analyzed, hasAsset, approved, false];
   // 현재 활성 = 완료되지 않은 첫 단계

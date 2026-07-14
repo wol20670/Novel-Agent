@@ -13,10 +13,14 @@
 create table if not exists public.projects (
   room       text primary key,          -- 방 코드(roomKey(): trim+소문자) = Realtime 채널 접미사
   data       jsonb not null,            -- 프로젝트 JSON 전체(last-write-wins)
-  version    bigint not null default 0, -- 에코 방지용 단조 증가 버전
+  version    bigint not null default 0, -- 순서 참고용 카운터(더 이상 에코 판정에 안 씀)
   updated_by text,                      -- 표시 이름(프레즌스용, 없으면 null)
   updated_at timestamptz not null default now()
 );
+
+-- 에코 판정을 version 동률 비교 대신 세션별 client_id 로 한다(동시 편집 시 버전 동률로 상대
+-- 변경을 자기 에코로 오판·조용히 유실하는 버그 수정). 기존 테이블에도 안전하게 추가.
+alter table public.projects add column if not exists client_id text;
 
 -- Realtime postgres_changes 구독(subscribeProject)이 이벤트를 받으려면 publication 에 있어야 함.
 do $$

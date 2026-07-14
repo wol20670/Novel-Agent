@@ -268,7 +268,16 @@ const indent = (n: number) => '    '.repeat(n);
 function esc(s: string): string {
   // %(변수)s 같은 보간 문법이 아닌 순수 문자(예: "할인 20%")는 %% 로 이스케이프해야 한다.
   // 안 하면 Ren'Py 가 그 줄을 표시할 때 "Unknown string format code" 로 런타임에 죽는다(실제 SDK로 확인).
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%').replace(/\n/g, ' ').trim();
+  // [ ] 는 변수 보간, { } 는 텍스트 태그로 해석되므로(예: 사용자가 "[속보]"·"{웃음}" 을 입력) 동일하게
+  // 무력화해야 한다 — 안 하면 NameError/Unknown text tag 로 런타임에 죽는다(escRpyText 와 동일 갭).
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\[/g, '[[')
+    .replace(/\{/g, '{{')
+    .replace(/%/g, '%%')
+    .replace(/\n/g, ' ')
+    .trim();
 }
 
 /**

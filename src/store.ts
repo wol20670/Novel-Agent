@@ -8,7 +8,7 @@ import { supertoneTTS, getCredits } from './generators/voice/supertoneProvider';
 import { aiConfig } from './config/aiConfig';
 import { parseText, parseWorkbook } from './parser';
 import type { ScriptMeta } from './parser';
-import { putAsset, getAsset, deleteAsset, clearAssets } from './storage/assetStore';
+import { putAsset, getAsset, deleteAsset, deleteAssets, clearAssets } from './storage/assetStore';
 import { saveProject, loadProject, clearProject } from './storage/projectStore';
 import { SAMPLE_STORY } from './sample';
 import { exportProjectFile, importProjectFile } from './project/transfer';
@@ -479,6 +479,10 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ busy: { ...s.busy, 'batch:translate': true } }));
       let done = 0;
       let failScenes = 0;
+      // 채워진 칸을 sceneId → lineIndex → locale → text 로 모아뒀다가 루프가 끝난 뒤 scenes 를
+      // 딱 1회만 재구축한다 — 예전엔 채워진 칸마다 setLineTranslation(=set 전체 재맵핑+autoSave
+      // 디바운스 리셋)을 호출해 장면·로케일 수에 비례해 최대 수백 번 리렌더/저장이 발생했다.
+      const updates = new Map<string, Map<number, Partial<Record<Locale, string>>>>();
       try {
         for (const { sceneId, items } of batches) {
           try {
@@ -489,7 +493,12 @@ export const useStore = create<State>((set, get) => {
               for (const loc of targets) {
                 const v = tr[loc];
                 if (v && v.trim()) {
-                  get().setLineTranslation(sceneId, it.i, loc, v);
+                  let sceneUpdates = updates.get(sceneId);
+                  if (!sceneUpdates) {
+                    sceneUpdates = new Map();
+                    updates.set(sceneId, sceneUpdates);
+                  }
+                  sceneUpdates.set(it.i, { ...sceneUpdates.get(it.i), [loc]: v });
                   done++;
                 }
               }
@@ -501,6 +510,19 @@ export const useStore = create<State>((set, get) => {
         }
       } finally {
         set((s) => ({ busy: { ...s.busy, 'batch:translate': false } }));
+      }
+      if (updates.size) {
+        const scenes = get().project.scenes.map((sc) => {
+          const sceneUpdates = updates.get(sc.id);
+          if (!sceneUpdates) return sc;
+          const lines = sc.lines.map((l, i) => {
+            const lineUpdate = sceneUpdates.get(i);
+            if (!lineUpdate || l.kind === 'item' || l.kind === 'cg') return l; // 아이템·CG 라인은 번역 없음
+            return { ...l, i18n: { ...(l.i18n ?? {}), ...lineUpdate } };
+          });
+          return { ...sc, lines };
+        });
+        setScenes(scenes); // 단일 set + 단일 autoSave
       }
       const msg =
         `자동 번역 완료 — ${done}건 채움` + (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
@@ -655,7 +677,7 @@ export const useStore = create<State>((set, get) => {
           }),
         },
       }));
-      for (const id of toDelete) await deleteAsset(id).catch(() => {});
+      await deleteAssets(toDelete).catch(() => {}); // 단일 트랜잭션(건당 트랜잭션 순차 호출 대체)
       autoSave();
       flash(`'${name}' 표정을 삭제했습니다.`);
     },
@@ -718,7 +740,7 @@ export const useStore = create<State>((set, get) => {
           }),
         },
       }));
-      for (const id of toDelete) await deleteAsset(id).catch(() => {});
+      await deleteAssets(toDelete).catch(() => {}); // 단일 트랜잭션(건당 트랜잭션 순차 호출 대체)
       autoSave();
       flash(`'${charName}'의 '${name}' 의상을 삭제했습니다.`);
     },
@@ -1254,7 +1276,7 @@ export const useStore = create<State>((set, get) => {
           itemAssetIds: undefined,
         },
       }));
-      for (const id of ids) await deleteAsset(id).catch(() => {});
+      await deleteAssets([...ids]).catch(() => {}); // 단일 트랜잭션(건당 트랜잭션 순차 호출 대체)
       autoSave();
       flash(`업로드한 에셋 ${ids.size}개를 비웠습니다. 대본·캐릭터 설정은 유지됩니다.`);
     },
@@ -1287,7 +1309,8 @@ export const useStore = create<State>((set, get) => {
         const { project, assets, assetCount } = await importProjectFile(file);
         // 새로 복원된 에셋과 겹치지 않는 이전 프로젝트 에셋은 고아가 되므로 IndexedDB 에서 제거.
         const newIds = new Set(Object.keys(assets));
-        for (const id of oldIds) if (!newIds.has(id)) await deleteAsset(id).catch(() => {});
+        // 단일 트랜잭션(건당 트랜잭션 순차 호출 대체) — 고아 에셋이 많은 대형 프로젝트 교체에서 유리.
+        await deleteAssets(oldIds.filter((id) => !newIds.has(id))).catch(() => {});
         set({
           project,
           assets,

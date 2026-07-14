@@ -23,13 +23,23 @@ export function saveProject(project: Project, assets: Record<string, AssetMeta>)
 export function loadProject(): { project: Project; assets: Record<string, AssetMeta> } | null {
   const raw = localStorage.getItem(PROJECT_KEY);
   if (!raw) return null;
+  // project/assets 파싱을 독립 try·catch 로 분리한다 — 예전엔 한 try 안이라 assets 키만 손상돼도
+  // 멀쩡한 대본까지 통째로 null(무음 폐기)이 됐다. assets 만 깨졌으면 project + 빈 assets 로
+  // 복원해 작업 유실을 막고, project 자체가 깨졌을 때만 진짜로 복구 불가(null)로 취급한다.
+  let project: Project;
   try {
-    const project = JSON.parse(raw) as Project;
-    const assets = JSON.parse(localStorage.getItem(ASSETS_KEY) ?? '{}') as Record<string, AssetMeta>;
-    return { project, assets };
-  } catch {
+    project = JSON.parse(raw) as Project;
+  } catch (e) {
+    console.error('[projectStore] project 파싱 실패 — 복구 불가:', e);
     return null;
   }
+  let assets: Record<string, AssetMeta> = {};
+  try {
+    assets = JSON.parse(localStorage.getItem(ASSETS_KEY) ?? '{}') as Record<string, AssetMeta>;
+  } catch (e) {
+    console.error('[projectStore] assets 파싱 실패 — project 는 살리고 assets 는 빈 값으로 복원:', e);
+  }
+  return { project, assets };
 }
 
 export function clearProject(): void {

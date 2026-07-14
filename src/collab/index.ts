@@ -10,7 +10,9 @@ import {
   markApplied,
   withApplyingRemoteGuard,
   resetSyncState,
+  setPushStatusHandler,
 } from './sync';
+import { setAssetPushStatusHandler } from './assetsSync';
 import { startPresence, type PeerPresence } from './presence';
 
 export type CollabStatus = 'off' | 'connecting' | 'online' | 'error';
@@ -34,6 +36,8 @@ function teardownChannels(): void {
   unsubscribeProject = null;
   unsubscribePresence?.();
   unsubscribePresence = null;
+  setPushStatusHandler(null);
+  setAssetPushStatusHandler(null);
 }
 
 /** 협업을 (재)시작한다. 설정은 이미 persistCollabConfig 로 저장돼 있어야 한다. */
@@ -54,6 +58,11 @@ export async function startCollab(hooks: CollabHooks): Promise<void> {
     hooks.setStatus('error');
     return;
   }
+
+  // push(프로젝트·에셋) 성공/실패를 뱃지에 그대로 반영 — 실패해도 계속 'online'으로 보이던 문제 수정.
+  // 'connecting' 단계는 최종 hooks.setStatus('online') 이 뒤에서 덮으므로 순서 문제 없음.
+  setPushStatusHandler(hooks.setStatus);
+  setAssetPushStatusHandler(hooks.setStatus);
 
   try {
     const remote = await pullProjectOnce();

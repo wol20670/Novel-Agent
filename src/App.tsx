@@ -17,14 +17,16 @@ export default function App() {
   const hydrate = useStore((s) => s.hydrate);
   const toast = useStore((s) => s.toast);
   const toastType = useStore((s) => s.toastType);
-  const project = useStore((s) => s.project);
+  // 전체 project 객체 대신 실제로 쓰는 파생값(개수)만 구독 — project 안의 무관한 필드(제목·장면
+  // 본문 등)가 바뀔 때마다 헤더가 통째로 리렌더되는 것을 막는다. 둘 다 원시값(number)이라
+  // useShallow 없이도 참조가 아닌 값 비교로 안전.
+  const scenesCount = useStore((s) => s.project.scenes.length);
+  const approved = useStore((s) => s.project.scenes.filter((sc) => sc.status === 'approved').length);
   const openaiKey = useStore((s) => s.openaiKey);
 
   useEffect(() => {
     hydrate();
   }, [hydrate]);
-
-  const approved = project.scenes.filter((s) => s.status === 'approved').length;
 
   return (
     <div className="h-full flex flex-col">
@@ -42,7 +44,7 @@ export default function App() {
           </span>
           <CollabBadge />
           <span className="text-gray-400">
-            장면 <b className="text-gray-200">{project.scenes.length}</b> · 승인{' '}
+            장면 <b className="text-gray-200">{scenesCount}</b> · 승인{' '}
             <b className="text-emerald-600">{approved}</b>
           </span>
         </div>

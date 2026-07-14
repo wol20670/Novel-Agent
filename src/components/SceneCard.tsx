@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store';
 import { SCENE_STATUS_LABEL, effectiveExpressions, emojiFor, baseLocaleOf, LOCALE_LABEL, type SceneStatus, type Expression, type Line, type Locale } from '../types';
 import { inferEmotion } from '../generators/emotion';
@@ -23,7 +24,9 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
   const importBgm = useStore((s) => s.importBgm);
   const bgUrl = useAssetUrl(scene.backgroundAssetId);
   // 협업 — 지금 이 장면을 보고 있는 상대방(있으면 편집 충돌을 피하라는 신호).
-  const peersHere = useStore((s) => s.collabPeers.filter((p) => p.selectedSceneId === sceneId));
+  // .filter(...) 는 매 렌더마다 새 배열이라 Object.is 비교가 항상 실패 → useShallow 로 배열
+  // 내용을 비교해야 장면 수백 개에서도 관계없는 상태 변경마다 전체 카드가 리렌더되지 않는다.
+  const peersHere = useStore(useShallow((s) => s.collabPeers.filter((p) => p.selectedSceneId === sceneId)));
 
   return (
     <div

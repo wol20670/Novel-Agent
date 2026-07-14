@@ -76,6 +76,17 @@ body {
   }
 }
 
+/* 장면 카드 슬롯 — 화면 밖 카드는 렌더/레이아웃을 건너뛰어(content-visibility) 장면 수백 개에서도
+   전체 마운트 비용을 줄인다(P1-2, 가상화 라이브러리 없이). contain-intrinsic-size 의 height 는
+   실제 카드 대략 높이(접힌 카드 기준)의 추정값 — 화면 밖일 때 스크롤 위치를 잡아주는 placeholder
+   크기일 뿐, width 는 auto 로 둬 부모 폭을 그대로 따르게 한다(레이아웃 틀어짐 방지).
+   SceneCard 내부의 id="scene-…"·scroll-mt-4 앵커 스크롤 대상은 이 래퍼가 아니라 그 자식 카드
+   자체이므로 그대로 동작한다. */
+.scene-card-slot {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
 /* 토스트 진입 */
 @keyframes toastIn {
   from {

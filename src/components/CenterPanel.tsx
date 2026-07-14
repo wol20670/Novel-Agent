@@ -70,7 +70,11 @@ export default function CenterPanel() {
           ) : (
             <div className="flex flex-col gap-4 max-w-3xl mx-auto">
               {scenes.map((s, i) => (
-                <SceneCard key={s.id} sceneId={s.id} index={i} />
+                // scene-card-slot(content-visibility: auto) 로 화면 밖 카드는 렌더를 건너뛴다(index.css).
+                // id·scroll-mt-4 앵커는 이 래퍼가 아니라 SceneCard 내부 카드 자체에 있어 그대로 동작.
+                <div key={s.id} className="scene-card-slot">
+                  <SceneCard sceneId={s.id} index={i} />
+                </div>
               ))}
             </div>
           ))}

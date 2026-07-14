@@ -58,10 +58,24 @@ export async function collectProjectFiles(
   // 조용히 기본 폰트 경로로 생성되고, 뒤의 selectedFontFiles 는 카탈로그가 찬 뒤라 실제 커스텀
   // 폰트 파일을 번들해서 gui.rpy 와 game/fonts/ 내용이 서로 어긋나는 버그가 있었음.
   await loadFontCatalog();
-  const { files: textFiles, refs, sprites } = generateRenpyFiles(project);
+
+  // 폰트 확보(다운로드 시도)를 gui.rpy 생성보다 먼저 한다 — 커스텀 폰트 다운로드가 실패하면
+  // selectedFontFiles 가 파일만 기본 폰트로 대체하는데, generateRenpyFiles(project) 를 원본
+  // guiOverrides 로 먼저 불러버리면 gui.rpy 는 여전히 없는 커스텀 폰트 파일명을 참조해
+  // "실행 불가 zip"이 된다. adoptedIds(요청 id → 실제 채택 id)로 guiOverrides 를 보정한 뒤
+  // gui.rpy 를 생성해야 파일 목록과 참조가 항상 일치한다.
+  const japanese =
+    effectiveTextLocales(project).includes('ja') || effectiveVoiceLocales(project).includes('ja');
+  const fontResult = await selectedFontFiles(project.guiOverrides, japanese);
+  const effectiveGuiOverrides = adoptGuiOverrideFonts(project.guiOverrides, fontResult.adoptedIds);
+  const effectiveProject: Project =
+    effectiveGuiOverrides === project.guiOverrides ? project : { ...project, guiOverrides: effectiveGuiOverrides };
+
+  const { files: textFiles, refs, sprites } = generateRenpyFiles(effectiveProject);
   const out: ProjectFile[] = textFiles.map((f) => ({ path: f.path, data: f.content }));
 
-  let placeholders = 0;
+  let placeholders = fontResult.placeholders;
+  for (const f of fontResult.files) out.push(f);
 
   // 캐릭터 스프라이트 (생성된 assetId → blob, 없으면 Canvas 폴백)
   for (const sp of sprites) {
@@ -196,14 +210,8 @@ export async function collectProjectFiles(
     out.push({ path: 'game/gui/textbox.png', data: await textboxGradientPng(boxColor, maxAlpha) });
   }
 
-  // 한글 폰트 — Ren'Py 기본 폰트는 한글 글리프가 없다. 선택한 본문/이름 폰트(기본은 나눔고딕)를
-  // game/fonts/ 에 번들. 일본어(자막·음성 어느 쪽이든) 프로젝트에서만 Source Han Sans(≈2.9MB)도
-  // 함께 번들한다. gui.rpy(guiRpy)의 JP 폰트 참조 조건과 반드시 일치해야 한다(같은 규칙: ja ∈ text|voice).
-  const japanese =
-    effectiveTextLocales(project).includes('ja') || effectiveVoiceLocales(project).includes('ja');
-  const fontResult = await selectedFontFiles(project.guiOverrides, japanese);
-  placeholders += fontResult.placeholders;
-  for (const f of fontResult.files) out.push(f);
+  // 한글·일본어 폰트 파일(game/fonts/)은 위에서 gui.rpy 생성 전에 이미 확보해 out 에 담아뒀다
+  // (fontResult) — placeholders 도 이미 그 값으로 초기화됨.
 
   return { files: out, placeholders };
 }
@@ -228,11 +236,15 @@ export async function buildRenpyZip(project: Project): Promise<ZipResult> {
  *   폴백한다(나눔고딕은 일본어 글리프가 없어 자막이 빈칸으로 나오는 문제 대응). 둘 다 SIL OFL 1.1.
  * - 커스텀(GCS) 폰트 다운로드 실패 시 기본 폰트로 자동 폴백(오프라인에도 항상 실행 가능한 zip 보장) —
  *   이 경우 placeholders 카운트를 올려 호출 측 토스트("임시 에셋 N개 포함")에 반영한다.
+ *
+ * adoptedIds: "요청한 폰트 id → 실제로 파일을 넣은 폰트 id" 매핑. 다운로드 실패로 기본 폰트로
+ * 대체된 경우 요청 id와 달라지므로, 호출 측이 gui.rpy 생성 전에 guiOverrides 를 이 매핑으로
+ * 보정해야 gui.rpy(참조 파일명) ↔ game/fonts/(실제 번들) 가 항상 일치한다(P0-3).
  */
 async function selectedFontFiles(
   guiOverrides: Project['guiOverrides'],
   includeJapanese: boolean,
-): Promise<{ files: ProjectFile[]; placeholders: number }> {
+): Promise<{ files: ProjectFile[]; placeholders: number; adoptedIds: Map<string, string> }> {
   // 호출 측(collectProjectFiles)이 gui.rpy 생성 전에 이미 로드해두지만, 이 함수만 독립 호출될 가능성도
   // 방어(loadFontCatalog 는 캐시돼 있으면 즉시 반환이라 비용 없음).
   await loadFontCatalog();
@@ -241,7 +253,8 @@ async function selectedFontFiles(
   // 항상 기본 폰트를 wanted 에 포함시켜야 gui.rpy 가 참조하는 파일과 번들 내용이 일치한다.
   const bodyId = guiOverrides?.bodyFontId ?? DEFAULT_FONT.id;
   const nameId = guiOverrides?.nameFontId ?? bodyId;
-  const wanted = [...new Set([bodyId, nameId])].map((id) => fontById(id));
+  const requestedIds = [...new Set([bodyId, nameId])];
+  const wanted = requestedIds.map((id) => fontById(id));
 
   // 본문/이름 폰트를 병렬로 확보(각각 독립적인 GCS 다운로드일 수 있음).
   const resolved = await Promise.all(
@@ -257,9 +270,11 @@ async function selectedFontFiles(
         placeholder = !!blob; // 대체 폰트마저 실패하면 아무것도 안 넣으므로 placeholder 로 세지 않는다.
       }
       const license = blob && !actual.bundled ? await ensureFontLicense(actual.id) : undefined;
-      return { actual, blob, license, placeholder };
+      return { requestedId: preset.id, actual, blob, license, placeholder };
     }),
   );
+
+  const adoptedIds = new Map(resolved.map((r) => [r.requestedId, r.actual.id]));
 
   const files: ProjectFile[] = [];
   const seenFiles = new Set<string>(); // 본문=이름 동일 폰트 등 중복 방지
@@ -280,7 +295,29 @@ async function selectedFontFiles(
   if (licenseRes?.ok) files.push({ path: 'game/fonts/OFL.txt', data: await licenseRes.text() });
   if (jpRes?.ok) files.push({ path: 'game/fonts/SourceHanSansLite.ttf', data: await jpRes.blob() });
 
-  return { files, placeholders };
+  return { files, placeholders, adoptedIds };
+}
+
+/**
+ * 요청한 커스텀 폰트가 다운로드 실패로 다른 id(기본 폰트)로 대체됐다면, gui.rpy 생성 전에
+ * guiOverrides 도 그 실제 채택 id로 보정한다 — 안 하면 gui.rpy 는 여전히 없는 파일을 참조한다.
+ * 대체가 없었다면(정상 다운로드/애초에 미지정) 원본 객체를 그대로 반환(불필요한 재생성 방지).
+ */
+function adoptGuiOverrideFonts(
+  guiOverrides: Project['guiOverrides'],
+  adoptedIds: Map<string, string>,
+): Project['guiOverrides'] {
+  if (!guiOverrides) return guiOverrides;
+  const nextBody = guiOverrides.bodyFontId && adoptedIds.get(guiOverrides.bodyFontId);
+  const nextName = guiOverrides.nameFontId && adoptedIds.get(guiOverrides.nameFontId);
+  const bodyChanged = !!nextBody && nextBody !== guiOverrides.bodyFontId;
+  const nameChanged = !!nextName && nextName !== guiOverrides.nameFontId;
+  if (!bodyChanged && !nameChanged) return guiOverrides;
+  return {
+    ...guiOverrides,
+    ...(bodyChanged ? { bodyFontId: nextBody } : {}),
+    ...(nameChanged ? { nameFontId: nextName } : {}),
+  };
 }
 
 /** 브라우저 다운로드 트리거. */

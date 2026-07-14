@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import {
   effectiveExpressions,
@@ -73,13 +73,18 @@ export default function AssetsTab() {
   const characters = useStore((s) => s.project.characters);
   const scenes = useStore((s) => s.project.scenes);
 
+  // scenes 전체를 4회 순회하는 그룹핑 — 렌더마다가 아니라 scenes 가 실제로 바뀔 때만 재계산.
+  // (early return 보다 먼저 둬야 함: Hook 은 조건부 return 위에서 항상 같은 순서로 호출돼야 한다.)
+  const bgs = useMemo(
+    () => groupBy(scenes, backgroundKey, (s) => s.background ?? '', (s) => s.backgroundAssetId, () => true),
+    [scenes],
+  );
+  const cgs = useMemo(() => cgGroups(scenes), [scenes]);
+  const bgms = useMemo(() => groupBy(scenes, bgmKey, (s) => s.bgm ?? '', (s) => s.bgmAssetId, hasBgm), [scenes]);
+  const items = useMemo(() => itemNames(scenes), [scenes]);
+
   if (scenes.length === 0)
     return <p className="text-gray-500 text-sm text-center mt-16">먼저 스토리를 분석하세요.</p>;
-
-  const bgs = groupBy(scenes, backgroundKey, (s) => s.background ?? '', (s) => s.backgroundAssetId, () => true);
-  const cgs = cgGroups(scenes);
-  const bgms = groupBy(scenes, bgmKey, (s) => s.bgm ?? '', (s) => s.bgmAssetId, hasBgm);
-  const items = itemNames(scenes);
 
   return (
     <div className="flex flex-col gap-7 max-w-3xl mx-auto">

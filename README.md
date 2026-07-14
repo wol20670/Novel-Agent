@@ -162,6 +162,8 @@ Chrome/Edge 데스크톱에서 **Ren'Py 탭 → "⚡ 폴더에 쓰기"** 로 **�
   제3자도 편집 가능).
 - Supabase 프로젝트 연결은 빌드 시점 설정(앱 배포자가 구성)이며, 사용자가 키를 입력하는 BYO 방식이 아니다.
 - 셀프호스트/재구축 시 테이블·RLS 정책·Storage 버킷은 [`supabase/setup.sql`](./supabase/setup.sql)을 SQL Editor에서 실행해 구성한다(재실행 안전).
+- 이미 운영 중인 Supabase 프로젝트를 새 버전 앱으로 올릴 때도 배포 전에 `setup.sql`을 다시 실행할 것
+  (예: `projects.client_id` 컬럼 추가 — 없으면 저장이 400으로 실패한다).
 
 ---
 

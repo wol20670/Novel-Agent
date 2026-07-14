@@ -4,9 +4,10 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
+- [ ] ⚠️ fix/review-p0-p1 배포 전 Supabase SQL Editor에서 `supabase/setup.sql` 재실행(projects.client_id 컬럼 추가) — 안 하면 협업 저장이 400으로 실패
+- [ ] fix/review-p0-p1 브랜치 커밋·병합 여부 사용자 결정 대기(워킹트리에만 존재, 검증 완료)
 - [ ] CG 배경 전환을 실제 업로드 CG로 사용자 실기기 확인(블러 백드롭 품질 체감)
 - [ ] 퀵메뉴 드롭다운(알약 원복) 실기기 확인: hover 하이라이트 + 우측 끝 정렬·여백 0 체감
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- 퀵메뉴 드롭다운 카드형 원복 — 개별 알약 버튼을 우측 끝(메뉴 버튼과 동일 앵커)·spacing 0 으로 쌓음, 카드 전용 스타일 3종 삭제 (실행 스크린샷으로 정렬 검증)
-- 대사→표정 LLM 분류기 연결 계획 제거(emotionModel·classifyEmotions·README 로드맵) — 휴리스틱+명시 태그로 확정
+- 코드리뷰 P0+P1 반영(fix/review-p0-p1, 미커밋): esc `[`/`{` 이스케이프, collab client_id 에코 판정, 폰트 폴백 gui.rpy 일치, 저장 로드 분리, push 실패 뱃지 반영, 전송 확장자 수정 + 성능 6건(SceneCard 셀렉터, content-visibility, 번역 배치 set, useMemo, 구독 축소, IDB 배치 삭제) — typecheck·test 32/32·외부 빌드·renpy lint 통과

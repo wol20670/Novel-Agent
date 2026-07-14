@@ -52,6 +52,37 @@ export async function deleteAsset(id: string): Promise<void> {
   });
 }
 
+/**
+ * 여러 에셋을 단일 readwrite 트랜잭션으로 삭제한다(건당 트랜잭션이던 순차 deleteAsset 루프 대체).
+ * IndexedDB 트랜잭션 오픈/커밋 오버헤드가 건마다 들지 않아, 캐릭터·의상 일괄 삭제·프로젝트
+ * 초기화·가져오기 시 삭제할 에셋이 많을 때 유리하다. 빈 배열이면 즉시 반환(불필요한 트랜잭션 방지).
+ */
+export async function deleteAssets(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const store = tx(db, 'readwrite');
+    let pending = ids.length;
+    let settled = false;
+    const fail = (e: unknown) => {
+      if (settled) return;
+      settled = true;
+      reject(e);
+    };
+    for (const id of ids) {
+      const r = store.delete(id);
+      r.onsuccess = () => {
+        pending--;
+        if (pending === 0 && !settled) {
+          settled = true;
+          resolve();
+        }
+      };
+      r.onerror = () => fail(r.error);
+    }
+  });
+}
+
 export async function clearAssets(): Promise<void> {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {

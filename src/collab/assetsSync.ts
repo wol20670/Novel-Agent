@@ -6,8 +6,18 @@
 
 import { getAsset, putAsset } from '../storage/assetStore';
 import { getSupabaseClient } from './supabaseClient';
+import type { PushStatusHandler } from './sync';
 
 const BUCKET = 'assets';
+
+// 실패해도 console.warn 만 하고 collabStatus 는 계속 'online'으로 보였던 문제 수정(sync.ts 와 동일
+// 콜백 패턴). index.ts 가 startCollab/stopCollab 시점에 sync.ts 것과 같은 핸들러를 등록/해제한다.
+let pushStatusHandler: PushStatusHandler | null = null;
+
+/** startCollab/stopCollab 이 push 성공·실패를 collabStatus 에 반영할 콜백을 등록/해제한다. */
+export function setAssetPushStatusHandler(handler: PushStatusHandler | null): void {
+  pushStatusHandler = handler;
+}
 
 /** 로컬 업로드 직후 Storage 에도 올린다. collab 미준비면 조용히 no-op(로컬 동작엔 영향 없음). */
 export async function pushAsset(id: string, blob: Blob): Promise<void> {
@@ -17,7 +27,12 @@ export async function pushAsset(id: string, blob: Blob): Promise<void> {
     upsert: true,
     contentType: blob.type || undefined,
   });
-  if (error) console.warn('[collab] 에셋 업로드 실패:', error.message);
+  if (error) {
+    console.warn('[collab] 에셋 업로드 실패:', error.message);
+    pushStatusHandler?.('error');
+    return;
+  }
+  pushStatusHandler?.('online');
 }
 
 // 동시에 같은 에셋을 여러 번 렌더 요청해도 다운로드는 1회만 나가도록 dedupe.
