@@ -77,11 +77,15 @@ export function parseText(input: string): BuildResult {
     if (idx > 0) {
       const speaker = line.slice(0, idx).trim();
       const text = line.slice(idx + 1).trim();
+      // URL("http://...")의 "//"를 대사 구분자로 오인하지 않도록 콜론 뒤가 "//"면 대사 판정 제외.
+      const looksUrl = line.slice(idx + 1).startsWith('//');
+      // "12:30 정각이었다" 같은 시각·비율 표기는 화자가 숫자로만 구성되면 대사로 받지 않는다.
+      const looksNumeric = /^\d+$/.test(speaker);
       // 합동 화자("A & B" / "A, B")는 구분자로 둘 이상이 분해되면 공백이 있어도 대사로 받는다.
       // 그 외엔 단일 화자 휴리스틱(공백 없는 짧은 이름)으로 지문 오인을 막는다.
       const looksJoint = splitJointSpeaker(speaker).length >= 2;
       const looksSingle = speaker.length <= 20 && !speaker.includes(' ');
-      if (speaker && text && (looksJoint || looksSingle)) {
+      if (speaker && text && !looksUrl && !looksNumeric && (looksJoint || looksSingle)) {
         b.addDialogue(speaker, text);
         continue;
       }

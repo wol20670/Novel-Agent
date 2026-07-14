@@ -265,19 +265,38 @@ export function resolveItems(project: Project): ItemRef[] {
 
 const indent = (n: number) => '    '.repeat(n);
 
-function esc(s: string): string {
+/**
+ * Ren'Py 문자열 리터럴 이스케이프 코어. esc/escRpyText/escLit 세 래퍼가 공유한다(과거 esc 에서만
+ * `[`/`{` 이스케이프가 빠져 런타임 크래시가 났던 것처럼, 복붙 재구현이 서로 갈라지는 걸 막기 위함).
+ * 치환 순서: 역슬래시 → 따옴표 → (tags==='escape' 일 때만) [ / { 텍스트태그 무력화 → % → 개행 → trim.
+ */
+function escapeRpy(s: string, opts: { tags: 'escape' | 'keep'; newline: 'space' | 'literal'; trim: boolean }): string {
+  let out = s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  if (opts.tags === 'escape') {
+    // [ ] 는 변수 보간, { } 는 텍스트 태그로 해석되므로(예: 사용자가 "[속보]"·"{웃음}" 을 입력) 무력화
+    // 해야 한다 — 안 하면 NameError/Unknown text tag 로 런타임에 죽는다.
+    out = out.replace(/\[/g, '[[').replace(/\{/g, '{{');
+  }
   // %(변수)s 같은 보간 문법이 아닌 순수 문자(예: "할인 20%")는 %% 로 이스케이프해야 한다.
   // 안 하면 Ren'Py 가 그 줄을 표시할 때 "Unknown string format code" 로 런타임에 죽는다(실제 SDK로 확인).
-  // [ ] 는 변수 보간, { } 는 텍스트 태그로 해석되므로(예: 사용자가 "[속보]"·"{웃음}" 을 입력) 동일하게
-  // 무력화해야 한다 — 안 하면 NameError/Unknown text tag 로 런타임에 죽는다(escRpyText 와 동일 갭).
-  return s
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\[/g, '[[')
-    .replace(/\{/g, '{{')
-    .replace(/%/g, '%%')
-    .replace(/\n/g, ' ')
-    .trim();
+  out = out.replace(/%/g, '%%');
+  out = opts.newline === 'space' ? out.replace(/\r?\n/g, ' ') : out.replace(/\r?\n/g, '\\n');
+  return opts.trim ? out.trim() : out;
+}
+
+/** 대사·이름 등 script.rpy 본문용: 태그 무력화 + 개행은 공백으로 뭉개고 앞뒤 trim. */
+export function esc(s: string): string {
+  return escapeRpy(s, { tags: 'escape', newline: 'space', trim: true });
+}
+
+/** 아이템/크레딧 등 단일 문자열 리터럴용: 태그 무력화 + 개행은 `\n` 리터럴로 보존, trim. */
+export function escRpyText(s: string): string {
+  return escapeRpy(s, { tags: 'escape', newline: 'literal', trim: true });
+}
+
+/** UI 문자열 이스케이프 — `{b}`·`[config.version!t]` 같은 태그·보간은 보존하고 따옴표·역슬래시·개행만 처리. */
+export function escLit(s: string): string {
+  return escapeRpy(s, { tags: 'keep', newline: 'literal', trim: false });
 }
 
 /**
@@ -750,18 +769,6 @@ function itemsRpy(items: ItemRef[]): string {
   ].join('\n');
 }
 
-/** Ren'Py 텍스트 리터럴용 안전 이스케이프: 따옴표·역슬래시·개행 + 텍스트태그([],{}) 무력화. */
-function escRpyText(s: string): string {
-  return s
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\[/g, '[[')
-    .replace(/\{/g, '{{')
-    .replace(/%/g, '%%')
-    .replace(/\r?\n/g, '\\n')
-    .trim();
-}
-
 /**
  * game/credits.rpy — 게임 내 "크레딧/라이선스 고지" 화면이 쓰는 데이터.
  * screens.rpy 의 credits 화면이 gui.credits_extra 를 항상 참조하므로 이 파일은 늘 생성한다.
@@ -847,11 +854,6 @@ function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] 
     files.push({ path: `game/tl/${rl}/script.rpy`, content: content + '\n' });
   }
   return files;
-}
-
-/** Ren'Py 문자열 리터럴 이스케이프 — 태그({…})·보간([…])은 보존하고 따옴표·역슬래시·개행만 처리. */
-function escLit(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%').replace(/\r?\n/g, '\\n');
 }
 
 /**

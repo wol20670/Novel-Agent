@@ -28,3 +28,26 @@ describe('parser: #아이템 / #아이템끝', () => {
     expect('text' in (item as object)).toBe(false);
   });
 });
+
+describe('parser: 콜론 오인식 방지', () => {
+  it('URL 줄("http://...")은 지문으로 처리되고 "http" 캐릭터가 생기지 않는다', () => {
+    const { scenes, characters } = parseText(['#S s', 'http://example.com 를 열었다'].join('\n'));
+    const lines = scenes[0].lines;
+    expect(lines.map((l) => l.kind)).toEqual(['narration']);
+    expect(characters.some((c) => c.name === 'http')).toBe(false);
+  });
+
+  it('"12:30 정각이었다" 같은 시각 표기는 지문으로 처리된다', () => {
+    const { scenes, characters } = parseText(['#S s', '12:30 정각이었다'].join('\n'));
+    const lines = scenes[0].lines;
+    expect(lines.map((l) => l.kind)).toEqual(['narration']);
+    expect(characters.some((c) => c.name === '12')).toBe(false);
+  });
+
+  it('"민주: 안녕"은 여전히 대사로 처리된다(회귀 방지)', () => {
+    const { scenes, characters } = parseText(['#S s', '민주: 안녕'].join('\n'));
+    const lines = scenes[0].lines;
+    expect(lines).toEqual([{ kind: 'dialogue', speaker: '민주', text: '안녕', emotion: undefined, i18n: undefined }]);
+    expect(characters.some((c) => c.name === '민주')).toBe(true);
+  });
+});
