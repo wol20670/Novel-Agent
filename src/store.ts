@@ -6,8 +6,8 @@ import { translateBatch } from './generators/translate';
 import { collectVoiceTargets } from './generators/voice/collectByCharacter';
 import { supertoneTTS, getCredits } from './generators/voice/supertoneProvider';
 import { aiConfig } from './config/aiConfig';
-import { parseText, parseWorkbook } from './parser';
-import type { ScriptMeta } from './parser';
+import type { ScriptMeta, BuildResult } from './parser';
+import { mergeScenes, type AnalyzeMode } from './project/mergeScenes';
 import { putAsset, getAsset, deleteAsset, deleteAssets, clearAssets } from './storage/assetStore';
 import { saveProject, loadProject, clearProject } from './storage/projectStore';
 import { SAMPLE_STORY } from './sample';
@@ -68,8 +68,13 @@ interface State {
   // 입력/분석
   setRawInput: (text: string) => void;
   loadSample: () => void;
-  analyzeText: (text: string) => void;
-  analyzeExcel: (data: ArrayBuffer) => Promise<void>;
+  /**
+   * 파서(parseText/parseWorkbook) 결과를 프로젝트에 적용한다 — 실제 파싱은 LeftPanel 이 먼저
+   * 수행해 병합 미리보기(previewMerge)를 계산한 뒤 이 액션을 호출한다. mode 로 기존 장면과의
+   * 병합 방식을 고른다(merge=스마트 병합/append=뒤에 추가/replace=전체 교체). rawText 는 텍스트
+   * 분석 경로에서만 project.rawInput 갱신용으로 넘긴다(엑셀 경로는 미지정).
+   */
+  applyAnalysis: (parsed: BuildResult, mode: AnalyzeMode, rawText?: string) => void;
 
   // 장면 편집
   updateScene: (id: string, patch: Partial<Scene>) => void;
@@ -367,45 +372,36 @@ export const useStore = create<State>((set, get) => {
       flash('샘플 스토리를 입력창에 불러왔습니다. "분석"을 눌러주세요.');
     },
 
-    analyzeText: (text) => {
-      const { scenes, characters, meta } = parseText(text);
-      if (scenes.length === 0) {
-        flash('분석할 장면이 없습니다. 형식을 확인하세요.');
+    applyAnalysis: (parsed, mode, rawText) => {
+      const { scenes: parsedScenes, characters: parsedChars, meta } = parsed;
+      if (parsedScenes.length === 0) {
+        flash(
+          rawText !== undefined
+            ? '분석할 장면이 없습니다. 형식을 확인하세요.'
+            : '엑셀에서 장면을 찾지 못했습니다. A/B열 형식을 확인하세요.',
+        );
         return;
       }
+      const s0 = get();
+      const scenes = mergeScenes(s0.project.scenes, parsedScenes, mode);
+      // append 는 기존 화자가 사라지면 안 되므로 union, merge/replace 는 엑셀/텍스트가 정본(mergeChars).
+      const characters =
+        mode === 'append' ? unionChars(s0.project.characters, parsedChars) : mergeChars(s0.project.characters, parsedChars);
+      const stillSelected = !!s0.selectedSceneId && scenes.some((sc) => sc.id === s0.selectedSceneId);
       set((s) => ({
         project: {
           ...s.project,
           ...localeMeta(meta),
-          rawInput: text,
+          ...(rawText !== undefined ? { rawInput: rawText } : {}),
           scenes,
-          characters: mergeChars(s.project.characters, characters),
+          characters,
         },
-        selectedSceneId: scenes[0].id,
+        selectedSceneId: stillSelected ? s0.selectedSceneId : (scenes[0]?.id ?? null),
         activeTab: 'scenes',
       }));
       autoSave();
-      flash(`${scenes.length}개 장면, ${characters.length}명 캐릭터를 분석했습니다.`);
-    },
-
-    analyzeExcel: async (data) => {
-      const { scenes, characters, meta } = await parseWorkbook(data);
-      if (scenes.length === 0) {
-        flash('엑셀에서 장면을 찾지 못했습니다. A/B열 형식을 확인하세요.');
-        return;
-      }
-      set((s) => ({
-        project: {
-          ...s.project,
-          ...localeMeta(meta),
-          scenes,
-          characters: mergeChars(s.project.characters, characters),
-        },
-        selectedSceneId: scenes[0].id,
-        activeTab: 'scenes',
-      }));
-      autoSave();
-      flash(`엑셀에서 ${scenes.length}개 장면을 분석했습니다.`);
+      const verb = mode === 'merge' ? '병합' : mode === 'append' ? '추가' : '분석';
+      flash(`${scenes.length}개 장면으로 ${verb} 완료(캐릭터 ${characters.length}명).`);
     },
 
     updateScene: (id, patch) => {
@@ -1464,6 +1460,16 @@ function applyCgToGroup(
     return { ...sc, cgAssetIds: arr };
   });
   return { scenes: next, prevs };
+}
+
+/**
+ * append(뒤에 추가) 전용 캐릭터 병합 — 기존 캐릭터는 전부 그대로 유지하고(설정·순서 불변),
+ * 새 분석 결과에만 있는 이름만 뒤에 추가한다. 기존 장면의 화자가 캐릭터 목록에서 사라지면
+ * 안 되므로 mergeChars(next 기준)와 달리 prev 를 기준으로 union 한다.
+ */
+function unionChars(prev: Character[], next: Character[]): Character[] {
+  const known = new Set(prev.map((c) => c.name));
+  return [...prev, ...next.filter((c) => !known.has(c.name))];
 }
 
 /** 기존 캐릭터의 표정/색 설정을 유지하면서 새 분석 결과와 병합. */

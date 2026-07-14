@@ -10,14 +10,16 @@ import { DEFAULT_FONT, getCachedCatalog, loadFontCatalog } from '../fonts/fontCa
 import type { FontPreset } from '../fonts/fontCatalog';
 import { loadFontFace } from '../fonts/fontCache';
 import { getCredits } from '../generators/voice/supertoneProvider';
+import { parseText, parseWorkbook } from '../parser';
+import type { BuildResult } from '../parser';
+import { previewMerge, type AnalyzeMode, type MergePreview } from '../project/mergeScenes';
 import Spinner from './Spinner';
 import UploadButton from './UploadButton';
 
 export default function LeftPanel() {
   const project = useStore((s) => s.project);
   const setRawInput = useStore((s) => s.setRawInput);
-  const analyzeText = useStore((s) => s.analyzeText);
-  const analyzeExcel = useStore((s) => s.analyzeExcel);
+  const applyAnalysis = useStore((s) => s.applyAnalysis);
   const loadSample = useStore((s) => s.loadSample);
   const save = useStore((s) => s.save);
   const resetAll = useStore((s) => s.resetAll);
@@ -38,13 +40,39 @@ export default function LeftPanel() {
   const [credits, setCredits] = useState<number>();
   const [creditsError, setCreditsError] = useState('');
   const [checkingCredits, setCheckingCredits] = useState(false);
+  // 재분석(엑셀/텍스트) 결과가 파싱됐지만 기존 장면 처리 방식을 아직 못 고른 상태(모달 표시 중).
+  const [pending, setPending] = useState<{ parsed: BuildResult; rawText?: string } | null>(null);
+
+  /** 파싱 결과를 받아 기존 장면 유무에 따라 곧장 반영하거나(0개) 모달로 방식을 고른다. */
+  const startAnalysis = (parsed: BuildResult, rawText?: string) => {
+    if (parsed.scenes.length === 0) {
+      applyAnalysis(parsed, 'replace', rawText); // 스토어가 빈 결과 안내 토스트를 띄운다
+      return;
+    }
+    if (project.scenes.length === 0) {
+      applyAnalysis(parsed, 'replace', rawText); // 첫 업로드 — 모달 없이 곧장 반영
+      return;
+    }
+    setPending({ parsed, rawText });
+  };
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const buf = await file.arrayBuffer();
-    await analyzeExcel(buf);
-    if (fileRef.current) fileRef.current.value = '';
+    const parsed = await parseWorkbook(buf);
+    if (fileRef.current) fileRef.current.value = ''; // 같은 파일 재선택 허용
+    startAnalysis(parsed);
+  };
+
+  const onAnalyzeTextClick = () => {
+    startAnalysis(parseText(project.rawInput), project.rawInput);
+  };
+
+  const resolveMode = (mode: AnalyzeMode) => {
+    if (!pending) return;
+    applyAnalysis(pending.parsed, mode, pending.rawText);
+    setPending(null);
   };
 
   const onProjFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -82,6 +110,7 @@ export default function LeftPanel() {
   };
 
   return (
+    <>
     <div className="p-3.5 flex flex-col gap-5 text-sm">
       {/* 상단 액션 */}
       <div className="flex flex-col gap-2">
@@ -170,7 +199,7 @@ export default function LeftPanel() {
           value={project.rawInput}
           onChange={(e) => setRawInput(e.target.value)}
         />
-        <button className="btn-primary" onClick={() => analyzeText(project.rawInput)}>
+        <button className="btn-primary" onClick={onAnalyzeTextClick}>
           🔍 분석
         </button>
       </section>
@@ -284,6 +313,87 @@ export default function LeftPanel() {
 
       <Divider />
       <CollabSettings />
+    </div>
+    {pending && (
+      <AnalyzeMergeModal
+        preview={previewMerge(project.scenes, pending.parsed.scenes)}
+        onMerge={() => resolveMode('merge')}
+        onAppend={() => resolveMode('append')}
+        onReplace={() => resolveMode('replace')}
+        onCancel={() => setPending(null)}
+      />
+    )}
+    </>
+  );
+}
+
+/**
+ * 기존 장면이 있을 때 재분석 결과를 어떻게 반영할지 고르는 모달 — 스마트 병합(추천)/뒤에 추가/전체 교체.
+ * previewMerge 로 미리 계산한 유지·추가·제거 개수를 스마트 병합 카드에 보여준다.
+ */
+function AnalyzeMergeModal({
+  preview,
+  onMerge,
+  onAppend,
+  onReplace,
+  onCancel,
+}: {
+  preview: MergePreview;
+  onMerge: () => void;
+  onAppend: () => void;
+  onReplace: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="card w-full max-w-md p-4 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-bold text-gray-100">기존 장면이 있습니다 — 새 분석 결과를 어떻게 반영할까요?</h3>
+
+        <button
+          className="text-left rounded-lg border border-accent/50 bg-accent2/10 hover:bg-accent2/20 transition-colors p-3 flex flex-col gap-1"
+          onClick={onMerge}
+        >
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-accent">
+            🔀 스마트 병합
+            <span className="chip border-accent text-accent bg-accent/10">추천</span>
+          </span>
+          <span className="text-[11px] text-gray-500 leading-snug">
+            엑셀/텍스트가 최신 전체 대본일 때 — 기존 배경·BGM·CG·번역·승인을 승계
+          </span>
+          <span className="text-[11px] text-gray-400">
+            유지 {preview.kept} · 추가 {preview.added} · 제거 {preview.removed}
+          </span>
+          {preview.removed > 0 && (
+            <span className="text-[11px] text-amber-600">
+              ⚠️ 새 결과에 없는 기존 장면 {preview.removed}개가 삭제됩니다
+            </span>
+          )}
+        </button>
+
+        <button
+          className="text-left rounded-lg border border-edge hover:border-accent/40 hover:bg-panel2 transition-colors p-3 flex flex-col gap-1"
+          onClick={onAppend}
+        >
+          <span className="text-sm font-semibold text-gray-200">➕ 뒤에 추가</span>
+          <span className="text-[11px] text-gray-500 leading-snug">
+            새 장면만 담은 파일일 때 — 기존 장면은 무수정, 새 장면만 뒤에 붙입니다
+          </span>
+        </button>
+
+        <button
+          className="text-left rounded-lg border border-edge hover:border-rose-400/50 hover:bg-rose-500/5 transition-colors p-3 flex flex-col gap-1"
+          onClick={onReplace}
+        >
+          <span className="text-sm font-semibold text-gray-200">♻️ 전체 교체</span>
+          <span className="text-[11px] text-rose-500 leading-snug">
+            처음부터 다시 — 기존 장면·에셋 연결이 모두 사라집니다
+          </span>
+        </button>
+
+        <button className="btn-ghost self-end" onClick={onCancel}>
+          취소
+        </button>
+      </div>
     </div>
   );
 }
