@@ -8,3 +8,4 @@
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
 - README 최신화(재업로드 병합·저장소 정리·협업 입력 보호 문서화) + HANDOFF 정리
+- 에셋 스왑 관용구 모듈화 — sceneAssets.ts 순수 함수 + commitAssetSwap 코어로 20개 액션 수렴(순서·가드·배치 통일 3건), test 57/57·Playwright 스모크 통과 (main 병합·푸시 완료)

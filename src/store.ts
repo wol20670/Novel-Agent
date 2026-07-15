@@ -8,6 +8,7 @@ import { supertoneTTS, getCredits } from './generators/voice/supertoneProvider';
 import { aiConfig } from './config/aiConfig';
 import type { ScriptMeta, BuildResult } from './parser';
 import { mergeScenes, type AnalyzeMode } from './project/mergeScenes';
+import { applyAssetToGroup, clearAssetFromGroup } from './project/sceneAssets';
 import { putAsset, getAsset, deleteAsset, deleteAssets, clearAssets, getAllAssetKeys } from './storage/assetStore';
 import { collectReferencedAssetIds } from './assetRefs';
 import { saveProject, loadProject, clearProject } from './storage/projectStore';
@@ -285,6 +286,21 @@ export const useStore = create<State>((set, get) => {
     setTimeout(() => {
       if (get().toast === msg) set({ toast: null });
     }, 3500);
+  };
+
+  // 업로드→이전 assetId 교체→정리의 공통 골격(에셋 스왑 관용구, import*/clear*/uploadItem/removeItem
+  // 등 약 20개 액션이 공유). 순서를 "set → autoSave → delete" 로 통일한다(과거엔 액션마다 순서가
+  // 갈렸으나 delete 실패는 전부 .catch 로 삼켜 관측 가능한 차이가 없어 안전하게 통일 가능).
+  // keepId 를 주면 prevIds 에서 그 id 는 제외(새로 적용한 id 를 실수로 지우지 않는 방어 — 지금은
+  // 항상 새로 생성한 고유 id 라 사실상 no-op 이지만 모든 경로에 가드를 일관 적용한다).
+  const commitAssetSwap = async (
+    patch: Partial<State> | ((s: State) => Partial<State>),
+    prevIds: string[],
+    keepId?: string,
+  ): Promise<void> => {
+    set(patch);
+    autoSave();
+    await deleteAssets(prevIds.filter((id) => id !== keepId)).catch(() => {});
   };
 
   // 외부 업로드 파일을 에셋으로 저장하고 id 반환. bgm/voice 는 오디오, 그 외는 이미지만 허용.
@@ -594,18 +610,18 @@ export const useStore = create<State>((set, get) => {
     clearCharacterSprites: async (name) => {
       const char = get().project.characters.find((c) => c.name === name);
       if (!char) return;
-      for (const id of Object.values(char.expressions)) {
-        if (id) await deleteAsset(id).catch(() => {});
-      }
-      set((s) => ({
-        project: {
-          ...s.project,
-          characters: s.project.characters.map((c) =>
-            c.name === name ? { ...c, expressions: {} } : c,
-          ),
-        },
-      }));
-      autoSave();
+      const toDelete = Object.values(char.expressions).filter((x): x is string => !!x);
+      await commitAssetSwap(
+        (s) => ({
+          project: {
+            ...s.project,
+            characters: s.project.characters.map((c) =>
+              c.name === name ? { ...c, expressions: {} } : c,
+            ),
+          },
+        }),
+        toDelete, // 건별 delete 루프 → 단일 트랜잭션 배치(의도적 통일 ③)
+      );
       flash(`${name} 스프라이트를 비웠습니다.`);
     },
 
@@ -671,20 +687,21 @@ export const useStore = create<State>((set, get) => {
         const id = c.expressions[name];
         if (id) toDelete.push(id);
       }
-      set((s) => ({
-        project: {
-          ...s.project,
-          expressions: cur.filter((e) => e !== name),
-          characters: s.project.characters.map((c) => {
-            if (!(name in c.expressions)) return c;
-            const ex = { ...c.expressions };
-            delete ex[name];
-            return { ...c, expressions: ex };
-          }),
-        },
-      }));
-      await deleteAssets(toDelete).catch(() => {}); // 단일 트랜잭션(건당 트랜잭션 순차 호출 대체)
-      autoSave();
+      await commitAssetSwap(
+        (s) => ({
+          project: {
+            ...s.project,
+            expressions: cur.filter((e) => e !== name),
+            characters: s.project.characters.map((c) => {
+              if (!(name in c.expressions)) return c;
+              const ex = { ...c.expressions };
+              delete ex[name];
+              return { ...c, expressions: ex };
+            }),
+          },
+        }),
+        toDelete,
+      );
       flash(`'${name}' 표정을 삭제했습니다.`);
     },
 
@@ -731,23 +748,24 @@ export const useStore = create<State>((set, get) => {
       const o = char?.outfits?.find((x) => x.name === name);
       if (!o) return;
       const toDelete = Object.values(o.expressions).filter((x): x is string => !!x);
-      set((s) => ({
-        project: {
-          ...s.project,
-          characters: s.project.characters.map((c) =>
-            c.name === charName ? { ...c, outfits: (c.outfits ?? []).filter((x) => x.name !== name) } : c,
-          ),
-          // 이 의상을 가리키던 장면 #복장 참조도 제거(기본 의상으로 복귀).
-          scenes: s.project.scenes.map((sc) => {
-            if (!sc.outfits || sc.outfits[charName] !== name) return sc;
-            const m = { ...sc.outfits };
-            delete m[charName];
-            return { ...sc, outfits: m };
-          }),
-        },
-      }));
-      await deleteAssets(toDelete).catch(() => {}); // 단일 트랜잭션(건당 트랜잭션 순차 호출 대체)
-      autoSave();
+      await commitAssetSwap(
+        (s) => ({
+          project: {
+            ...s.project,
+            characters: s.project.characters.map((c) =>
+              c.name === charName ? { ...c, outfits: (c.outfits ?? []).filter((x) => x.name !== name) } : c,
+            ),
+            // 이 의상을 가리키던 장면 #복장 참조도 제거(기본 의상으로 복귀).
+            scenes: s.project.scenes.map((sc) => {
+              if (!sc.outfits || sc.outfits[charName] !== name) return sc;
+              const m = { ...sc.outfits };
+              delete m[charName];
+              return { ...sc, outfits: m };
+            }),
+          },
+        }),
+        toDelete,
+      );
       flash(`'${charName}'의 '${name}' 의상을 삭제했습니다.`);
     },
 
@@ -757,10 +775,14 @@ export const useStore = create<State>((set, get) => {
       try {
         const id = await uploadAsset(file, 'background', `bg_${sceneId}.png`);
         const bkey = backgroundKey(scene);
-        const { scenes, prevs, count } = applyBackgroundToGroup(get().project.scenes, bkey, id);
-        set((s) => ({ project: { ...s.project, scenes } }));
-        autoSave();
-        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        const { scenes, prevIds, count } = applyAssetToGroup(
+          get().project.scenes,
+          (sc) => backgroundKey(sc) === bkey,
+          id,
+          (sc) => (sc.backgroundAssetId ? [sc.backgroundAssetId] : []),
+          (sc, id) => ({ ...sc, backgroundAssetId: id }),
+        );
+        await commitAssetSwap((s) => ({ project: { ...s.project, scenes } }), prevIds);
         flash(
           count > 1
             ? `업로드한 배경을 ${count}개 장면에 적용했습니다.`
@@ -781,14 +803,16 @@ export const useStore = create<State>((set, get) => {
         const sub = outfit === '기본' ? '' : safeFileName(outfit) + '_';
         const id = await uploadAsset(file, 'sprite', `sprite_${name}_${sub}${expr}.png`);
         const prev = exprStore[expr];
-        set((s) => ({
-          project: {
-            ...s.project,
-            characters: withSpriteAsset(s.project.characters, name, outfit, expr, id),
-          },
-        }));
-        if (prev) await deleteAsset(prev).catch(() => {});
-        autoSave();
+        await commitAssetSwap(
+          (s) => ({
+            project: {
+              ...s.project,
+              characters: withSpriteAsset(s.project.characters, name, outfit, expr, id),
+            },
+          }),
+          prev ? [prev] : [],
+          id,
+        );
         flash(`${name} · ${outfit === '기본' ? '' : outfit + ' '}${expr} 입화를 업로드했습니다.`);
       } catch (e) {
         flash((e as Error).message);
@@ -801,11 +825,13 @@ export const useStore = create<State>((set, get) => {
       try {
         const id = await uploadAsset(file, 'item', `item_${Date.now().toString(36)}.png`);
         const prev = get().project.itemAssetIds?.[key];
-        set((s) => ({
-          project: { ...s.project, itemAssetIds: { ...(s.project.itemAssetIds ?? {}), [key]: id } },
-        }));
-        autoSave();
-        if (prev) await deleteAsset(prev).catch(() => {});
+        await commitAssetSwap(
+          (s) => ({
+            project: { ...s.project, itemAssetIds: { ...(s.project.itemAssetIds ?? {}), [key]: id } },
+          }),
+          prev ? [prev] : [],
+          id,
+        );
         flash('아이템 이미지를 업로드했습니다.');
       } catch (e) {
         flash(`업로드 실패: ${(e as Error).message}`);
@@ -816,13 +842,11 @@ export const useStore = create<State>((set, get) => {
       const key = name.trim();
       const prev = get().project.itemAssetIds?.[key];
       if (!prev) return;
-      set((s) => {
+      await commitAssetSwap((s) => {
         const itemAssetIds = { ...(s.project.itemAssetIds ?? {}) };
         delete itemAssetIds[key];
         return { project: { ...s.project, itemAssetIds } };
-      });
-      await deleteAsset(prev).catch(() => {});
-      autoSave();
+      }, [prev]);
       flash(`'${key}' 아이템 이미지를 해제했습니다(Canvas 임시로 복귀).`);
     },
 
@@ -835,8 +859,16 @@ export const useStore = create<State>((set, get) => {
         while (arr.length <= index) arr.push('');
         const prev = arr[index];
         arr[index] = id;
-        get().updateScene(sceneId, { cgAssetIds: arr });
-        if (prev) await deleteAsset(prev).catch(() => {});
+        await commitAssetSwap(
+          (s) => ({
+            project: {
+              ...s.project,
+              scenes: s.project.scenes.map((sc) => (sc.id === sceneId ? { ...sc, cgAssetIds: arr } : sc)),
+            },
+          }),
+          prev ? [prev] : [],
+          id,
+        );
         flash('업로드한 CG를 적용했습니다.');
       } catch (e) {
         flash((e as Error).message);
@@ -849,8 +881,15 @@ export const useStore = create<State>((set, get) => {
       const arr = [...scene.cgAssetIds];
       const prev = arr[index];
       arr[index] = '';
-      if (prev) await deleteAsset(prev).catch(() => {});
-      get().updateScene(sceneId, { cgAssetIds: arr });
+      await commitAssetSwap(
+        (s) => ({
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) => (sc.id === sceneId ? { ...sc, cgAssetIds: arr } : sc)),
+          },
+        }),
+        prev ? [prev] : [],
+      );
       flash('CG 업로드를 해제했습니다(Canvas 임시로 복귀).');
     },
 
@@ -862,24 +901,17 @@ export const useStore = create<State>((set, get) => {
         const id = await uploadAsset(file, 'bgm', `bgm_${sceneId}.${ext}`);
         // 같은 BGM 이름을 쓰는 모든 장면에 함께 적용(업로드 1회 = 일관성).
         const key = bgmKey(scene);
-        const targets = get().project.scenes.filter((sc) => bgmKey(sc) === key);
-        const prevs = new Set(targets.map((t) => t.bgmAssetId).filter((x): x is string => !!x && x !== id));
-        set((s) => ({
-          project: {
-            ...s.project,
-            scenes: s.project.scenes.map((sc) =>
-              bgmKey(sc) === key
-                ? { ...sc, bgmAssetId: id, ...(sc.id === sceneId ? { bgm: scene.bgm || scene.title } : {}) }
-                : sc,
-            ),
-          },
-        }));
-        autoSave();
-        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        const { scenes, prevIds, count } = applyAssetToGroup(
+          get().project.scenes,
+          (sc) => bgmKey(sc) === key,
+          id,
+          (sc) => (sc.bgmAssetId ? [sc.bgmAssetId] : []),
+          // 업로드를 시작한 소스 장면에만 부가로 bgm 이름을 세팅(기존 값 우선, 없으면 장면 제목).
+          (sc, id) => ({ ...sc, bgmAssetId: id, ...(sc.id === sceneId ? { bgm: scene.bgm || scene.title } : {}) }),
+        );
+        await commitAssetSwap((s) => ({ project: { ...s.project, scenes } }), prevIds);
         flash(
-          targets.length > 1
-            ? `업로드한 BGM을 ${targets.length}개 장면에 적용했습니다.`
-            : '업로드한 BGM을 적용했습니다.',
+          count > 1 ? `업로드한 BGM을 ${count}개 장면에 적용했습니다.` : '업로드한 BGM을 적용했습니다.',
         );
       } catch (e) {
         flash((e as Error).message);
@@ -890,8 +922,15 @@ export const useStore = create<State>((set, get) => {
       const scene = get().project.scenes.find((s) => s.id === sceneId);
       if (!scene?.bgmAssetId) return;
       const prev = scene.bgmAssetId;
-      get().updateScene(sceneId, { bgmAssetId: undefined });
-      await deleteAsset(prev).catch(() => {});
+      await commitAssetSwap(
+        (s) => ({
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) => (sc.id === sceneId ? { ...sc, bgmAssetId: undefined } : sc)),
+          },
+        }),
+        [prev],
+      );
       flash('BGM 업로드를 해제했습니다.');
     },
 
@@ -911,27 +950,28 @@ export const useStore = create<State>((set, get) => {
       if (!scene || !line || line.kind !== 'dialogue') return;
       const prev = line.voiceAssetIds?.[locale];
       if (!prev) return;
-      set((s) => ({
-        project: {
-          ...s.project,
-          scenes: s.project.scenes.map((sc) =>
-            sc.id === sceneId
-              ? {
-                  ...sc,
-                  lines: sc.lines.map((l, i) => {
-                    if (i !== lineIndex || l.kind !== 'dialogue') return l;
-                    const next = { ...l.voiceAssetIds };
-                    delete next[locale];
-                    const stillVoiced = Object.keys(next).length > 0;
-                    return { ...l, voiceAssetIds: next, voiced: stillVoiced };
-                  }),
-                }
-              : sc,
-          ),
-        },
-      }));
-      await deleteAsset(prev).catch(() => {});
-      autoSave();
+      await commitAssetSwap(
+        (s) => ({
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) =>
+              sc.id === sceneId
+                ? {
+                    ...sc,
+                    lines: sc.lines.map((l, i) => {
+                      if (i !== lineIndex || l.kind !== 'dialogue') return l;
+                      const next = { ...l.voiceAssetIds };
+                      delete next[locale];
+                      const stillVoiced = Object.keys(next).length > 0;
+                      return { ...l, voiceAssetIds: next, voiced: stillVoiced };
+                    }),
+                  }
+                : sc,
+            ),
+          },
+        }),
+        [prev],
+      );
       flash(`${locale.toUpperCase()} 음성을 해제했습니다.`);
     },
 
@@ -1032,32 +1072,24 @@ export const useStore = create<State>((set, get) => {
     },
 
     clearBackgroundGroup: async (key) => {
-      const targets = get().project.scenes.filter((sc) => backgroundKey(sc) === key);
-      const prevs = new Set(targets.map((t) => t.backgroundAssetId).filter((x): x is string => !!x));
-      set((s) => ({
-        project: {
-          ...s.project,
-          scenes: s.project.scenes.map((sc) =>
-            backgroundKey(sc) === key ? { ...sc, backgroundAssetId: undefined } : sc,
-          ),
-        },
-      }));
-      autoSave();
-      for (const p of prevs) await deleteAsset(p).catch(() => {});
+      const { scenes, prevIds } = clearAssetFromGroup(
+        get().project.scenes,
+        (sc) => backgroundKey(sc) === key,
+        (sc) => (sc.backgroundAssetId ? [sc.backgroundAssetId] : []),
+        (sc) => ({ ...sc, backgroundAssetId: undefined }),
+      );
+      await commitAssetSwap((s) => ({ project: { ...s.project, scenes } }), prevIds);
       flash('배경 업로드를 해제했습니다(Canvas 임시로 복귀).');
     },
 
     clearBgmGroup: async (key) => {
-      const targets = get().project.scenes.filter((sc) => bgmKey(sc) === key);
-      const prevs = new Set(targets.map((t) => t.bgmAssetId).filter((x): x is string => !!x));
-      set((s) => ({
-        project: {
-          ...s.project,
-          scenes: s.project.scenes.map((sc) => (bgmKey(sc) === key ? { ...sc, bgmAssetId: undefined } : sc)),
-        },
-      }));
-      autoSave();
-      for (const p of prevs) await deleteAsset(p).catch(() => {});
+      const { scenes, prevIds } = clearAssetFromGroup(
+        get().project.scenes,
+        (sc) => bgmKey(sc) === key,
+        (sc) => (sc.bgmAssetId ? [sc.bgmAssetId] : []),
+        (sc) => ({ ...sc, bgmAssetId: undefined }),
+      );
+      await commitAssetSwap((s) => ({ project: { ...s.project, scenes } }), prevIds);
       flash('BGM 업로드를 해제했습니다.');
     },
 
@@ -1084,10 +1116,28 @@ export const useStore = create<State>((set, get) => {
       const key = desc.trim();
       try {
         const id = await uploadAsset(file, 'cg', `cg_${Date.now().toString(36)}.png`);
-        const { scenes, prevs } = applyCgToGroup(get().project.scenes, key, id);
-        set((s) => ({ project: { ...s.project, scenes } }));
-        autoSave();
-        for (const p of prevs) await deleteAsset(p).catch(() => {});
+        const { scenes, prevIds } = applyAssetToGroup(
+          get().project.scenes,
+          (sc) => sc.cg.some((d) => d.trim() === key),
+          id,
+          (sc) =>
+            sc.cg.reduce<string[]>((acc, d, i) => {
+              const v = sc.cgAssetIds?.[i];
+              if (d.trim() === key && v) acc.push(v);
+              return acc;
+            }, []),
+          (sc, id) => {
+            // 한 장면에 같은 설명(컷)이 여러 인덱스에 있을 수 있어(cg 배열), 매칭되는 슬롯 전부를 채운다.
+            const arr = [...(sc.cgAssetIds ?? [])];
+            sc.cg.forEach((d, i) => {
+              if (d.trim() !== key) return;
+              while (arr.length <= i) arr.push('');
+              arr[i] = id;
+            });
+            return { ...sc, cgAssetIds: arr };
+          },
+        );
+        await commitAssetSwap((s) => ({ project: { ...s.project, scenes } }), prevIds);
         flash('업로드한 CG를 같은 컷의 모든 장면에 적용했습니다.');
       } catch (e) {
         flash((e as Error).message);
@@ -1096,25 +1146,24 @@ export const useStore = create<State>((set, get) => {
 
     clearCgGroup: async (desc) => {
       const key = desc.trim();
-      const prevs = new Set<string>();
-      set((s) => ({
-        project: {
-          ...s.project,
-          scenes: s.project.scenes.map((sc) => {
-            if (!sc.cgAssetIds || !sc.cg.some((d) => d.trim() === key)) return sc;
-            const arr = [...sc.cgAssetIds];
-            sc.cg.forEach((d, i) => {
-              if (d.trim() === key && arr[i]) {
-                prevs.add(arr[i]);
-                arr[i] = '';
-              }
-            });
-            return { ...sc, cgAssetIds: arr };
-          }),
+      const { scenes, prevIds } = clearAssetFromGroup(
+        get().project.scenes,
+        (sc) => !!sc.cgAssetIds && sc.cg.some((d) => d.trim() === key),
+        (sc) =>
+          sc.cg.reduce<string[]>((acc, d, i) => {
+            const v = sc.cgAssetIds?.[i];
+            if (d.trim() === key && v) acc.push(v);
+            return acc;
+          }, []),
+        (sc) => {
+          const arr = [...(sc.cgAssetIds ?? [])];
+          sc.cg.forEach((d, i) => {
+            if (d.trim() === key) arr[i] = '';
+          });
+          return { ...sc, cgAssetIds: arr };
         },
-      }));
-      autoSave();
-      for (const p of prevs) await deleteAsset(p).catch(() => {});
+      );
+      await commitAssetSwap((s) => ({ project: { ...s.project, scenes } }), prevIds);
       flash('CG 업로드를 해제했습니다(Canvas 임시로 복귀).');
     },
 
@@ -1122,9 +1171,11 @@ export const useStore = create<State>((set, get) => {
       try {
         const id = await uploadAsset(file, 'background', `${which === 'main' ? 'main_menu' : 'game_menu'}.png`);
         const prev = get().project.menuArt?.[which];
-        set((s) => ({ project: { ...s.project, menuArt: { ...s.project.menuArt, [which]: id } } }));
-        if (prev) await deleteAsset(prev).catch(() => {});
-        autoSave();
+        await commitAssetSwap(
+          (s) => ({ project: { ...s.project, menuArt: { ...s.project.menuArt, [which]: id } } }),
+          prev ? [prev] : [],
+          id,
+        );
         flash(`${which === 'main' ? '메인' : '게임'} 메뉴 배경을 업로드했습니다.`);
       } catch (e) {
         flash((e as Error).message);
@@ -1133,13 +1184,11 @@ export const useStore = create<State>((set, get) => {
 
     clearMenuArt: async (which) => {
       const prev = get().project.menuArt?.[which];
-      if (prev) await deleteAsset(prev).catch(() => {});
-      set((s) => {
+      await commitAssetSwap((s) => {
         const menuArt = { ...s.project.menuArt };
         delete menuArt[which];
         return { project: { ...s.project, menuArt } };
-      });
-      autoSave();
+      }, prev ? [prev] : []);
       flash(`${which === 'main' ? '메인' : '게임'} 메뉴 배경 업로드를 해제했습니다(Canvas 생성으로 복귀).`);
     },
 
@@ -1247,28 +1296,29 @@ export const useStore = create<State>((set, get) => {
       const ids = collectReferencedAssetIds(project, { includeVoice: false });
       if (ids.size === 0) return flash('비울 에셋이 없습니다.');
       // 참조만 비우고 대본·캐릭터 설정(외형·성격·의상 정의·표정 목록)·GUI 는 유지.
-      set((s) => ({
-        assets: Object.fromEntries(Object.entries(s.assets).filter(([id]) => !ids.has(id))),
-        project: {
-          ...s.project,
-          scenes: s.project.scenes.map((sc) => {
-            const n = { ...sc };
-            delete n.backgroundAssetId;
-            delete n.bgmAssetId;
-            delete n.cgAssetIds;
-            return n;
-          }),
-          characters: s.project.characters.map((c) => ({
-            ...c,
-            expressions: {},
-            outfits: c.outfits?.map((o) => ({ ...o, expressions: {} })),
-          })),
-          menuArt: undefined,
-          itemAssetIds: undefined,
-        },
-      }));
-      await deleteAssets([...ids]).catch(() => {}); // 단일 트랜잭션(건당 트랜잭션 순차 호출 대체)
-      autoSave();
+      await commitAssetSwap(
+        (s) => ({
+          assets: Object.fromEntries(Object.entries(s.assets).filter(([id]) => !ids.has(id))),
+          project: {
+            ...s.project,
+            scenes: s.project.scenes.map((sc) => {
+              const n = { ...sc };
+              delete n.backgroundAssetId;
+              delete n.bgmAssetId;
+              delete n.cgAssetIds;
+              return n;
+            }),
+            characters: s.project.characters.map((c) => ({
+              ...c,
+              expressions: {},
+              outfits: c.outfits?.map((o) => ({ ...o, expressions: {} })),
+            })),
+            menuArt: undefined,
+            itemAssetIds: undefined,
+          },
+        }),
+        [...ids],
+      );
       flash(`업로드한 에셋 ${ids.size}개를 비웠습니다. 대본·캐릭터 설정은 유지됩니다.`);
     },
 
@@ -1425,51 +1475,6 @@ function withSpriteAsset(
       ),
     };
   });
-}
-
-/**
- * 같은 배경 키(backgroundKey)를 쓰는 모든 장면에 배경 assetId 를 적용한 새 scenes 와,
- * 그 과정에서 교체된 이전 assetId 집합(삭제 대상)을 함께 돌려준다.
- * (업로드 1회 = 같은 이름 전 장면 일관 적용.)
- */
-function applyBackgroundToGroup(
-  scenes: Scene[],
-  bkey: string,
-  id: string,
-): { scenes: Scene[]; prevs: Set<string>; count: number } {
-  const prevs = new Set<string>();
-  let count = 0;
-  const next = scenes.map((sc) => {
-    if (backgroundKey(sc) !== bkey) return sc;
-    count++;
-    if (sc.backgroundAssetId && sc.backgroundAssetId !== id) prevs.add(sc.backgroundAssetId);
-    return { ...sc, backgroundAssetId: id };
-  });
-  return { scenes: next, prevs, count };
-}
-
-/**
- * 같은 CG 설명(key)을 쓰는 모든 장면의 해당 인덱스에 CG assetId 를 적용한 새 scenes 와,
- * 교체된 이전 assetId 집합(삭제 대상)을 함께 돌려준다.
- */
-function applyCgToGroup(
-  scenes: Scene[],
-  key: string,
-  id: string,
-): { scenes: Scene[]; prevs: Set<string> } {
-  const prevs = new Set<string>();
-  const next = scenes.map((sc) => {
-    if (!sc.cg.some((d) => d.trim() === key)) return sc;
-    const arr = [...(sc.cgAssetIds ?? [])];
-    sc.cg.forEach((d, i) => {
-      if (d.trim() !== key) return;
-      while (arr.length <= i) arr.push('');
-      if (arr[i] && arr[i] !== id) prevs.add(arr[i]);
-      arr[i] = id;
-    });
-    return { ...sc, cgAssetIds: arr };
-  });
-  return { scenes: next, prevs };
 }
 
 /**
