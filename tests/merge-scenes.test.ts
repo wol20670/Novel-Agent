@@ -160,6 +160,66 @@ describe('mergeScenes: 재분석(엑셀/텍스트) 시 기존 에셋·번역·�
     expect(result[1].title).toBe('장면2');
   });
 
+  it('merge: 제목이 바뀐 장면도 라인이 완전히 같으면 내용 기반 폴백으로 매칭되어 voice/i18n/승인이 승계된다', () => {
+    const lines: Line[] = [
+      { kind: 'dialogue', speaker: '민주', text: '안녕', i18n: { en: 'Hi' }, voiced: true, voiceAssetIds: { en: 'va1' } },
+      { kind: 'narration', text: '창밖엔 비가 내렸다' },
+    ];
+    const prev: Scene[] = [scene('s1', '옛 제목', { lines, status: 'approved' })];
+    // 오타 수정으로 제목만 바뀌고 라인은 그대로(2/2 = 100% 겹침).
+    const next: Scene[] = [
+      scene('n1', '새 제목', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '안녕' },
+          { kind: 'narration', text: '창밖엔 비가 내렸다' },
+        ],
+      }),
+    ];
+
+    const preview = previewMerge(prev, next);
+    expect(preview).toEqual({ kept: 1, added: 0, removed: 0 });
+
+    const result = mergeScenes(prev, next, 'merge');
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('s1'); // prev.id 유지
+    expect(result[0].status).toBe('approved'); // 내용 동일 → status 승계
+    const [l1] = result[0].lines as Extract<Line, { kind: 'dialogue' }>[];
+    expect(l1.i18n).toEqual({ en: 'Hi' });
+    expect(l1.voiced).toBe(true);
+    expect(l1.voiceAssetIds).toEqual({ en: 'va1' });
+  });
+
+  it('merge: 라인 겹침이 50% 미만이면 내용 기반 폴백 매칭이 일어나지 않고 추가/삭제로 처리된다', () => {
+    const prev: Scene[] = [
+      scene('s1', '옛 제목', {
+        lines: [
+          { kind: 'narration', text: '문장A' },
+          { kind: 'narration', text: '문장B' },
+          { kind: 'narration', text: '문장C' },
+        ],
+        status: 'approved',
+      }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '새 제목', {
+        // 3줄 중 1줄만 겹침(1/3 < 0.5) → 매칭 안 됨.
+        lines: [
+          { kind: 'narration', text: '문장A' },
+          { kind: 'narration', text: '문장X' },
+          { kind: 'narration', text: '문장Y' },
+        ],
+      }),
+    ];
+
+    const preview = previewMerge(prev, next);
+    expect(preview).toEqual({ kept: 0, added: 1, removed: 1 });
+
+    const result = mergeScenes(prev, next, 'merge');
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('n1'); // 매칭 안 됨 — 신규 장면 취급
+    expect(result[0].status).toBe('review');
+  });
+
   it('동명 장면이 여럿이면 등장 순서대로(FIFO) 매칭된다', () => {
     const prev: Scene[] = [
       scene('s1', '교실', { status: 'approved', lines: [{ kind: 'narration', text: '아침' }] }),

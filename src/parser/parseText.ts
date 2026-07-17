@@ -11,9 +11,7 @@
 //   > 앞자리에 앉는다.
 //   > 창가 자리에 앉는다.
 
-import { SceneBuilder, applyTag, splitJointSpeaker, type BuildResult } from './sceneBuilder';
-
-const FIELD = /^(장면|배경|BGM|복장|연출|CG|점프|글언어|목소리언어)\s*[:：]\s*(.*)$/i;
+import { SceneBuilder, applyTag, fieldToTag, splitJointSpeaker, type BuildResult } from './sceneBuilder';
 
 export function parseText(input: string): BuildResult {
   const b = new SceneBuilder();
@@ -45,22 +43,9 @@ export function parseText(input: string): BuildResult {
     inChoiceBlock = false;
 
     // 필드형 태그 (장면:/배경:/BGM: ...)
-    const m = line.match(FIELD);
-    if (m) {
-      const key = m[1].toLowerCase();
-      const val = m[2];
-      const map: Record<string, string> = {
-        '장면': '#S ',
-        '배경': '#배경 ',
-        bgm: '#BGM ',
-        '복장': '#복장 ',
-        '연출': '#연출 ',
-        cg: '#CG ',
-        '점프': '#점프 ',
-        '글언어': '#설정_글언어 ',
-        '목소리언어': '#설정_목소리언어 ',
-      };
-      applyTag(b, (map[key] ?? '#') + val);
+    const tag = fieldToTag(line);
+    if (tag) {
+      applyTag(b, tag);
       continue;
     }
 

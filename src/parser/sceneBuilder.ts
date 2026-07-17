@@ -244,14 +244,42 @@ export class SceneBuilder {
   }
 }
 
+/** 필드형 태그 (장면:/배경:/BGM: ...) 정규식 — 텍스트·엑셀 파서가 공유. */
+const FIELD = /^(장면|배경|BGM|복장|연출|CG|점프|글언어|목소리언어)\s*[:：]\s*(.*)$/i;
+
+const FIELD_TAG_MAP: Record<string, string> = {
+  '장면': '#S ',
+  '배경': '#배경 ',
+  bgm: '#BGM ',
+  '복장': '#복장 ',
+  '연출': '#연출 ',
+  cg: '#CG ',
+  '점프': '#점프 ',
+  '글언어': '#설정_글언어 ',
+  '목소리언어': '#설정_목소리언어 ',
+};
+
+/**
+ * "장면: 교실" 같은 필드형(콜론) 태그 한 줄을 '#…' 태그 문자열로 변환한다(텍스트·엑셀 공용).
+ * 필드형이 아니면 null — 호출 측이 다른 방식(원시 # 태그·대사·지문)으로 처리.
+ */
+export function fieldToTag(line: string): string | null {
+  const m = line.match(FIELD);
+  if (!m) return null;
+  const key = m[1].toLowerCase();
+  const val = m[2];
+  // 알 수 없는 key 는 발생하지 않는다(정규식이 key 를 열거) — 단순 매핑으로 충분.
+  return (FIELD_TAG_MAP[key] ?? '#') + val;
+}
+
 /**
  * 본문 한 줄에서 태그(#…) / 선택지(>) 를 해석해 빌더에 반영한다.
  * 어떤 태그도 아니면 false 를 반환(= 호출 측이 대사/지문으로 처리).
  */
 export function applyTag(b: SceneBuilder, body: string): boolean {
   const t = body.trim();
-  if (t.startsWith('#S ') || t === '#S' || t.startsWith('#장면')) {
-    b.startScene(t.replace(/^#S\s*/, '').replace(/^#장면\s*/, ''));
+  if (/^#s(\s|$)/i.test(t) || t.startsWith('#장면')) {
+    b.startScene(t.replace(/^#S\s*/i, '').replace(/^#장면\s*/, ''));
     return true;
   }
   // 프로젝트 레벨 다국어 설정(장면 무관, 대본 어디에 있어도 됨).

@@ -98,9 +98,9 @@ interface SceneMatch {
 /**
  * title 정확일치 + 등장순서(첫 미사용 매칭)로 next 장면들을 prev 장면에 대응시킨다.
  * 동명 장면이 여럿이면 prev 등록 순서대로 소비(FIFO) — 순서가 바뀌어도 이름 그룹 안에서는 안정적.
- * 반환: next 각각에 대한 매칭 결과 + prev 중 끝까지 매칭 안 된(= 삭제 대상) 개수.
+ * 반환: next 각각에 대한 매칭 결과 + 끝까지 매칭 안 된(= title 매칭 실패) prev 장면 목록.
  */
-function matchScenesByTitle(prev: Scene[], next: Scene[]): { matches: SceneMatch[]; unmatchedPrevCount: number } {
+function matchScenesByTitle(prev: Scene[], next: Scene[]): { matches: SceneMatch[]; unmatchedPrev: Scene[] } {
   const queues = new Map<string, Scene[]>();
   for (const sc of prev) {
     const q = queues.get(sc.title);
@@ -112,9 +112,50 @@ function matchScenesByTitle(prev: Scene[], next: Scene[]): { matches: SceneMatch
     const prevMatch = q && q.length ? q.shift() : undefined;
     return { next: sc, prevMatch };
   });
-  let unmatchedPrevCount = 0;
-  for (const q of queues.values()) unmatchedPrevCount += q.length;
-  return { matches, unmatchedPrevCount };
+  const unmatchedPrev: Scene[] = [];
+  for (const q of queues.values()) unmatchedPrev.push(...q);
+  return { matches, unmatchedPrev };
+}
+
+/** 두 장면의 라인 내용 겹침 비율 — |lineKey 교집합| / max(prev 라인 수, next 라인 수). */
+function contentOverlapRatio(a: Scene, b: Scene): number {
+  const setA = new Set(a.lines.map(lineKey));
+  const setB = new Set(b.lines.map(lineKey));
+  let intersection = 0;
+  for (const k of setA) if (setB.has(k)) intersection += 1;
+  return intersection / Math.max(a.lines.length, b.lines.length);
+}
+
+/**
+ * title 매칭 + 내용 기반 폴백 매칭을 함께 수행한다. mergeScenes('merge')·previewMerge 가 모두
+ * 이 함수 하나를 공유해 미리보기 수치와 실제 병합 결과가 어긋나지 않게 한다.
+ *
+ * title 매칭에서 빠진 next 장면은, title 매칭에서도 빠진 prev 장면들과 라인 내용 겹침 비율을
+ * 비교해 가장 높은 상대(≥ 0.5)와 1:1로 짝짓는다. 제목이 바뀐 장면(오타 수정·자동분할 접미사)도
+ * 내용이 반쯤 같으면 같은 장면으로 보고 TTS·번역·승인 메타를 승계한다. 라인이 0개인 장면은
+ * (본문이 없어 유사도 판정이 무의미하므로) 폴백 매칭 대상에서 제외한다.
+ */
+function matchScenes(prev: Scene[], next: Scene[]): { matches: SceneMatch[]; unmatchedPrevCount: number } {
+  const { matches, unmatchedPrev } = matchScenesByTitle(prev, next);
+  const pool = [...unmatchedPrev];
+  for (const m of matches) {
+    if (m.prevMatch || m.next.lines.length === 0) continue;
+    let bestIdx = -1;
+    let bestRatio = 0;
+    for (let i = 0; i < pool.length; i++) {
+      if (pool[i].lines.length === 0) continue;
+      const ratio = contentOverlapRatio(pool[i], m.next);
+      if (ratio > bestRatio) {
+        bestRatio = ratio;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0 && bestRatio >= 0.5) {
+      m.prevMatch = pool[bestIdx];
+      pool.splice(bestIdx, 1);
+    }
+  }
+  return { matches, unmatchedPrevCount: pool.length };
 }
 
 /**
@@ -151,7 +192,7 @@ function reconnectAssets(scenes: Scene[], prev: Scene[]): Scene[] {
 
 /** 병합 전 미리보기(유지/추가/제거 개수) — 모달에 표시. mergeScenes(mode:'merge')와 같은 매칭 규칙. */
 export function previewMerge(prev: Scene[], next: Scene[]): MergePreview {
-  const { matches, unmatchedPrevCount } = matchScenesByTitle(prev, next);
+  const { matches, unmatchedPrevCount } = matchScenes(prev, next);
   const kept = matches.filter((m) => m.prevMatch).length;
   return { kept, added: matches.length - kept, removed: unmatchedPrevCount };
 }
@@ -169,7 +210,7 @@ export function mergeScenes(prev: Scene[], next: Scene[], mode: AnalyzeMode): Sc
 
   // merge
   const reconnected = reconnectAssets(next, prev);
-  const { matches } = matchScenesByTitle(prev, reconnected);
+  const { matches } = matchScenes(prev, reconnected);
   return matches.map(({ next: ns, prevMatch }) => {
     if (!prevMatch) return ns; // 신규 장면 — 그대로
     const contentSame = sceneContentEqual(prevMatch, ns);

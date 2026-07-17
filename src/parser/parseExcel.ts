@@ -9,7 +9,7 @@
 // 캐릭터 외형·성격, 배경/CG 프롬프트, GUI 등 "설정"은 엑셀이 아니라 앱(에셋·테마 화면)에서
 // 관리한다. 엑셀은 대본 전용이다.
 
-import { SceneBuilder, applyTag, type BuildResult } from './sceneBuilder';
+import { SceneBuilder, applyTag, fieldToTag, type BuildResult } from './sceneBuilder';
 import type { I18nText, Locale } from '../types';
 
 /** 번역 검수 열 매핑(열 인덱스 → 로케일). base(A/B열)는 여기 없다 — 번역본만. */
@@ -53,8 +53,14 @@ export async function parseWorkbook(data: ArrayBuffer): Promise<BuildResult> {
       if (col) b.addDialogue(a, col, undefined, readI18n(row));
       continue;
     }
-    // A열 비어있음 → 태그/선택지 우선 시도, 아니면 지문(지문도 번역 검수본을 받을 수 있음)
-    if (!applyTag(b, col)) {
+    // "선택지:" 단독 행은 텍스트 포맷의 선택지 블록 헤더 — 엑셀에선 지문으로 흡수하면 안 되므로 건너뛴다.
+    if (/^선택지\s*[:：]?\s*$/.test(col)) continue;
+    // A열 비어있음 → 콜론형 필드 태그(장면: 교실 등) 우선 시도, 그다음 원시 #/> 태그, 마지막은 지문
+    // (지문도 번역 검수본을 받을 수 있음).
+    const tag = fieldToTag(col);
+    if (tag) {
+      applyTag(b, tag);
+    } else if (!applyTag(b, col)) {
       b.addNarration(col, readI18n(row));
     }
   }

@@ -32,6 +32,7 @@ export default function LeftPanel() {
   const setTranslateMode = useStore((s) => s.setTranslateMode);
   const exportProject = useStore((s) => s.exportProject);
   const importProject = useStore((s) => s.importProject);
+  const setToast = useStore((s) => s.setToast);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const projFileRef = useRef<HTMLInputElement>(null);
@@ -59,10 +60,15 @@ export default function LeftPanel() {
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const buf = await file.arrayBuffer();
-    const parsed = await parseWorkbook(buf);
-    if (fileRef.current) fileRef.current.value = ''; // 같은 파일 재선택 허용
-    startAnalysis(parsed);
+    try {
+      const buf = await file.arrayBuffer();
+      const parsed = await parseWorkbook(buf);
+      startAnalysis(parsed);
+    } catch (err) {
+      setToast('엑셀 파싱에 실패했습니다: ' + (err as Error).message);
+    } finally {
+      if (fileRef.current) fileRef.current.value = ''; // 같은 파일 재선택 허용
+    }
   };
 
   const onAnalyzeTextClick = () => {
@@ -317,6 +323,8 @@ export default function LeftPanel() {
     {pending && (
       <AnalyzeMergeModal
         preview={previewMerge(project.scenes, pending.parsed.scenes)}
+        newCount={pending.parsed.scenes.length}
+        prevCount={project.scenes.length}
         onMerge={() => resolveMode('merge')}
         onAppend={() => resolveMode('append')}
         onReplace={() => resolveMode('replace')}
@@ -333,21 +341,37 @@ export default function LeftPanel() {
  */
 function AnalyzeMergeModal({
   preview,
+  newCount,
+  prevCount,
   onMerge,
   onAppend,
   onReplace,
   onCancel,
 }: {
   preview: MergePreview;
+  newCount: number;
+  prevCount: number;
   onMerge: () => void;
   onAppend: () => void;
   onReplace: () => void;
   onCancel: () => void;
 }) {
+  // 장면 태그(#S/장면:)가 인식 안 돼 대본 전체가 한 장면으로 뭉개진 흔한 실수를 여기서 바로 알린다.
+  const suspiciouslyFew = newCount === 1 && prevCount >= 3;
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="card w-full max-w-md p-4 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold text-gray-100">기존 장면이 있습니다 — 새 분석 결과를 어떻게 반영할까요?</h3>
+
+        <p className="text-[11px] text-gray-400">
+          새 대본: {newCount}개 장면 · 기존: {prevCount}개
+        </p>
+        {suspiciouslyFew && (
+          <p className="text-[11px] text-amber-600">
+            ⚠️ 새 대본에서 장면을 1개만 읽었습니다 — 장면 태그(#S/장면:)가 인식되지 않았을 수 있어요. B열
+            태그를 확인하세요.
+          </p>
+        )}
 
         <button
           className="text-left rounded-lg border border-accent/50 bg-accent2/10 hover:bg-accent2/20 transition-colors p-3 flex flex-col gap-1"

@@ -25,7 +25,28 @@ export default function RightPanel() {
     select(id);
     setActiveTab('scenes');
     requestAnimationFrame(() => {
-      document.getElementById(`scene-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const el = document.getElementById(`scene-${id}`);
+      if (!el) return;
+      // content-visibility 플레이스홀더(320px 추정치)가 실제 카드(700~900px)로 렌더되며 매 프레임
+      // 레이아웃이 밀리므로, 한 번만 스크롤하면 목표보다 한참 못 미친 위치에 멈춘다. 위치가
+      // 연속 2프레임 안정될 때까지(또는 최대 40프레임) instant 스크롤을 반복해 "정착"시킨다.
+      let lastTop: number | null = null;
+      let stableCount = 0;
+      let frame = 0;
+      const tick = () => {
+        el.scrollIntoView({ block: 'center' });
+        const top = el.getBoundingClientRect().top;
+        if (lastTop !== null && Math.abs(top - lastTop) < 1) {
+          stableCount += 1;
+        } else {
+          stableCount = 0;
+        }
+        lastTop = top;
+        frame += 1;
+        if (stableCount >= 2 || frame >= 40) return;
+        requestAnimationFrame(tick);
+      };
+      tick();
     });
   };
   const curIdx = scenes.findIndex((s) => s.id === sceneId);
