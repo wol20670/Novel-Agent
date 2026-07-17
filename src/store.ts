@@ -3,8 +3,9 @@ import type { Project, Scene, AssetMeta, Character, Expression, Locale, Translat
 import { emptyProject, effectiveExpressions, baseLocaleOf, translateModeOf, translateModelFor } from './types';
 import { collectUntranslated } from './generators/translate/collect';
 import { translateBatch } from './generators/translate';
-import { collectVoiceTargets } from './generators/voice/collectByCharacter';
+import { collectVoiceTargets, type VoiceBatchItem } from './generators/voice/collectByCharacter';
 import { supertoneTTS, getCredits } from './generators/voice/supertoneProvider';
+import { estimateVoiceCostForProject, recordMeasuredCreditsPerSec, type VoiceEstimate } from './generators/voice/estimate';
 import { aiConfig } from './config/aiConfig';
 import type { ScriptMeta, BuildResult } from './parser';
 import { mergeScenes, type AnalyzeMode } from './project/mergeScenes';
@@ -143,6 +144,16 @@ interface State {
    * 수백 줄이어도 하나하나 손으로 안 해도 되게 하는 일괄 기능. 진행 중엔 busy['batch:voice:'+charName].
    */
   batchVoiceCharacter: (charName: string, locale: Locale) => Promise<void>;
+  /** 보이스 프리셋이 저장된 모든 캐릭터에 대해 batchVoiceCharacter 를 순차 실행(확인창은 총합으로 한 번만). */
+  batchVoiceAll: (locale: Locale) => Promise<void>;
+
+  /**
+   * Predict Duration(무료)으로 뽑은 프로젝트 전체 보이스 예상 비용. estimateVoiceCost() 로 채워지고,
+   * batchVoiceCharacter/batchVoiceAll 의 진행 전 확인창에 표시된다. null = 아직 계산 안 함.
+   */
+  voiceEstimate: VoiceEstimate | null;
+  /** 저장된 보이스 프리셋 기준으로 프로젝트 전체 예상 크레딧을 계산(base 로케일 고정, 무료). */
+  estimateVoiceCost: () => Promise<void>;
 
   // 에셋 라이브러리 (이름 그룹 단위 — 같은 이름 장면 전체에 한 번에 적용)
   renameBackgroundGroup: (key: string, name: string) => void;
@@ -371,6 +382,71 @@ export const useStore = create<State>((set, get) => {
     if (prev) await deleteAsset(prev).catch(() => {});
   };
 
+  // batchVoiceCharacter/batchVoiceAll 공유 — 확인창·크레딧 전후 조회는 호출측이 하고, 이 함수는
+  // "이 캐릭터의 미생성 대사를 순차 생성·적용"만 담당한다(batchVoiceAll 이 여러 캐릭터를 돌 때
+  // 캐릭터마다 확인창이 다시 뜨지 않게 분리).
+  const runCharacterVoiceBatch = async (
+    charName: string,
+    locale: Locale,
+    voicePreset: NonNullable<Character['voice']>,
+    items: VoiceBatchItem[],
+    key: string,
+  ): Promise<{ done: number; failed: number; totalSeconds: number; creditsExhausted: boolean }> => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    // 연속 호출을 곧바로 이어 붙이면 매 줄이 레이트리밋(429)에 걸림(실사용에서 확인) — 요청 사이에
+    // 일정 간격을 두고, 그래도 429 나면 지수 백오프(2s→4s→8s)로 최대 3회 재시도한다.
+    const PACE_MS = 900;
+    let done = 0;
+    let failed = 0;
+    let totalSeconds = 0;
+    let creditsExhausted = false;
+    for (let idx = 0; idx < items.length; idx++) {
+      const item = items[idx];
+      if (idx > 0) await sleep(PACE_MS);
+      const params = {
+        voiceId: voicePreset.voiceId,
+        text: item.text,
+        language: locale,
+        model: voicePreset.model || aiConfig.voice.defaultModel,
+        style: voicePreset.style,
+        settings: voicePreset.settings,
+      };
+      let result;
+      let lastErr: unknown;
+      for (let attempt = 0; attempt <= 3; attempt++) {
+        try {
+          result = await supertoneTTS(params, key);
+          lastErr = undefined;
+          break;
+        } catch (e) {
+          lastErr = e;
+          const isRateLimit = /레이트 리밋/.test((e as Error).message);
+          if (!isRateLimit || attempt === 3) break; // 레이트리밋 아니면 즉시 포기, 마지막 시도면 종료
+          await sleep(2000 * 2 ** attempt); // 2s, 4s, 8s
+        }
+      }
+      if (!result) {
+        failed++;
+        console.warn('[보이스 일괄생성] 실패:', item.sceneId, item.lineIndex, lastErr);
+        // 크레딧 소진(402)이면 나머지 줄도 전부 실패할 게 뻔하니 재시도 없이 배치 전체를 중단한다.
+        if (lastErr instanceof Error && /크레딧이 부족/.test(lastErr.message)) {
+          creditsExhausted = true;
+          break;
+        }
+        continue;
+      }
+      totalSeconds += result.seconds;
+      try {
+        await attachVoiceQuiet(item.sceneId, item.lineIndex, locale, result.blob, charName);
+        done++;
+      } catch (e) {
+        failed++;
+        console.warn('[보이스 일괄생성] 적용 실패:', item.sceneId, item.lineIndex, e);
+      }
+    }
+    return { done, failed, totalSeconds, creditsExhausted };
+  };
+
   return {
     project: emptyProject(),
     assets: {},
@@ -384,6 +460,7 @@ export const useStore = create<State>((set, get) => {
     activeTab: 'scenes',
     selectedSceneId: null,
     busy: {},
+    voiceEstimate: null,
     toast: null,
     toastType: 'info',
     folderSupported: isFolderSyncSupported(),
@@ -994,70 +1071,152 @@ export const useStore = create<State>((set, get) => {
         flash('일괄 생성할 빈 대사가 없습니다(이미 모두 채워짐).');
         return;
       }
+
+      // 대사 하나당 크레딧이 얼마나 드는지 감을 잡을 수 있게, 배치 전후로 잔량을 재서 확인창·완료
+      // 메시지에 같이 보여준다(베스트에포트 — 조회 실패해도 배치 자체엔 영향 없음, 조용히 생략).
+      const creditsBefore = await getCredits(key).catch(() => undefined);
+      const estimate = get().voiceEstimate?.perChar.find((c) => c.name === charName);
+      const remainNote = creditsBefore !== undefined ? `잔여 ${creditsBefore}` : '잔여 크레딧 확인 실패';
+      const confirmMsg = estimate
+        ? `예상 약 ${Math.ceil(estimate.estCredits)}크레딧 소모(${remainNote}). 진행할까요?`
+        : `${remainNote}. 진행할까요? (예상 비용은 "💡 비용 계산"으로 먼저 확인할 수 있습니다)`;
+      if (!window.confirm(confirmMsg)) return;
+
       const busyKey = `batch:voice:${charName}`;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
-      // 대사 하나당 크레딧이 얼마나 드는지 감을 잡을 수 있게, 배치 전후로 잔량을 재서 완료 메시지에
-      // 소진량을 같이 보여준다(베스트에포트 — 조회 실패해도 배치 자체엔 영향 없음, 조용히 생략).
-      const creditsBefore = await getCredits(key).catch(() => undefined);
-      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-      // 연속 호출을 곧바로 이어 붙이면 매 줄이 레이트리밋(429)에 걸림(실사용에서 확인) — 요청 사이에
-      // 일정 간격을 두고, 그래도 429 나면 지수 백오프(2s→4s→8s)로 최대 3회 재시도한다.
-      const PACE_MS = 900;
-      let done = 0;
-      let failed = 0;
+      let outcome: { done: number; failed: number; totalSeconds: number; creditsExhausted: boolean };
       try {
-        for (let idx = 0; idx < items.length; idx++) {
-          const item = items[idx];
-          if (idx > 0) await sleep(PACE_MS);
-          const params = {
-            voiceId: voicePreset.voiceId,
-            text: item.text,
-            language: locale,
-            model: voicePreset.model || aiConfig.voice.defaultModel,
-            style: voicePreset.style,
-            settings: voicePreset.settings,
-          };
-          let result;
-          let lastErr: unknown;
-          for (let attempt = 0; attempt <= 3; attempt++) {
-            try {
-              result = await supertoneTTS(params, key);
-              lastErr = undefined;
-              break;
-            } catch (e) {
-              lastErr = e;
-              const isRateLimit = /레이트 리밋/.test((e as Error).message);
-              if (!isRateLimit || attempt === 3) break; // 레이트리밋 아니면 즉시 포기, 마지막 시도면 종료
-              await sleep(2000 * 2 ** attempt); // 2s, 4s, 8s
-            }
-          }
-          if (!result) {
-            failed++;
-            console.warn('[보이스 일괄생성] 실패:', item.sceneId, item.lineIndex, lastErr);
-            continue;
-          }
-          try {
-            await attachVoiceQuiet(item.sceneId, item.lineIndex, locale, result.blob, charName);
-            done++;
-          } catch (e) {
-            failed++;
-            console.warn('[보이스 일괄생성] 적용 실패:', item.sceneId, item.lineIndex, e);
-          }
-        }
+        outcome = await runCharacterVoiceBatch(charName, locale, voicePreset, items, key);
       } finally {
         set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
       }
       autoSave();
       const creditsAfter = await getCredits(key).catch(() => undefined);
+      if (creditsBefore !== undefined && creditsAfter !== undefined) {
+        recordMeasuredCreditsPerSec(creditsBefore - creditsAfter, outcome.totalSeconds);
+      }
       const creditsNote =
         creditsBefore !== undefined && creditsAfter !== undefined
           ? ` · 크레딧 ${creditsBefore - creditsAfter} 소진(잔여 ${creditsAfter})`
           : '';
+      if (outcome.creditsExhausted) {
+        flash(
+          `${charName} 보이스 일괄 생성 중단 — ${outcome.done}건 적용 후 크레딧 소진. 충전/다음 달 후 재실행하면 이어서 생성됩니다.` +
+            creditsNote,
+          'error',
+        );
+        return;
+      }
       const msg =
-        `${charName} 보이스 일괄 생성 완료 — ${done}건 적용` +
-        (failed ? ` · ${failed}건 실패(재시도 가능)` : '') +
+        `${charName} 보이스 일괄 생성 완료 — ${outcome.done}건 적용` +
+        (outcome.failed ? ` · ${outcome.failed}건 실패(재시도 가능)` : '') +
         creditsNote;
-      flash(msg, failed ? 'error' : 'success');
+      flash(msg, outcome.failed ? 'error' : 'success');
+    },
+
+    batchVoiceAll: async (locale) => {
+      const project = get().project;
+      const key = get().supertoneKey.trim();
+      if (!key) {
+        flash('Supertone 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
+        return;
+      }
+      const base = baseLocaleOf(project);
+      const targets = project.characters
+        .filter((c): c is Character & { voice: NonNullable<Character['voice']> } => !!c.voice)
+        .map((c) => ({ char: c, items: collectVoiceTargets(project, c.name, locale, base) }))
+        .filter((t) => t.items.length > 0);
+      if (!targets.length) {
+        flash('일괄 생성할 빈 대사가 없습니다(프리셋이 저장된 캐릭터가 없거나 이미 모두 채워짐).', 'error');
+        return;
+      }
+
+      const creditsBefore = await getCredits(key).catch(() => undefined);
+      const estimateTotal = get().voiceEstimate?.totalCredits;
+      const remainNote = creditsBefore !== undefined ? `잔여 ${creditsBefore}` : '잔여 크레딧 확인 실패';
+      const confirmMsg = estimateTotal
+        ? `전체 캐릭터 예상 약 ${Math.ceil(estimateTotal)}크레딧 소모(${remainNote}). 진행할까요?`
+        : `${remainNote}. 프리셋이 저장된 모든 캐릭터를 순차 생성할까요? (예상 비용은 "💡 비용 계산"으로 먼저 확인할 수 있습니다)`;
+      if (!window.confirm(confirmMsg)) return;
+
+      set((s) => ({ busy: { ...s.busy, 'batch:voice:all': true } }));
+      let totalDone = 0;
+      let totalFailed = 0;
+      let totalSeconds = 0;
+      let creditsExhausted = false;
+      try {
+        for (const { char, items } of targets) {
+          const busyKey = `batch:voice:${char.name}`;
+          set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+          let outcome;
+          try {
+            outcome = await runCharacterVoiceBatch(char.name, locale, char.voice, items, key);
+          } finally {
+            set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
+          }
+          totalDone += outcome.done;
+          totalFailed += outcome.failed;
+          totalSeconds += outcome.totalSeconds;
+          if (outcome.creditsExhausted) {
+            creditsExhausted = true;
+            break;
+          }
+        }
+      } finally {
+        set((s) => ({ busy: { ...s.busy, 'batch:voice:all': false } }));
+      }
+      autoSave();
+      const creditsAfter = await getCredits(key).catch(() => undefined);
+      if (creditsBefore !== undefined && creditsAfter !== undefined) {
+        recordMeasuredCreditsPerSec(creditsBefore - creditsAfter, totalSeconds);
+      }
+      const creditsNote =
+        creditsBefore !== undefined && creditsAfter !== undefined
+          ? ` · 크레딧 ${creditsBefore - creditsAfter} 소진(잔여 ${creditsAfter})`
+          : '';
+      if (creditsExhausted) {
+        flash(
+          `전체 보이스 일괄 생성 중단 — ${totalDone}건 적용 후 크레딧 소진. 충전/다음 달 후 재실행하면 이어서 생성됩니다.` +
+            creditsNote,
+          'error',
+        );
+        return;
+      }
+      flash(
+        `전체 보이스 일괄 생성 완료 — ${totalDone}건 적용` +
+          (totalFailed ? ` · ${totalFailed}건 실패(재시도 가능)` : '') +
+          creditsNote,
+        totalFailed ? 'error' : 'success',
+      );
+    },
+
+    estimateVoiceCost: async () => {
+      const project = get().project;
+      const key = get().supertoneKey.trim();
+      if (!key) {
+        flash('Supertone 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
+        return;
+      }
+      const busyKey = 'estimate:voice';
+      set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
+      try {
+        const base = baseLocaleOf(project);
+        const result = await estimateVoiceCostForProject(project, base, key);
+        set({ voiceEstimate: result });
+        if (!result.perChar.length) {
+          flash('예상 비용을 계산할 대사가 없습니다(프리셋이 저장된 캐릭터가 없거나 남은 대사가 없음).', 'error');
+          return;
+        }
+        const msg =
+          `예상 비용 계산 완료 — 약 ${Math.ceil(result.totalCredits)}크레딧(${Math.round(result.totalSeconds)}초, ${result.totalLines}줄)` +
+          (result.noPreset.length ? ` · 프리셋 없음 ${result.noPreset.length}명` : '') +
+          (result.overLimit.length ? ` · 300자 초과 ${result.overLimit.length}줄(생성 실패 가능)` : '');
+        flash(msg, 'success');
+      } catch (e) {
+        flash((e as Error).message, 'error');
+      } finally {
+        set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
+      }
     },
 
     // 같은 배경 이름을 쓰는 모든 장면의 배경 이름을 한 번에 변경(라이브러리 편집).

@@ -26,6 +26,14 @@ export interface TtsResult {
   seconds: number;
 }
 
+/** 음성 검색 결과에 딸려오는 사전 녹음 샘플 — 재생만 하면 되는 무료 미리듣기(크레딧 0). */
+export interface VoiceSample {
+  language: string;
+  style: string;
+  model: string;
+  url: string;
+}
+
 export interface SupertoneVoice {
   voiceId: string;
   name: string;
@@ -34,6 +42,8 @@ export interface SupertoneVoice {
   language: string[];
   styles: string[];
   models?: string[];
+  /** 무료 미리듣기 샘플(있으면). 없으면 빈 배열. */
+  samples: VoiceSample[];
 }
 
 // 실제 Supertone 하위경로는 ?path= 쿼리로 넘긴다(고정 경로 하나만 씀 — api/supertone.ts 참고,
@@ -56,14 +66,14 @@ async function errorMessage(res: Response): Promise<string> {
   return `Supertone 요청 실패 (HTTP ${res.status})`;
 }
 
-/** 한 줄 텍스트를 음성으로 합성. 결과 오디오는 호출측이 재생만 하고 저장은 하지 않는다(테스트 전용). */
-export async function supertoneTTS(params: TtsParams, apiKey: string): Promise<TtsResult> {
-  const { voiceId, text, language, model, style, settings } = params;
+// text-to-speech 와 predict-duration 은 output_format 유무만 다르고 나머지 바디는 동일하다
+// (predict-duration 이 정확하려면 실제 생성과 같은 model/voice_settings 를 그대로 넘겨야 함).
+function buildTtsBody(params: Omit<TtsParams, 'voiceId'>): Record<string, unknown> {
+  const { text, language, model, style, settings } = params;
   const body: Record<string, unknown> = {
     text,
     language,
     model: model || aiConfig.voice.defaultModel,
-    output_format: 'mp3',
   };
   if (style) body.style = style;
   if (settings) {
@@ -74,8 +84,13 @@ export async function supertoneTTS(params: TtsParams, apiKey: string): Promise<T
       ...(settings.textGuidance !== undefined ? { text_guidance: settings.textGuidance } : {}),
     };
   }
+  return body;
+}
 
-  const res = await fetch(proxyUrl(`text-to-speech/${voiceId}`), {
+/** 한 줄 텍스트를 음성으로 합성. 결과 오디오는 호출측이 재생만 하고 저장은 하지 않는다(테스트 전용). */
+export async function supertoneTTS(params: TtsParams, apiKey: string): Promise<TtsResult> {
+  const body = { ...buildTtsBody(params), output_format: 'mp3' };
+  const res = await fetch(proxyUrl(`text-to-speech/${params.voiceId}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-sup-api-key': apiKey },
     body: JSON.stringify(body),
@@ -84,6 +99,23 @@ export async function supertoneTTS(params: TtsParams, apiKey: string): Promise<T
   const blob = await res.blob();
   const seconds = Number(res.headers.get('X-Audio-Length')) || 0;
   return { blob, seconds };
+}
+
+/**
+ * 실제 합성 없이 예상 오디오 길이(초)만 무료로 조회(Supertone Predict Duration, 크레딧 0).
+ * 정확도를 위해 실제 생성과 동일한 model/voice_settings 를 넘겨야 한다(속도가 바뀌면 길이도 바뀜).
+ * 300자 제한 등은 text-to-speech 와 동일하게 적용된다.
+ */
+export async function predictDuration(params: TtsParams, apiKey: string): Promise<number> {
+  const body = buildTtsBody(params);
+  const res = await fetch(proxyUrl(`predict-duration/${params.voiceId}`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-sup-api-key': apiKey },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const j = await res.json();
+  return Number(j?.duration) || 0;
 }
 
 /** 음성 목록 검색(드롭다운용). language/style 은 콤마 구분 OR 조건. */
@@ -110,6 +142,14 @@ export async function searchVoices(
       language: Array.isArray(v.language) ? v.language.map(String) : [],
       styles: Array.isArray(v.styles) ? v.styles.map(String) : [],
       models: Array.isArray(v.models) ? v.models.map(String) : undefined,
+      samples: Array.isArray(v.samples)
+        ? v.samples.map((sm: Record<string, unknown>) => ({
+            language: String(sm.language ?? ''),
+            style: String(sm.style ?? ''),
+            model: String(sm.model ?? ''),
+            url: String(sm.url ?? ''),
+          }))
+        : [],
     }),
   );
 }

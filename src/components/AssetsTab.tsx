@@ -14,6 +14,8 @@ import { backgroundKey, bgmKey, hasBgm } from '../renpy/generate';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
 import Spinner from './Spinner';
+import VoiceLab from './VoiceLab';
+import VoiceReview from './VoiceReview';
 
 // ── 이름(의미) 기준 그룹화 — 같은 이름 = 하나의 에셋(업로드 1회, 모든 장면 공유) ──
 
@@ -113,6 +115,8 @@ export default function AssetsTab() {
         <NarrationOnlyRow />
       </section>
 
+      <VoiceSection />
+
       <section>
         <h3 className="section-title mb-1">🖼 배경 <span className="text-gray-500 font-normal text-xs">· {bgs.length}종 / 장면 {scenes.length}개</span></h3>
         <p className="text-xs text-gray-500 mb-3">
@@ -193,6 +197,76 @@ function CleanupSection() {
       <button className="btn-ghost text-[11px] text-gray-400 hover:text-rose-500" onClick={() => void cleanupOrphanAssets()}>
         참조되지 않는 에셋 정리
       </button>
+    </section>
+  );
+}
+
+/**
+ * 🎙 성우(TTS) 비용·검수 — 캐릭터별 카드가 아니라 프로젝트 전체를 다루는 액션 모음.
+ *  - 💡 비용 계산: Predict Duration(무료)으로 예상 크레딧을 미리 가늠(일부만 샘플링).
+ *  - 전체 캐릭터 일괄 생성: 프리셋이 저장된 모든 캐릭터를 순차 생성(캐릭터마다 확인창이 다시
+ *    뜨지 않게 한 번만 확인).
+ *  - 🎧 검수 시작: 생성된 음성을 이어 들으며 검수(VoiceReview).
+ */
+function VoiceSection() {
+  const project = useStore((s) => s.project);
+  const supertoneKey = useStore((s) => s.supertoneKey);
+  const voiceEstimate = useStore((s) => s.voiceEstimate);
+  const estimating = useStore((s) => !!s.busy['estimate:voice']);
+  const batchAllBusy = useStore((s) => !!s.busy['batch:voice:all']);
+  const estimateVoiceCost = useStore((s) => s.estimateVoiceCost);
+  const batchVoiceAll = useStore((s) => s.batchVoiceAll);
+  const base = baseLocaleOf(project);
+  const [reviewOpen, setReviewOpen] = useState(false);
+
+  const hasAnyPreset = project.characters.some((c) => c.voice);
+  const hasAnyVoiced = project.scenes.some((sc) =>
+    sc.lines.some((l) => l.kind === 'dialogue' && l.voiceAssetIds?.[base]),
+  );
+
+  return (
+    <section>
+      <h3 className="section-title mb-1">🎙 성우(TTS) 비용·검수</h3>
+      <p className="text-xs text-gray-500 mb-3">
+        생성 전 무료 예측(Predict Duration)으로 대략적인 크레딧 소모량을 가늠하고, 생성 후엔 이어듣기로 검수하세요.
+      </p>
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <button
+          className="btn-ghost text-xs"
+          disabled={!supertoneKey || !hasAnyPreset || estimating}
+          onClick={() => void estimateVoiceCost()}
+          title="Predict Duration(무료)으로 예상 크레딧을 계산합니다 — 대사가 많으면 일부만 샘플링해 빠르게 추정합니다"
+        >
+          {estimating ? <Spinner /> : '💡 비용 계산'}
+        </button>
+        <button
+          className="btn-ghost text-xs"
+          disabled={!supertoneKey || !hasAnyPreset || batchAllBusy}
+          onClick={() => void batchVoiceAll(base)}
+          title="보이스 프리셋이 저장된 모든 캐릭터의 남은 대사를 순차 생성합니다"
+        >
+          {batchAllBusy ? <Spinner /> : '🎙 전체 캐릭터 일괄 생성'}
+        </button>
+        <button
+          className="btn-ghost text-xs"
+          disabled={!hasAnyVoiced}
+          onClick={() => setReviewOpen(true)}
+          title="생성된 음성을 이어서 들으며 검수합니다"
+        >
+          🎧 검수 시작
+        </button>
+      </div>
+      {voiceEstimate && (
+        <p className="text-[11px] text-gray-400">
+          예상 약 {Math.ceil(voiceEstimate.totalCredits)}크레딧 · {Math.round(voiceEstimate.totalSeconds)}초 ·{' '}
+          {voiceEstimate.totalLines}줄
+          {voiceEstimate.noPreset.length > 0 && ` · 프리셋 없음: ${voiceEstimate.noPreset.join(', ')}`}
+          {voiceEstimate.overLimit.length > 0 && (
+            <span className="text-amber-600"> · 300자 초과 {voiceEstimate.overLimit.length}줄(생성 실패 가능)</span>
+          )}
+        </p>
+      )}
+      {reviewOpen && <VoiceReview onClose={() => setReviewOpen(false)} />}
     </section>
   );
 }
@@ -366,6 +440,7 @@ function CharacterCard({ name }: { name: string }) {
 
   // 현재 편집 중인 의상(기본/추가 의상). 업로드·썸네일이 모두 이 의상을 대상으로 한다.
   const [outfit, setOutfit] = useState('기본');
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
   const outfits = characterOutfits(c);
   const activeOutfit = outfit === '기본' ? undefined : c.outfits?.find((o) => o.name === outfit);
   const exprStore: Partial<Record<string, string>> = outfit === '기본' ? c.expressions : activeOutfit?.expressions ?? {};
@@ -407,6 +482,32 @@ function CharacterCard({ name }: { name: string }) {
           <option value="right">오른쪽 고정</option>
         </select>
       </div>
+      {/* 보이스 설정 — VoiceLab 을 캐릭터 모드로 열어 대사와 무관하게 보이스 프리셋만 고른다.
+          미리듣기는 오디션 캐시를 거치므로 같은 설정을 여러 번 눌러 들어봐도 크레딧이 안 든다. */}
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span className="text-[10px] text-gray-500 mr-0.5">🎤 보이스</span>
+        <button className="btn-ghost text-xs" onClick={() => setVoiceSettingsOpen((v) => !v)}>
+          목소리 설정
+        </button>
+        {c.voice ? (
+          <span
+            className="chip border-edge text-gray-400"
+            title={`voice_id: ${c.voice.voiceId}`}
+          >
+            {c.voice.style ? `${c.voice.style} · ` : ''}속도 {c.voice.settings?.speed ?? 1}
+          </span>
+        ) : (
+          <span className="chip border-amber-500/50 text-amber-600">미설정</span>
+        )}
+      </div>
+      {voiceSettingsOpen && (
+        <VoiceLab
+          char={c}
+          baseLocale={baseLocaleOf(project)}
+          mode="character"
+          onClose={() => setVoiceSettingsOpen(false)}
+        />
+      )}
       {/* 보이스 일괄 생성 — VoiceLab 에서 저장해둔 프리셋(c.voice)으로 이 캐릭터의 모든 대사를
           순차 생성·적용(이미 있는 언어 음성은 건너뜀). 대본이 수백 줄이어도 하나하나 안 해도 됨 —
           마음에 안 드는 특정 줄은 그 대사의 VoiceLab 에서 개별로 다시 만지면 된다. */}
@@ -419,7 +520,7 @@ function CharacterCard({ name }: { name: string }) {
           title={
             c.voice
               ? `${name} 이 말하는 모든 대사 중 아직 음성 없는 줄을 저장된 보이스 프리셋으로 일괄 생성`
-              : '먼저 대사의 🎙 VoiceLab에서 보이스를 고르고 "💾 캐릭터에 저장"하세요'
+              : '먼저 🎤 목소리 설정에서 보이스를 고르고 "💾 저장 후 닫기"를 누르세요'
           }
         >
           {voiceBatchBusy ? <Spinner /> : '전체 대사 일괄 생성'}

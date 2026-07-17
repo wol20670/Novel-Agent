@@ -20,3 +20,6 @@ e2e-shots/
 
 # 로컬 참고 자료(레포에 안 올림 — 예: NovelAI API PDF). 필요하면 개별 보관.
 docs/
+
+# 게임 대본 원본(창작물 — 공개 레포에 올리지 않음)
+scenario/

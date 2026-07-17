@@ -26,6 +26,12 @@ export interface AiConfig {
   voice: {
     proxyBase: string;
     defaultModel: string;
+    /**
+     * 크레딧/초 기본값(실측 없을 때만 사용) — Creator 플랜 100,000크레딧 ≈ 150분(9000초) 환산 추정치.
+     * 정확한 단가는 비공개라 배치 생성 전후 실제 잔량 차이를 잴 때마다 recordMeasuredCreditsPerSec 로
+     * localStorage(novel-agent:creditsPerSec)에 보정값을 남기고, 다음 견적부턴 그 값을 우선한다.
+     */
+    defaultCreditsPerSec: number;
   };
 }
 
@@ -38,5 +44,6 @@ export const aiConfig: AiConfig = {
   voice: {
     proxyBase: '/api/supertone',
     defaultModel: 'sona_speech_2',
+    defaultCreditsPerSec: 100000 / 9000,
   },
 };
