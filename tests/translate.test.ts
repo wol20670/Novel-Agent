@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { parseTranslateResponse } from '../src/generators/translate';
+import {
+  parseTranslateResponse,
+  chunkItems,
+  isTransientTranslateError,
+  isFatalTranslateError,
+  type TranslateItem,
+} from '../src/generators/translate';
 import { collectUntranslated } from '../src/generators/translate/collect';
 import { emptyProject, type Project } from '../src/types';
 
@@ -42,5 +48,77 @@ describe('collectUntranslated', () => {
     expect(batches).toHaveLength(1);
     expect(batches[0].items.map((i) => i.i)).toEqual([0, 2]);
     expect(batches[0].items[1].narration).toBe(true);
+  });
+});
+
+function mkItems(n: number, koLen = 3): TranslateItem[] {
+  return Array.from({ length: n }, (_, i) => ({ i, ko: 'x'.repeat(koLen) }));
+}
+
+describe('chunkItems', () => {
+  it('줄 수가 상한 이하면 청크 1개로 묶는다(회귀 가드)', () => {
+    const items = mkItems(40);
+    const chunks = chunkItems(items);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toHaveLength(40);
+  });
+
+  it('90개면 40/40/10 으로 나누고 순서·인덱스를 보존한다', () => {
+    const items = mkItems(90);
+    const chunks = chunkItems(items);
+    expect(chunks.map((c) => c.length)).toEqual([40, 40, 10]);
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(40);
+    const seen = chunks.flat().map((it) => it.i);
+    expect(seen).toEqual(Array.from({ length: 90 }, (_, i) => i)); // 순서 보존 + 정확히 1번씩
+  });
+
+  it('글자 수 상한에 걸리면 줄 수 상한 전에 분할한다', () => {
+    // 10개 × 500자 = 5000자 > 4000자 캡 → 40줄 캡(=10개 미만이라 안 걸림)보다 먼저 글자 수로 쪼개져야 함
+    const items = mkItems(10, 500);
+    const chunks = chunkItems(items);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) {
+      const chars = c.reduce((sum, it) => sum + it.ko.length, 0);
+      expect(chars).toBeLessThanOrEqual(4000);
+    }
+    expect(chunks.flat()).toHaveLength(10);
+  });
+
+  it('단일 아이템이 maxChars 를 넘어도 누락 없이 단독 청크가 된다', () => {
+    const items: TranslateItem[] = [
+      { i: 0, ko: 'x'.repeat(50) },
+      { i: 1, ko: 'y'.repeat(5) },
+    ];
+    const chunks = chunkItems(items, 40, 10); // 작은 maxChars 로 빠르게 테스트
+    expect(chunks.flat().map((it) => it.i)).toEqual([0, 1]);
+    expect(chunks.some((c) => c.length === 1 && c[0].i === 0)).toBe(true);
+  });
+
+  it('빈 입력은 빈 배열을 반환한다', () => {
+    expect(chunkItems([])).toEqual([]);
+  });
+});
+
+describe('isTransientTranslateError', () => {
+  it('레이트리밋/시간초과/5xx 는 일시적 오류로 판단한다', () => {
+    expect(isTransientTranslateError(new Error('번역 실패 (HTTP 429): 레이트 리밋'))).toBe(true);
+    expect(isTransientTranslateError(new Error('번역 요청 시간 초과(레이트 리밋/네트워크 의심)'))).toBe(true);
+    expect(isTransientTranslateError(new Error('번역 실패 (HTTP 503)'))).toBe(true);
+  });
+
+  it('4xx(429 제외)나 무관한 오류는 일시적이지 않다고 판단한다', () => {
+    expect(isTransientTranslateError(new Error('번역 실패 (HTTP 400)'))).toBe(false);
+    expect(isTransientTranslateError(new Error('Incorrect API key'))).toBe(false);
+  });
+});
+
+describe('isFatalTranslateError', () => {
+  it('인증/쿼터 오류는 치명적으로 판단한다', () => {
+    expect(isFatalTranslateError(new Error('번역 실패 (HTTP 401)'))).toBe(true);
+    expect(isFatalTranslateError(new Error('You exceeded your current quota'))).toBe(true);
+  });
+
+  it('레이트리밋은 치명적이지 않다고 판단한다', () => {
+    expect(isFatalTranslateError(new Error('번역 실패 (HTTP 429): 레이트 리밋'))).toBe(false);
   });
 });

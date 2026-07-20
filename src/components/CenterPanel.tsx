@@ -19,6 +19,7 @@ export default function CenterPanel() {
   const translateMode = useStore((s) => translateModeOf(s.project));
   const autoTranslate = useStore((s) => s.autoTranslateAll);
   const translating = useStore((s) => !!s.busy['batch:translate']);
+  const translateProgress = useStore((s) => s.translateProgress);
 
   const approved = scenes.filter((s) => s.status === 'approved').length;
   const allApproved = scenes.length > 0 && approved === scenes.length;
@@ -49,7 +50,18 @@ export default function CenterPanel() {
                 disabled={translating}
                 title="번역이 빈 대사·지문을 영어·일본어로 자동 번역(빈 칸만). 이후 미리보기에서 검수/수정하세요."
               >
-                {translating ? <Spinner /> : '🌐 전체 자동 번역'}
+                {translating ? (
+                  translateProgress ? (
+                    <span className="flex items-center gap-1.5">
+                      <Spinner />
+                      {`${translateProgress.done}/${translateProgress.total} 장면 번역 중…`}
+                    </span>
+                  ) : (
+                    <Spinner />
+                  )
+                ) : (
+                  '🌐 전체 자동 번역'
+                )}
               </button>
             )}
             <button

@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import type { Project, Scene, AssetMeta, Character, Expression, Locale, TranslateMode } from './types';
 import { emptyProject, effectiveExpressions, baseLocaleOf, translateModeOf, translateModelFor } from './types';
 import { collectUntranslated } from './generators/translate/collect';
-import { translateBatch } from './generators/translate';
+import { translateBatch, chunkItems, isFatalTranslateError } from './generators/translate';
+import { sleep } from './generators/shared/retry';
 import { collectVoiceTargets, type VoiceBatchItem } from './generators/voice/collectByCharacter';
 import { supertoneTTS, getCredits } from './generators/voice/supertoneProvider';
 import { estimateVoiceCostForProject, recordMeasuredCreditsPerSec, type VoiceEstimate } from './generators/voice/estimate';
@@ -91,6 +92,8 @@ interface State {
   setTranslateMode: (mode: TranslateMode) => void;
   /** 번역이 빈 대사·지문을 GPT 로 en·ja 채운다(빈 칸만). off/키없음이면 no-op/에러. */
   autoTranslateAll: () => Promise<void>;
+  /** 자동 번역 진행 상황(장면 기준) — null = 실행 중 아님. CenterPanel 이 "N/M 장면" 으로 표시. */
+  translateProgress: { done: number; total: number } | null;
   setSceneStatus: (id: string, status: Scene['status']) => void;
   approveAll: () => void;
   selectScene: (id: string | null) => void;
@@ -460,6 +463,7 @@ export const useStore = create<State>((set, get) => {
     activeTab: 'scenes',
     selectedSceneId: null,
     busy: {},
+    translateProgress: null,
     voiceEstimate: null,
     toast: null,
     toastType: 'info',
@@ -575,40 +579,61 @@ export const useStore = create<State>((set, get) => {
         flash('번역할 빈 칸이 없습니다(이미 모두 채워짐).');
         return;
       }
-      set((s) => ({ busy: { ...s.busy, 'batch:translate': true } }));
+      set((s) => ({
+        busy: { ...s.busy, 'batch:translate': true },
+        translateProgress: { done: 0, total: batches.length },
+      }));
       let done = 0;
       let failScenes = 0;
+      let doneScenes = 0;
+      let aborted = false; // 키/쿼터 오류처럼 재시도해도 의미 없는 치명적 오류 — 배치 전체 중단
       // 채워진 칸을 sceneId → lineIndex → locale → text 로 모아뒀다가 루프가 끝난 뒤 scenes 를
       // 딱 1회만 재구축한다 — 예전엔 채워진 칸마다 setLineTranslation(=set 전체 재맵핑+autoSave
       // 디바운스 리셋)을 호출해 장면·로케일 수에 비례해 최대 수백 번 리렌더/저장이 발생했다.
       const updates = new Map<string, Map<number, Partial<Record<Locale, string>>>>();
+      // 연속 호출을 곧바로 이어 붙이면 레이트리밋에 걸리기 쉬워(보이스 일괄생성에서 확인된 패턴)
+      // 청크 호출 사이에 일정 간격을 둔다. callIndex 는 장면 경계를 넘어 전체 호출 기준으로 센다.
+      const PACE_MS = 1200;
+      let callIndex = 0;
       try {
-        for (const { sceneId, items } of batches) {
-          try {
-            const result = await translateBatch(items, targets, model, key);
-            for (const it of items) {
-              const tr = result[it.i];
-              if (!tr) continue;
-              for (const loc of targets) {
-                const v = tr[loc];
-                if (v && v.trim()) {
-                  let sceneUpdates = updates.get(sceneId);
-                  if (!sceneUpdates) {
-                    sceneUpdates = new Map();
-                    updates.set(sceneId, sceneUpdates);
+        outer: for (const { sceneId, items } of batches) {
+          let sceneFailed = false;
+          for (const chunk of chunkItems(items)) {
+            if (callIndex > 0) await sleep(PACE_MS);
+            callIndex++;
+            try {
+              const result = await translateBatch(chunk, targets, model, key);
+              for (const it of chunk) {
+                const tr = result[it.i];
+                if (!tr) continue;
+                for (const loc of targets) {
+                  const v = tr[loc];
+                  if (v && v.trim()) {
+                    let sceneUpdates = updates.get(sceneId);
+                    if (!sceneUpdates) {
+                      sceneUpdates = new Map();
+                      updates.set(sceneId, sceneUpdates);
+                    }
+                    sceneUpdates.set(it.i, { ...sceneUpdates.get(it.i), [loc]: v });
+                    done++;
                   }
-                  sceneUpdates.set(it.i, { ...sceneUpdates.get(it.i), [loc]: v });
-                  done++;
                 }
               }
+            } catch (e) {
+              sceneFailed = true;
+              console.warn('[자동번역] 청크 실패:', sceneId, e);
+              if (isFatalTranslateError(e)) {
+                aborted = true;
+                break outer;
+              }
             }
-          } catch (e) {
-            failScenes++;
-            console.warn('[자동번역] 장면 실패:', sceneId, e);
           }
+          if (sceneFailed) failScenes++;
+          doneScenes++;
+          set(() => ({ translateProgress: { done: doneScenes, total: batches.length } }));
         }
       } finally {
-        set((s) => ({ busy: { ...s.busy, 'batch:translate': false } }));
+        set((s) => ({ busy: { ...s.busy, 'batch:translate': false }, translateProgress: null }));
       }
       if (updates.size) {
         const scenes = get().project.scenes.map((sc) => {
@@ -623,9 +648,16 @@ export const useStore = create<State>((set, get) => {
         });
         setScenes(scenes); // 단일 set + 단일 autoSave
       }
-      const msg =
-        `자동 번역 완료 — ${done}건 채움` + (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
-      flash(msg, failScenes ? 'error' : 'success');
+      if (aborted) {
+        flash(
+          `자동 번역 중단 — ${done}건 채움 · API 키/쿼터 오류로 중단됨(키·잔액을 확인하세요).`,
+          'error',
+        );
+      } else {
+        const msg =
+          `자동 번역 완료 — ${done}건 채움` + (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
+        flash(msg, failScenes ? 'error' : 'success');
+      }
     },
 
     setSceneStatus: (id, status) => {
