@@ -5,8 +5,8 @@ import { collectUntranslated } from './generators/translate/collect';
 import { translateBatch, chunkItems, isFatalTranslateError } from './generators/translate';
 import { sleep } from './generators/shared/retry';
 import { collectVoiceTargets, type VoiceBatchItem } from './generators/voice/collectByCharacter';
-import { supertoneTTS, getCredits } from './generators/voice/supertoneProvider';
-import { estimateVoiceCostForProject, recordMeasuredCreditsPerSec, type VoiceEstimate } from './generators/voice/estimate';
+import { typecastTTS, getSubscription } from './generators/voice/typecastProvider';
+import { estimateVoiceCostForProject, type VoiceEstimate } from './generators/voice/estimate';
 import { aiConfig } from './config/aiConfig';
 import type { ScriptMeta, BuildResult } from './parser';
 import { mergeScenes, type AnalyzeMode } from './project/mergeScenes';
@@ -151,12 +151,13 @@ interface State {
   batchVoiceAll: (locale: Locale) => Promise<void>;
 
   /**
-   * Predict Duration(무료)으로 뽑은 프로젝트 전체 보이스 예상 비용. estimateVoiceCost() 로 채워지고,
-   * batchVoiceCharacter/batchVoiceAll 의 진행 전 확인창에 표시된다. null = 아직 계산 안 함.
+   * 글자수 기반 즉시 계산(1글자=1크레딧, API 호출 0회)한 프로젝트 전체 보이스 예상 비용.
+   * estimateVoiceCost() 로 채워지고, batchVoiceCharacter/batchVoiceAll 의 진행 전 확인창에 표시된다.
+   * null = 아직 계산 안 함.
    */
   voiceEstimate: VoiceEstimate | null;
-  /** 저장된 보이스 프리셋 기준으로 프로젝트 전체 예상 크레딧을 계산(base 로케일 고정, 무료). */
-  estimateVoiceCost: () => Promise<void>;
+  /** 저장된 보이스 프리셋 기준으로 프로젝트 전체 예상 크레딧을 계산(base 로케일 고정, 키 불필요·즉시). */
+  estimateVoiceCost: () => void;
 
   // 에셋 라이브러리 (이름 그룹 단위 — 같은 이름 장면 전체에 한 번에 적용)
   renameBackgroundGroup: (key: string, name: string) => void;
@@ -181,9 +182,9 @@ interface State {
   openaiKey: string;
   setOpenaiKey: (key: string) => void;
 
-  /** Supertone 키(선택) — 성우 TTS 테스트용. 브라우저에만 저장, /api/supertone 프록시로만 통과. */
-  supertoneKey: string;
-  setSupertoneKey: (key: string) => void;
+  /** Typecast 키(선택) — 성우 TTS 테스트용. 브라우저에만 저장, /api/typecast 프록시로만 통과. */
+  typecastKey: string;
+  setTypecastKey: (key: string) => void;
 
   /**
    * 협업(실시간 공유, 가벼운 버전) — 2인 전제. Supabase 접속 정보(URL·anon key)는 빌드에
@@ -385,6 +386,17 @@ export const useStore = create<State>((set, get) => {
     if (prev) await deleteAsset(prev).catch(() => {});
   };
 
+  // 배치 확인창·완료 메시지에 쓸 잔여 크레딧(plan_credits - used_credits) — 조회 실패해도(키
+  // 오류·네트워크 등) 배치 자체엔 영향 없게 베스트에포트로 undefined 폴백.
+  const subscriptionRemaining = async (key: string): Promise<number | undefined> => {
+    try {
+      const sub = await getSubscription(key);
+      return sub.planCredits - sub.usedCredits;
+    } catch {
+      return undefined;
+    }
+  };
+
   // batchVoiceCharacter/batchVoiceAll 공유 — 확인창·크레딧 전후 조회는 호출측이 하고, 이 함수는
   // "이 캐릭터의 미생성 대사를 순차 생성·적용"만 담당한다(batchVoiceAll 이 여러 캐릭터를 돌 때
   // 캐릭터마다 확인창이 다시 뜨지 않게 분리).
@@ -411,14 +423,15 @@ export const useStore = create<State>((set, get) => {
         text: item.text,
         language: locale,
         model: voicePreset.model || aiConfig.voice.defaultModel,
-        style: voicePreset.style,
+        emotion: voicePreset.emotion,
+        intensity: voicePreset.intensity,
         settings: voicePreset.settings,
       };
       let result;
       let lastErr: unknown;
       for (let attempt = 0; attempt <= 3; attempt++) {
         try {
-          result = await supertoneTTS(params, key);
+          result = await typecastTTS(params, key);
           lastErr = undefined;
           break;
         } catch (e) {
@@ -454,7 +467,7 @@ export const useStore = create<State>((set, get) => {
     project: emptyProject(),
     assets: {},
     openaiKey: '',
-    supertoneKey: '',
+    typecastKey: '',
     collabEnabled: false,
     collabRoom: '',
     collabName: '',
@@ -1092,9 +1105,9 @@ export const useStore = create<State>((set, get) => {
         flash('먼저 이 캐릭터의 보이스를 골라 "💾 캐릭터에 저장"하세요.', 'error');
         return;
       }
-      const key = get().supertoneKey.trim();
+      const key = get().typecastKey.trim();
       if (!key) {
-        flash('Supertone 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
+        flash('Typecast 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
         return;
       }
       const base = baseLocaleOf(project);
@@ -1106,11 +1119,11 @@ export const useStore = create<State>((set, get) => {
 
       // 대사 하나당 크레딧이 얼마나 드는지 감을 잡을 수 있게, 배치 전후로 잔량을 재서 확인창·완료
       // 메시지에 같이 보여준다(베스트에포트 — 조회 실패해도 배치 자체엔 영향 없음, 조용히 생략).
-      const creditsBefore = await getCredits(key).catch(() => undefined);
+      const creditsBefore = await subscriptionRemaining(key);
       const estimate = get().voiceEstimate?.perChar.find((c) => c.name === charName);
       const remainNote = creditsBefore !== undefined ? `잔여 ${creditsBefore}` : '잔여 크레딧 확인 실패';
       const confirmMsg = estimate
-        ? `예상 약 ${Math.ceil(estimate.estCredits)}크레딧 소모(${remainNote}). 진행할까요?`
+        ? `예상 정확히 ${estimate.estCredits}크레딧 소모(${remainNote}). 진행할까요?`
         : `${remainNote}. 진행할까요? (예상 비용은 "💡 비용 계산"으로 먼저 확인할 수 있습니다)`;
       if (!window.confirm(confirmMsg)) return;
 
@@ -1123,10 +1136,7 @@ export const useStore = create<State>((set, get) => {
         set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
       }
       autoSave();
-      const creditsAfter = await getCredits(key).catch(() => undefined);
-      if (creditsBefore !== undefined && creditsAfter !== undefined) {
-        recordMeasuredCreditsPerSec(creditsBefore - creditsAfter, outcome.totalSeconds);
-      }
+      const creditsAfter = await subscriptionRemaining(key);
       const creditsNote =
         creditsBefore !== undefined && creditsAfter !== undefined
           ? ` · 크레딧 ${creditsBefore - creditsAfter} 소진(잔여 ${creditsAfter})`
@@ -1148,9 +1158,9 @@ export const useStore = create<State>((set, get) => {
 
     batchVoiceAll: async (locale) => {
       const project = get().project;
-      const key = get().supertoneKey.trim();
+      const key = get().typecastKey.trim();
       if (!key) {
-        flash('Supertone 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
+        flash('Typecast 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
         return;
       }
       const base = baseLocaleOf(project);
@@ -1163,11 +1173,11 @@ export const useStore = create<State>((set, get) => {
         return;
       }
 
-      const creditsBefore = await getCredits(key).catch(() => undefined);
+      const creditsBefore = await subscriptionRemaining(key);
       const estimateTotal = get().voiceEstimate?.totalCredits;
       const remainNote = creditsBefore !== undefined ? `잔여 ${creditsBefore}` : '잔여 크레딧 확인 실패';
       const confirmMsg = estimateTotal
-        ? `전체 캐릭터 예상 약 ${Math.ceil(estimateTotal)}크레딧 소모(${remainNote}). 진행할까요?`
+        ? `전체 캐릭터 예상 정확히 ${estimateTotal}크레딧 소모(${remainNote}). 진행할까요?`
         : `${remainNote}. 프리셋이 저장된 모든 캐릭터를 순차 생성할까요? (예상 비용은 "💡 비용 계산"으로 먼저 확인할 수 있습니다)`;
       if (!window.confirm(confirmMsg)) return;
 
@@ -1198,10 +1208,7 @@ export const useStore = create<State>((set, get) => {
         set((s) => ({ busy: { ...s.busy, 'batch:voice:all': false } }));
       }
       autoSave();
-      const creditsAfter = await getCredits(key).catch(() => undefined);
-      if (creditsBefore !== undefined && creditsAfter !== undefined) {
-        recordMeasuredCreditsPerSec(creditsBefore - creditsAfter, totalSeconds);
-      }
+      const creditsAfter = await subscriptionRemaining(key);
       const creditsNote =
         creditsBefore !== undefined && creditsAfter !== undefined
           ? ` · 크레딧 ${creditsBefore - creditsAfter} 소진(잔여 ${creditsAfter})`
@@ -1222,33 +1229,22 @@ export const useStore = create<State>((set, get) => {
       );
     },
 
-    estimateVoiceCost: async () => {
+    // 글자수 합=크레딧이라 API 호출이 필요 없다(키 없이도 즉시 계산 — Typecast 이관 전 Predict
+    // Duration 샘플링 방식과 달리 동기 함수, 스피너·busy 상태도 필요 없어졌다).
+    estimateVoiceCost: () => {
       const project = get().project;
-      const key = get().supertoneKey.trim();
-      if (!key) {
-        flash('Supertone 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
+      const base = baseLocaleOf(project);
+      const result = estimateVoiceCostForProject(project, base);
+      set({ voiceEstimate: result });
+      if (!result.perChar.length) {
+        flash('예상 비용을 계산할 대사가 없습니다(프리셋이 저장된 캐릭터가 없거나 남은 대사가 없음).', 'error');
         return;
       }
-      const busyKey = 'estimate:voice';
-      set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
-      try {
-        const base = baseLocaleOf(project);
-        const result = await estimateVoiceCostForProject(project, base, key);
-        set({ voiceEstimate: result });
-        if (!result.perChar.length) {
-          flash('예상 비용을 계산할 대사가 없습니다(프리셋이 저장된 캐릭터가 없거나 남은 대사가 없음).', 'error');
-          return;
-        }
-        const msg =
-          `예상 비용 계산 완료 — 약 ${Math.ceil(result.totalCredits)}크레딧(${Math.round(result.totalSeconds)}초, ${result.totalLines}줄)` +
-          (result.noPreset.length ? ` · 프리셋 없음 ${result.noPreset.length}명` : '') +
-          (result.overLimit.length ? ` · 300자 초과 ${result.overLimit.length}줄(생성 실패 가능)` : '');
-        flash(msg, 'success');
-      } catch (e) {
-        flash((e as Error).message, 'error');
-      } finally {
-        set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
-      }
+      const msg =
+        `예상 비용 계산 완료 — 정확히 ${result.totalCredits}크레딧(약 ${Math.round(result.totalSeconds)}초, ${result.totalLines}줄)` +
+        (result.noPreset.length ? ` · 프리셋 없음 ${result.noPreset.length}명` : '') +
+        (result.overLimit.length ? ` · 2000자 초과 ${result.overLimit.length}줄(생성 실패 가능)` : '');
+      flash(msg, 'success');
     },
 
     // 같은 배경 이름을 쓰는 모든 장면의 배경 이름을 한 번에 변경(라이브러리 편집).
@@ -1412,10 +1408,10 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
-    setSupertoneKey: (key) => {
-      set({ supertoneKey: key });
+    setTypecastKey: (key) => {
+      set({ typecastKey: key });
       try {
-        localStorage.setItem('na_supertone_key', key);
+        localStorage.setItem('na_typecast_key', key);
       } catch {
         /* ignore */
       }
@@ -1440,14 +1436,14 @@ export const useStore = create<State>((set, get) => {
           return '';
         }
       })();
-      const supertoneKey = (() => {
+      const typecastKey = (() => {
         try {
-          return localStorage.getItem('na_supertone_key') ?? '';
+          return localStorage.getItem('na_typecast_key') ?? '';
         } catch {
           return '';
         }
       })();
-      set({ openaiKey, supertoneKey });
+      set({ openaiKey, typecastKey });
       if (loaded) {
         set({ project: loaded.project, assets: loaded.assets, selectedSceneId: loaded.project.scenes[0]?.id ?? null });
       }

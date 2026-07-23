@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { aiConfig } from '../config/aiConfig';
-import { supertoneTTS, searchVoices, type SupertoneVoice, type VoiceSettings } from '../generators/voice/supertoneProvider';
+import { typecastTTS, listVoices, type TtsVoice, type VoiceSettings } from '../generators/voice/typecastProvider';
 import { getClip, putClip, clipKey } from '../generators/voice/auditionCache';
 import { LOCALE_LABEL, type Character, type Line, type Locale } from '../types';
 import Spinner from './Spinner';
@@ -10,15 +10,19 @@ import { useAssetUrl } from './useAssetUrl';
 
 type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
 
+const SMART_EMOTION = 'smart';
+
 /**
- * Supertone 성우 테스트 패널 — 두 가지 모드로 쓰인다.
- *  - 'line'(기본, SceneCard 🎙): 대사 한 줄용. 감정·속도·억양 등을 바꿔가며 "▶ 생성"하면 그 결과가
+ * Typecast 성우 테스트 패널 — 두 가지 모드로 쓰인다.
+ *  - 'line'(기본, SceneCard 🎙): 대사 한 줄용. 감정·강도·속도 등을 바꿔가며 "▶ 생성"하면 그 결과가
  *    **자동으로** 이 대사·이 언어에 바로 적용된다(별도 "적용" 클릭 필요 없음 — 예전엔 생성 결과가
  *    컴포넌트 로컬 state에만 있어서 적용 버튼을 안 누르고 새로고침하면 크레딧 써서 만든 오디오가
  *    그냥 사라지는 문제가 있었음).
  *  - 'character'(AssetsTab 🎤 목소리 설정): 특정 대사가 아니라 캐릭터 프리셋 자체를 고르는 모드.
- *    미리듣기 텍스트를 자유 편집할 수 있고, "생성"은 대사에 적용되지 않는 순수 미리듣기라
- *    같은 설정 조합이면 재생성 없이 캐시를 재생한다(auditionCache — 크레딧 절약).
+ *    미리듣기 텍스트를 자유 편집할 수 있고, "생성"은 대사에 적용되지 않는 순수 미리듣기.
+ *    Typecast 보이스 목록엔 사전 녹음 샘플이 없어(응답에 샘플 URL 없음) 미리듣기는 항상 실제
+ *    생성(소액 크레딧)이지만, 같은 설정 조합(보이스+모델+감정+강도+텍스트)이면 오디션 캐시에서
+ *    그대로 재생해 재청취는 크레딧 0이다.
  * "💾 캐릭터에 저장"은 두 모드 공통, 오디오 자체와는 무관하게 다른 대사를 열 때 프리필되는
  * 보이스 설정 레시피만 남긴다(배치 생성이 이 레시피를 씀).
  */
@@ -39,7 +43,7 @@ export default function VoiceLab({
   mode?: 'line' | 'character';
   onClose?: () => void;
 }) {
-  const supertoneKey = useStore((s) => s.supertoneKey);
+  const typecastKey = useStore((s) => s.typecastKey);
   const updateChar = useStore((s) => s.updateCharacter);
   const attachLineVoice = useStore((s) => s.attachLineVoice);
   const detachLineVoice = useStore((s) => s.detachLineVoice);
@@ -48,11 +52,12 @@ export default function VoiceLab({
   // (내부 함수들은 en/ja 도 받을 수 있게 locale 로 유지, 화면에만 노출 안 함).
   const [lang, setLang] = useState<Locale>(baseLocale);
   const [voiceId, setVoiceId] = useState(char.voice?.voiceId ?? '');
-  const [style, setStyle] = useState(char.voice?.style ?? '');
-  const [speed, setSpeed] = useState(char.voice?.settings?.speed ?? 1);
-  const [pitchShift, setPitchShift] = useState(char.voice?.settings?.pitchShift ?? 0);
-  const [pitchVariance, setPitchVariance] = useState(char.voice?.settings?.pitchVariance ?? 1);
-  const [textGuidance, setTextGuidance] = useState(char.voice?.settings?.textGuidance ?? 1);
+  const [model, setModel] = useState(char.voice?.model || aiConfig.voice.defaultModel);
+  const [emotion, setEmotion] = useState(char.voice?.emotion ?? SMART_EMOTION);
+  const [intensity, setIntensity] = useState(char.voice?.intensity ?? 1);
+  const [tempo, setTempo] = useState(char.voice?.settings?.tempo ?? 1);
+  const [pitch, setPitch] = useState(char.voice?.settings?.pitch ?? 0);
+  const [volume, setVolume] = useState(char.voice?.settings?.volume ?? 100);
 
   // character 모드 미리듣기 텍스트 — 이 캐릭터의 첫 단일화자 대사로 프리필, 없으면 예시 문장.
   const project = useStore((s) => s.project);
@@ -67,7 +72,7 @@ export default function VoiceLab({
   const [previewText, setPreviewText] = useState(firstLine || '안녕하세요, 만나서 반가워요.');
   const [fromCache, setFromCache] = useState(false);
 
-  const [voices, setVoices] = useState<SupertoneVoice[]>([]);
+  const [voices, setVoices] = useState<TtsVoice[]>([]);
   const [loadingVoices, setLoadingVoices] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string>();
   const [seconds, setSeconds] = useState(0);
@@ -78,16 +83,6 @@ export default function VoiceLab({
   // 언마운트·재생성 시 이전 object URL 정리(오디오 영구 저장 안 함 — 첨부 전까지는 순수 테스트).
   useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
 
-  // 무료 샘플 재생(선택한 보이스에 딸린 사전 녹음 미리듣기, 크레딧 0) — <audio> 엘리먼트를 매번
-  // 새로 만드는 대신 하나를 재사용한다.
-  const sampleAudioRef = useRef<HTMLAudioElement | null>(null);
-  const playSample = (url: string) => {
-    if (!url) return;
-    if (!sampleAudioRef.current) sampleAudioRef.current = new Audio();
-    sampleAudioRef.current.src = url;
-    sampleAudioRef.current.play().catch(() => {});
-  };
-
   const isLineMode = mode === 'line' && !!line;
   const attachedLangs = isLineMode ? (Object.keys(line!.voiceAssetIds ?? {}) as Locale[]) : [];
   const attachedId = isLineMode ? line!.voiceAssetIds?.[lang] : undefined;
@@ -96,16 +91,16 @@ export default function VoiceLab({
   const attachedUrl = useAssetUrl(attachedId);
 
   const selectedVoice = voices.find((v) => v.voiceId === voiceId);
-  const bestSample = selectedVoice?.samples.find((s) => s.language === 'ko') ?? selectedVoice?.samples[0];
-  const styleOptions = selectedVoice?.styles ?? [];
+  // 감정 프리셋은 "선택한 모델"이 지원하는 것만 보여준다(같은 보이스라도 모델마다 지원 감정이 다를 수 있음).
+  const emotionPresets = selectedVoice?.models.find((m) => m.version === model)?.emotions ?? [];
   const text = isLineMode ? ((lang === baseLocale ? undefined : line!.i18n?.[lang]) ?? line!.text) : previewText;
 
   const loadVoices = async () => {
-    if (!supertoneKey) return;
+    if (!typecastKey) return;
     setLoadingVoices(true);
     setError('');
     try {
-      setVoices(await searchVoices({ language: lang }, supertoneKey));
+      setVoices(await listVoices({ model }, typecastKey));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -113,17 +108,14 @@ export default function VoiceLab({
     }
   };
 
-  const settings: VoiceSettings = { speed, pitchShift, pitchVariance, textGuidance };
+  const settings: VoiceSettings = { tempo, pitch, volume };
 
   const generate = async () => {
-    if (!supertoneKey || !voiceId || !sceneId || lineIndex === undefined) return;
+    if (!typecastKey || !voiceId || !sceneId || lineIndex === undefined) return;
     setBusy(true);
     setError('');
     try {
-      const result = await supertoneTTS(
-        { voiceId, text, language: lang, model: aiConfig.voice.defaultModel, style: style || undefined, settings },
-        supertoneKey,
-      );
+      const result = await typecastTTS({ voiceId, text, language: lang, model, emotion, intensity, settings }, typecastKey);
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       setAudioUrl(URL.createObjectURL(result.blob));
       setSeconds(result.seconds);
@@ -137,32 +129,23 @@ export default function VoiceLab({
     }
   };
 
-  // character 모드 전용 — 대사에 적용하지 않는 순수 미리듣기. 같은 설정 조합(보이스·감정·속도 등
-  // + 텍스트)이면 오디션 캐시에서 그대로 재생(크레딧 0), 없을 때만 실제 생성 후 캐싱한다.
+  // character 모드 전용 — 대사에 적용하지 않는 순수 미리듣기. 같은 설정 조합(보이스·모델·감정·
+  // 강도 + 텍스트)이면 오디션 캐시에서 그대로 재생(크레딧 0), 없을 때만 실제 생성 후 캐싱한다.
   const generatePreview = async () => {
-    if (!supertoneKey || !voiceId) return;
+    if (!typecastKey || !voiceId) return;
     setBusy(true);
     setError('');
     try {
-      const key = clipKey({
-        voiceId,
-        model: aiConfig.voice.defaultModel,
-        style: style || '',
-        speed,
-        pitchShift,
-        pitchVariance,
-        textGuidance,
-        text: previewText,
-      });
+      const key = clipKey({ voiceId, model, emotion, intensity, text: previewText });
       const cached = await getClip(key);
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       if (cached) {
         setAudioUrl(URL.createObjectURL(cached));
         setFromCache(true);
       } else {
-        const result = await supertoneTTS(
-          { voiceId, text: previewText, language: lang, model: aiConfig.voice.defaultModel, style: style || undefined, settings },
-          supertoneKey,
+        const result = await typecastTTS(
+          { voiceId, text: previewText, language: lang, model, emotion, intensity, settings },
+          typecastKey,
         );
         await putClip(key, result.blob).catch(() => {});
         setAudioUrl(URL.createObjectURL(result.blob));
@@ -178,7 +161,7 @@ export default function VoiceLab({
 
   const saveToCharacter = () => {
     if (!voiceId) return;
-    updateChar(char.name, { voice: { voiceId, style: style || undefined, settings } });
+    updateChar(char.name, { voice: { voiceId, model, emotion, intensity, settings } });
   };
 
   const attachToLine = async (blob: Blob) => {
@@ -204,9 +187,9 @@ export default function VoiceLab({
     <div className="card border-edge p-2.5 mt-1.5 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center justify-between">
         <span className="label">
-          {mode === 'character' ? `🎤 ${char.name} 보이스 설정` : `🎙 ${char.name} 보이스 테스트 (Supertone)`}
+          {mode === 'character' ? `🎤 ${char.name} 보이스 설정` : `🎙 ${char.name} 보이스 테스트 (Typecast)`}
         </span>
-        {!supertoneKey && (
+        {!typecastKey && (
           <span className="text-[10px] text-amber-600">키 없음 — 왼쪽 패널에서 입력하세요</span>
         )}
         {mode === 'character' && onClose && (
@@ -227,7 +210,7 @@ export default function VoiceLab({
         </div>
       )}
 
-      {supertoneKey && (
+      {typecastKey && (
         <>
           {mode === 'character' ? (
             <div className="flex items-center gap-1.5">
@@ -263,6 +246,18 @@ export default function VoiceLab({
           )}
 
           <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-gray-500 w-11 shrink-0">모델</span>
+            <select
+              className="field text-xs"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+            >
+              <option value="ssfm-v30">ssfm-v30</option>
+              <option value="ssfm-v21">ssfm-v21</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
             <span className="text-[10px] text-gray-500 w-11 shrink-0">음성</span>
             {voices.length > 0 ? (
               <select className="field flex-1 text-xs" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
@@ -277,41 +272,32 @@ export default function VoiceLab({
             ) : (
               <input
                 className="field flex-1 text-xs"
-                placeholder="voice_id 직접 입력(Supertone 콘솔에서 복사)"
+                placeholder="voice_id 직접 입력(tc_/uc_ 접두사, Typecast 대시보드에서 복사)"
                 value={voiceId}
                 onChange={(e) => setVoiceId(e.target.value)}
               />
             )}
-            {bestSample?.url && (
-              <button
-                className="btn-ghost text-[11px] shrink-0"
-                onClick={() => playSample(bestSample.url)}
-                title="이 보이스의 사전 녹음 무료 샘플을 재생합니다(크레딧 0)"
-              >
-                ▶ 무료 샘플
-              </button>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-gray-500 w-11 shrink-0">감정</span>
+            <select className="field flex-1 text-xs" value={emotion} onChange={(e) => setEmotion(e.target.value)}>
+              <option value={SMART_EMOTION}>스마트(문맥 자동)</option>
+              {emotionPresets.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+            {emotion !== SMART_EMOTION && (
+              <VoiceSlider label="강도" value={intensity} min={0} max={2} step={0.1} onChange={setIntensity} />
             )}
           </div>
 
-          {styleOptions.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-gray-500 w-11 shrink-0">감정</span>
-              <select className="field flex-1 text-xs" value={style} onChange={(e) => setStyle(e.target.value)}>
-                <option value="">기본</option>
-                {styleOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-            <VoiceSlider label="속도" value={speed} min={0.5} max={2} step={0.05} onChange={setSpeed} />
-            <VoiceSlider label="음높이" value={pitchShift} min={-24} max={24} step={1} onChange={setPitchShift} />
-            <VoiceSlider label="억양변화" value={pitchVariance} min={0} max={2} step={0.1} onChange={setPitchVariance} />
-            <VoiceSlider label="감정강도" value={textGuidance} min={0} max={4} step={0.1} onChange={setTextGuidance} />
+            <VoiceSlider label="속도" value={tempo} min={0.5} max={2} step={0.05} onChange={setTempo} />
+            <VoiceSlider label="음높이" value={pitch} min={-12} max={12} step={1} onChange={setPitch} />
+            <VoiceSlider label="음량" value={volume} min={0} max={200} step={5} onChange={setVolume} />
           </div>
 
           {error && <p className="text-[11px] text-rose-500">{error}</p>}
@@ -348,7 +334,7 @@ export default function VoiceLab({
               <audio src={audioUrl} controls autoPlay className="flex-1 h-8" />
               {mode === 'character' ? (
                 <span className={`text-[10px] shrink-0 ${fromCache ? 'text-emerald-600' : 'text-gray-500'}`}>
-                  {fromCache ? '캐시 재생(크레딧 0)' : `새로 생성 · ${seconds.toFixed(1)}s`}
+                  {fromCache ? '캐시 재청취(크레딧 0)' : `새로 생성 · ${seconds.toFixed(1)}s`}
                 </span>
               ) : (
                 <span className="text-[10px] text-gray-500 shrink-0">{seconds.toFixed(1)}s</span>
@@ -377,9 +363,10 @@ export default function VoiceLab({
           <p className="text-[10px] text-gray-500 leading-relaxed">
             {mode === 'character' ? (
               <>
-                여기서 생성하는 건 <b className="text-gray-400">미리듣기 전용</b>이며 대사에 적용되지 않습니다(같은
-                설정 조합이면 재생성 없이 캐시를 재생 — 크레딧 절약). "💾 저장 후 닫기"를 눌러야 이 보이스
-                레시피가 캐릭터에 남고, 그래야 "전체 대사 일괄 생성"이 이 설정을 씁니다.
+                "▶ 미리듣기"는 <b className="text-gray-400">실제 생성</b>이라 텍스트 길이만큼 소액 크레딧이
+                듭니다(Typecast 보이스 목록엔 무료 사전 샘플이 없음). 단, 같은 설정 조합(보이스·모델·감정·
+                강도+텍스트)이면 <b className="text-gray-400">캐시에서 재청취는 크레딧 0</b>입니다. "💾 저장 후
+                닫기"를 눌러야 이 보이스 레시피가 캐릭터에 남고, 그래야 "전체 대사 일괄 생성"이 이 설정을 씁니다.
               </>
             ) : (
               <>

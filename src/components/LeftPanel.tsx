@@ -9,7 +9,7 @@ import { hasEnvCredentials, generateRoomCode } from '../collab';
 import { DEFAULT_FONT, getCachedCatalog, loadFontCatalog } from '../fonts/fontCatalog';
 import type { FontPreset } from '../fonts/fontCatalog';
 import { loadFontFace } from '../fonts/fontCache';
-import { getCredits } from '../generators/voice/supertoneProvider';
+import { getSubscription, type Subscription } from '../generators/voice/typecastProvider';
 import { parseText, parseWorkbook } from '../parser';
 import type { BuildResult } from '../parser';
 import { previewMerge, type AnalyzeMode, type MergePreview } from '../project/mergeScenes';
@@ -26,8 +26,8 @@ export default function LeftPanel() {
   const clearGenerated = useStore((s) => s.clearGeneratedAssets);
   const openaiKey = useStore((s) => s.openaiKey);
   const setOpenaiKey = useStore((s) => s.setOpenaiKey);
-  const supertoneKey = useStore((s) => s.supertoneKey);
-  const setSupertoneKey = useStore((s) => s.setSupertoneKey);
+  const typecastKey = useStore((s) => s.typecastKey);
+  const setTypecastKey = useStore((s) => s.setTypecastKey);
   const translateMode = translateModeOf(project);
   const setTranslateMode = useStore((s) => s.setTranslateMode);
   const exportProject = useStore((s) => s.exportProject);
@@ -37,8 +37,8 @@ export default function LeftPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const projFileRef = useRef<HTMLInputElement>(null);
   const [showOaiKey, setShowOaiKey] = useState(false);
-  const [showSupertoneKey, setShowSupertoneKey] = useState(false);
-  const [credits, setCredits] = useState<number>();
+  const [showTypecastKey, setShowTypecastKey] = useState(false);
+  const [subscription, setSubscription] = useState<Subscription>();
   const [creditsError, setCreditsError] = useState('');
   const [checkingCredits, setCheckingCredits] = useState(false);
   // 재분석(엑셀/텍스트) 결과가 파싱됐지만 기존 장면 처리 방식을 아직 못 고른 상태(모달 표시 중).
@@ -90,11 +90,11 @@ export default function LeftPanel() {
 
   // 일괄 생성 전에 잔량을 미리 보고 감을 잡을 수 있도록(자동 폴링은 안 함 — 클릭 시에만 호출).
   const checkCredits = async () => {
-    if (!supertoneKey) return;
+    if (!typecastKey) return;
     setCheckingCredits(true);
     setCreditsError('');
     try {
-      setCredits(await getCredits(supertoneKey));
+      setSubscription(await getSubscription(typecastKey));
     } catch (e) {
       setCreditsError((e as Error).message);
     } finally {
@@ -280,38 +280,45 @@ export default function LeftPanel() {
 
       <Divider />
 
-      {/* Supertone 키 — 히로인 대사 성우(TTS) 테스트용. CORS 때문에 /api/supertone 프록시를 거친다. */}
+      {/* Typecast 키 — 히로인 대사 성우(TTS) 테스트용. CORS 때문에 /api/typecast 프록시를 거친다. */}
       <section className="flex flex-col gap-2">
-        <h2 className="section-title">Supertone 키 · 선택 (성우 TTS 테스트)</h2>
+        <h2 className="section-title">Typecast 키 · 선택 (성우 TTS 테스트)</h2>
         <p className="text-[11px] text-gray-500 leading-snug">
           히로인 대사 옆 🎙 버튼으로 실제 음성을 생성·재생해볼 수 있습니다(주인공·나레이션은 성우 없음).{' '}
           <b className="text-gray-400">키는 이 브라우저에만 저장</b>되며, 호출은 CORS 우회용 프록시(
-          <code className="text-accent">/api/supertone</code>)를 거칠 뿐 서버에 저장되지 않습니다.
+          <code className="text-accent">/api/typecast</code>)를 거칠 뿐 서버에 저장되지 않습니다.
+          키는 <b className="text-gray-400">typecast.ai 대시보드</b>에서 발급하며, Free 플랜은 월
+          3만 크레딧까지 무료입니다(1글자=1크레딧).
         </p>
         <div className="flex gap-2">
           <input
-            type={showSupertoneKey ? 'text' : 'password'}
+            type={showTypecastKey ? 'text' : 'password'}
             className="field flex-1"
-            placeholder="Supertone API 키"
-            value={supertoneKey}
-            onChange={(e) => setSupertoneKey(e.target.value)}
+            placeholder="Typecast API 키"
+            value={typecastKey}
+            onChange={(e) => setTypecastKey(e.target.value)}
           />
-          <button className="btn-ghost" onClick={() => setShowSupertoneKey((v) => !v)}>
-            {showSupertoneKey ? '숨김' : '표시'}
+          <button className="btn-ghost" onClick={() => setShowTypecastKey((v) => !v)}>
+            {showTypecastKey ? '숨김' : '표시'}
           </button>
         </div>
         <div
-          className={`text-[11px] flex items-center gap-1.5 ${supertoneKey ? 'text-emerald-600' : 'text-gray-500'}`}
+          className={`text-[11px] flex items-center gap-1.5 ${typecastKey ? 'text-emerald-600' : 'text-gray-500'}`}
         >
-          <span className={`w-1.5 h-1.5 rounded-full ${supertoneKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
-          {supertoneKey ? '키 저장됨 · 성우 테스트 켜짐' : '키 없음 · 성우 테스트 꺼짐'}
+          <span className={`w-1.5 h-1.5 rounded-full ${typecastKey ? 'bg-emerald-400' : 'bg-gray-600'}`} />
+          {typecastKey ? '키 저장됨 · 성우 테스트 켜짐' : '키 없음 · 성우 테스트 꺼짐'}
         </div>
-        {supertoneKey && (
+        {typecastKey && (
           <div className="flex items-center gap-1.5 text-[11px]">
             <button className="btn-ghost !py-0.5" disabled={checkingCredits} onClick={checkCredits}>
               {checkingCredits ? <Spinner /> : '🔍 크레딧 확인'}
             </button>
-            {credits !== undefined && <span className="text-gray-400">잔여 크레딧: {credits}</span>}
+            {subscription && (
+              <span className="text-gray-400">
+                {subscription.plan} 플랜 · 잔여 크레딧: {subscription.planCredits - subscription.usedCredits} /{' '}
+                {subscription.planCredits}
+              </span>
+            )}
             {creditsError && <span className="text-rose-500">{creditsError}</span>}
           </div>
         )}

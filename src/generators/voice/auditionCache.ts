@@ -24,19 +24,14 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-/** 같은 설정 조합(보이스·모델·감정·속도 등 + 텍스트)이면 재생성 없이 캐시를 재생한다(크레딧 0). */
-export function clipKey(params: {
-  voiceId: string;
-  model: string;
-  style: string;
-  speed: number;
-  pitchShift: number;
-  pitchVariance: number;
-  textGuidance: number;
-  text: string;
-}): string {
-  const { voiceId, model, style, speed, pitchShift, pitchVariance, textGuidance, text } = params;
-  return [voiceId, model, style, speed, pitchShift, pitchVariance, textGuidance, text].join('|');
+/**
+ * 같은 설정 조합(보이스·모델·감정·강도 + 텍스트)이면 재생성 없이 캐시를 재생한다(크레딧 0).
+ * ⚠️ tempo/pitch/volume 은 캐시 키에 포함하지 않는다(마이그레이션 플랜 명시 — 감정 프리셋 위주
+ * 오디션이 목적). 슬라이더만 바꿔서 다시 들으면 캐시가 이전 설정 그대로 재생될 수 있음에 유의.
+ */
+export function clipKey(params: { voiceId: string; model: string; emotion: string; intensity: number; text: string }): string {
+  const { voiceId, model, emotion, intensity, text } = params;
+  return [voiceId, model, emotion, intensity, text].join('|');
 }
 
 export async function getClip(key: string): Promise<Blob | undefined> {

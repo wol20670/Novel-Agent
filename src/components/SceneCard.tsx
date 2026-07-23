@@ -291,7 +291,7 @@ function LineRow({
               e.stopPropagation();
               setVoiceOpen((v) => !v);
             }}
-            title="성우 음성 테스트(Supertone)"
+            title="성우 음성 테스트(Typecast)"
           >
             🎙
           </button>

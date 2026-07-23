@@ -19,19 +19,15 @@ export interface AiConfig {
     temperature: number;
   };
   /**
-   * 성우(TTS) — Supertone. CORS 문제로 브라우저 직접 호출 대신 같은 origin의
-   * Vercel Edge 함수(api/supertone, 로컬은 vite dev 프록시)를 통해 중계한다.
-   * 키(x-sup-api-key)는 프록시가 저장 없이 그대로 통과시킨다(BYO 키 원칙 유지).
+   * 성우(TTS) — Typecast(https://typecast.ai/docs/api-reference). CORS 문제로 브라우저 직접
+   * 호출 대신 같은 origin의 Vercel Edge 함수(api/typecast, 로컬은 vite dev 프록시)를 통해
+   * 중계한다. 키(X-API-KEY)는 프록시가 저장 없이 그대로 통과시킨다(BYO 키 원칙 유지).
+   * 과금이 "1글자 = 1크레딧"으로 고정이라(문서 확인) 이전 TTS 벤더 때와 달리 크레딧/초 추정치·실측
+   * 보정이 필요 없다 — 글자수 합이 곧 정확한 견적(src/generators/voice/estimate.ts).
    */
   voice: {
     proxyBase: string;
     defaultModel: string;
-    /**
-     * 크레딧/초 기본값(실측 없을 때만 사용) — Creator 플랜 100,000크레딧 ≈ 150분(9000초) 환산 추정치.
-     * 정확한 단가는 비공개라 배치 생성 전후 실제 잔량 차이를 잴 때마다 recordMeasuredCreditsPerSec 로
-     * localStorage(novel-agent:creditsPerSec)에 보정값을 남기고, 다음 견적부턴 그 값을 우선한다.
-     */
-    defaultCreditsPerSec: number;
   };
 }
 
@@ -42,8 +38,7 @@ export const aiConfig: AiConfig = {
     temperature: 0.8,
   },
   voice: {
-    proxyBase: '/api/supertone',
-    defaultModel: 'sona_speech_2',
-    defaultCreditsPerSec: 100000 / 9000,
+    proxyBase: '/api/typecast',
+    defaultModel: 'ssfm-v30',
   },
 };

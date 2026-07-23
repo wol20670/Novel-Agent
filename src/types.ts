@@ -137,18 +137,24 @@ export interface Character {
    */
   i18nName?: I18nText;
   /**
-   * Supertone 성우 설정(선택) — 멘트별 보이스 테스트에서 마음에 든 값을 저장해두는 참고용
+   * Typecast 성우 설정(선택) — 멘트별 보이스 테스트에서 마음에 든 값을 저장해두는 참고용
    * 프리필(주인공·나레이션은 성우가 필요 없어 보통 비워둔다). 오디오 자체는 저장하지 않는다.
+   * ⚠️ TTS 벤더 이관(2026-07)으로 스키마가 바뀌었다 — 옛 프로젝트의 이전 벤더 voiceId(접두사
+   * 없음)·style·speed 등은 자동 변환하지 않는다(프로바이더가 달라 거짓 호환만 만든다). voiceId 가
+   * tc_/uc_ 접두사가 아니면 UI 에서 "재설정 필요"로 표시한다.
    */
   voice?: {
+    /** Typecast voice_id. 정식 보이스는 tc_, 클론한 커스텀 보이스는 uc_ 접두사. */
     voiceId: string;
     model?: string;
-    style?: string;
+    /** 'smart'(문맥 자동) 또는 감정 프리셋 이름(normal/happy/sad/angry/whisper/toneup/tonedown 등). */
+    emotion?: string;
+    /** emotion 이 프리셋일 때만 의미 있음. 0~2. */
+    intensity?: number;
     settings?: {
-      speed?: number;
-      pitchShift?: number;
-      pitchVariance?: number;
-      textGuidance?: number;
+      tempo?: number;
+      pitch?: number;
+      volume?: number;
     };
   };
   /**
@@ -157,6 +163,11 @@ export interface Character {
    * 혼자 등장하면 side 와 무관하게 항상 중앙(scenePositions 참고).
    */
   side?: 'left' | 'right' | 'auto';
+}
+
+/** Typecast voice_id 형식(tc_/uc_ 접두사)인지 — 아니면 옛 벤더 프리셋 등 "재설정 필요". */
+export function isTypecastVoiceId(voiceId: string | undefined): boolean {
+  return !!voiceId && (voiceId.startsWith('tc_') || voiceId.startsWith('uc_'));
 }
 
 export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice' | 'item';

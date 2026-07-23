@@ -7,6 +7,7 @@ import {
   LOCALE_LABEL,
   emojiFor,
   characterOutfits,
+  isTypecastVoiceId,
   type Expression,
   type Scene,
 } from '../types';
@@ -203,16 +204,15 @@ function CleanupSection() {
 
 /**
  * 🎙 성우(TTS) 비용·검수 — 캐릭터별 카드가 아니라 프로젝트 전체를 다루는 액션 모음.
- *  - 💡 비용 계산: Predict Duration(무료)으로 예상 크레딧을 미리 가늠(일부만 샘플링).
+ *  - 💡 비용 계산: 글자수 기반 즉시 계산(1글자=1크레딧, API 호출 0회) — 키가 없어도 동작한다.
  *  - 전체 캐릭터 일괄 생성: 프리셋이 저장된 모든 캐릭터를 순차 생성(캐릭터마다 확인창이 다시
  *    뜨지 않게 한 번만 확인).
  *  - 🎧 검수 시작: 생성된 음성을 이어 들으며 검수(VoiceReview).
  */
 function VoiceSection() {
   const project = useStore((s) => s.project);
-  const supertoneKey = useStore((s) => s.supertoneKey);
+  const typecastKey = useStore((s) => s.typecastKey);
   const voiceEstimate = useStore((s) => s.voiceEstimate);
-  const estimating = useStore((s) => !!s.busy['estimate:voice']);
   const batchAllBusy = useStore((s) => !!s.busy['batch:voice:all']);
   const estimateVoiceCost = useStore((s) => s.estimateVoiceCost);
   const batchVoiceAll = useStore((s) => s.batchVoiceAll);
@@ -228,20 +228,21 @@ function VoiceSection() {
     <section>
       <h3 className="section-title mb-1">🎙 성우(TTS) 비용·검수</h3>
       <p className="text-xs text-gray-500 mb-3">
-        생성 전 무료 예측(Predict Duration)으로 대략적인 크레딧 소모량을 가늠하고, 생성 후엔 이어듣기로 검수하세요.
+        생성 전 글자수 기반 즉시 견적(1자=1크레딧, 키 불필요)으로 정확한 크레딧을 확인하고, 생성 후엔
+        이어듣기로 검수하세요.
       </p>
       <div className="flex flex-wrap items-center gap-2 mb-2">
         <button
           className="btn-ghost text-xs"
-          disabled={!supertoneKey || !hasAnyPreset || estimating}
-          onClick={() => void estimateVoiceCost()}
-          title="Predict Duration(무료)으로 예상 크레딧을 계산합니다 — 대사가 많으면 일부만 샘플링해 빠르게 추정합니다"
+          disabled={!hasAnyPreset}
+          onClick={estimateVoiceCost}
+          title="글자수 합계로 예상 크레딧을 즉시 계산합니다(1자=1크레딧, 정확값 — 키가 없어도 동작)"
         >
-          {estimating ? <Spinner /> : '💡 비용 계산'}
+          💡 비용 계산
         </button>
         <button
           className="btn-ghost text-xs"
-          disabled={!supertoneKey || !hasAnyPreset || batchAllBusy}
+          disabled={!typecastKey || !hasAnyPreset || batchAllBusy}
           onClick={() => void batchVoiceAll(base)}
           title="보이스 프리셋이 저장된 모든 캐릭터의 남은 대사를 순차 생성합니다"
         >
@@ -258,11 +259,11 @@ function VoiceSection() {
       </div>
       {voiceEstimate && (
         <p className="text-[11px] text-gray-400">
-          예상 약 {Math.ceil(voiceEstimate.totalCredits)}크레딧 · {Math.round(voiceEstimate.totalSeconds)}초 ·{' '}
+          정확히 {voiceEstimate.totalCredits}크레딧 · 약 {Math.round(voiceEstimate.totalSeconds)}초 ·{' '}
           {voiceEstimate.totalLines}줄
           {voiceEstimate.noPreset.length > 0 && ` · 프리셋 없음: ${voiceEstimate.noPreset.join(', ')}`}
           {voiceEstimate.overLimit.length > 0 && (
-            <span className="text-amber-600"> · 300자 초과 {voiceEstimate.overLimit.length}줄(생성 실패 가능)</span>
+            <span className="text-amber-600"> · 2000자 초과 {voiceEstimate.overLimit.length}줄(생성 실패 가능)</span>
           )}
         </p>
       )}
@@ -490,12 +491,19 @@ function CharacterCard({ name }: { name: string }) {
           목소리 설정
         </button>
         {c.voice ? (
-          <span
-            className="chip border-edge text-gray-400"
-            title={`voice_id: ${c.voice.voiceId}`}
-          >
-            {c.voice.style ? `${c.voice.style} · ` : ''}속도 {c.voice.settings?.speed ?? 1}
-          </span>
+          isTypecastVoiceId(c.voice.voiceId) ? (
+            <span className="chip border-edge text-gray-400" title={`voice_id: ${c.voice.voiceId}`}>
+              {c.voice.emotion && c.voice.emotion !== 'smart' ? `${c.voice.emotion} · ` : ''}
+              속도 {c.voice.settings?.tempo ?? 1}
+            </span>
+          ) : (
+            <span
+              className="chip border-amber-500/50 text-amber-600"
+              title={`voice_id: ${c.voice.voiceId} — 이전 TTS 서비스 프리셋은 그대로 못 씁니다`}
+            >
+              ⚠️ 재설정 필요(Typecast)
+            </span>
+          )
         ) : (
           <span className="chip border-amber-500/50 text-amber-600">미설정</span>
         )}
