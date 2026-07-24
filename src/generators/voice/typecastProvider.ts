@@ -164,10 +164,23 @@ export async function typecastTTS(params: TtsParams, apiKey: string): Promise<Tt
  * 보이스 목록 조회(드롭다운용). GET /v2/voices — 문서 확인분 필드: voice_id/voice_name/models[]
  * (models[].version·models[].emotions[])/gender/age/use_cases/voice_type. 페이징 없음(전체 반환).
  * 응답 스키마가 문서와 다를 가능성에 대비해 여러 후보 필드명을 방어적으로 시도한다.
+ *
+ * opts 의 gender/age/useCase 는 서버 쿼리(gender/age/use_cases)로 그대로 전달할 수 있게 구현은
+ * 해두지만(단위테스트 대상), 실제 UI(VoiceLab)는 전체 목록을 한 번만 받아 **클라이언트에서 필터링**한다
+ * (getAllVoices 참고) — 토글마다 재요청하지 않아 API 호출을 아끼고 필터 반응이 즉각적이다.
+ * enum(문서 WebFetch 로 확정, 2026-07-24): gender=male|female,
+ * age=child|teenager|young_adult|middle_age|elder,
+ * useCase=Announcer|Anime|Audiobook|Conversational|Documentary|E-learning|Rapper|Game|Tiktok/Reels|News|Podcast|Voicemail|Ads.
  */
-export async function listVoices(opts: { model?: string }, apiKey: string): Promise<TtsVoice[]> {
+export async function listVoices(
+  opts: { model?: string; gender?: string; age?: string; useCase?: string },
+  apiKey: string,
+): Promise<TtsVoice[]> {
   const query: Record<string, string> = {};
   if (opts.model) query.model = opts.model;
+  if (opts.gender) query.gender = opts.gender;
+  if (opts.age) query.age = opts.age;
+  if (opts.useCase) query.use_cases = opts.useCase;
   const res = await fetch(proxyUrl('v2/voices', query), {
     headers: { 'X-API-KEY': apiKey },
   });
@@ -203,6 +216,68 @@ export async function listVoices(opts: { model?: string }, apiKey: string): Prom
       voiceType: typeof v.voice_type === 'string' ? v.voice_type : undefined,
     };
   });
+}
+
+// ── 전체 보이스 목록 모듈 캐시 ──────────────────────────────────────────────
+// GET /v2/voices 는 700+개를 반환하는 정적 데이터(자주 안 바뀜)라, 필터 없이 세션당 1회만
+// fetch 하고 이후 필터 토글은 이 배열을 클라이언트에서 걸러 쓴다(VoiceLab). 키가 바뀌면
+// (다른 프로젝트로 전환 등) 캐시를 무효화한다. 실패한 요청은 캐시하지 않아 재시도가 자연히 된다.
+let voiceCache: { key: string; promise: Promise<TtsVoice[]> } | null = null;
+
+/** 필터 없는 전체 보이스 목록을 모듈 캐시로 반환(같은 apiKey 로 재호출하면 네트워크 없이 즉시). */
+export function getAllVoices(apiKey: string): Promise<TtsVoice[]> {
+  if (voiceCache && voiceCache.key === apiKey) return voiceCache.promise;
+  const promise = listVoices({}, apiKey);
+  // 실패 시 다음 호출에서 재시도할 수 있게 캐시를 비운다(빈 배열/에러를 영구히 캐시하지 않음).
+  promise.catch(() => {
+    if (voiceCache?.promise === promise) voiceCache = null;
+  });
+  voiceCache = { key: apiKey, promise };
+  return promise;
+}
+
+/** 테스트·키 변경 시 강제 무효화용(단위테스트에서 모듈 상태를 리셋할 때 사용). */
+export function clearVoiceCache(): void {
+  voiceCache = null;
+}
+
+export interface VoiceRecommendation {
+  voiceId: string;
+  name: string;
+  score: number;
+}
+
+/**
+ * 자연어 설명으로 보이스 추천. GET /v1/voices/recommendations?query=&limit= — 문서 확인분 응답
+ * 필드: voice_id/voice_name/score(플랜 조사 결과, 2026-07-24). 메타(성별·나이 등)는 응답에 없어
+ * 호출측이 getAllVoices 결과와 voiceId 로 조인해 보강해야 한다. 응답 스키마가 문서와 다를 가능성에
+ * 대비해 여러 후보 필드명 + 감싼 형태({voices:[...]} 등)를 방어적으로 시도한다.
+ */
+export async function recommendVoices(query: string, limit: number, apiKey: string): Promise<VoiceRecommendation[]> {
+  const res = await fetch(proxyUrl('v1/voices/recommendations', { query, limit: String(limit) }), {
+    headers: { 'X-API-KEY': apiKey },
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const j = await res.json();
+  const items: unknown[] = Array.isArray(j)
+    ? j
+    : Array.isArray(j?.voices)
+      ? j.voices
+      : Array.isArray(j?.recommendations)
+        ? j.recommendations
+        : Array.isArray(j?.items)
+          ? j.items
+          : [];
+  return items
+    .map((raw): VoiceRecommendation => {
+      const v = raw as Record<string, unknown>;
+      return {
+        voiceId: String(v.voice_id ?? v.voiceId ?? ''),
+        name: String(v.voice_name ?? v.voiceName ?? v.name ?? '(이름 없음)'),
+        score: Number(v.score ?? 0) || 0,
+      };
+    })
+    .filter((r) => r.voiceId); // voice_id 없는 항목은 선택 불가하니 애초에 제외.
 }
 
 /**

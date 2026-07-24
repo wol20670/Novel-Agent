@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { aiConfig } from '../config/aiConfig';
-import { typecastTTS, listVoices, type TtsVoice, type VoiceSettings } from '../generators/voice/typecastProvider';
+import {
+  typecastTTS,
+  getAllVoices,
+  recommendVoices,
+  type TtsVoice,
+  type VoiceSettings,
+  type VoiceRecommendation,
+} from '../generators/voice/typecastProvider';
 import { getClip, putClip, clipKey } from '../generators/voice/auditionCache';
 import { LOCALE_LABEL, type Character, type Line, type Locale } from '../types';
 import Spinner from './Spinner';
@@ -11,6 +18,46 @@ import { useAssetUrl } from './useAssetUrl';
 type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
 
 const SMART_EMOTION = 'smart';
+
+// GET /v2/voices 필터 enum(문서 WebFetch 로 확정, 2026-07-24) — 필터 select 옵션 구성용.
+const GENDER_OPTIONS: { value: string; label: string }[] = [
+  { value: 'male', label: '남성' },
+  { value: 'female', label: '여성' },
+];
+const AGE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'child', label: '아동' },
+  { value: 'teenager', label: '청소년' },
+  { value: 'young_adult', label: '청년' },
+  { value: 'middle_age', label: '중년' },
+  { value: 'elder', label: '노년' },
+];
+// Anime·Game 을 목록 위쪽에 — 비주얼노벨 제작 도구 특성상 가장 자주 찾을 용도라 우선 노출.
+const USE_CASE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'Anime', label: '애니메이션' },
+  { value: 'Game', label: '게임' },
+  { value: 'Announcer', label: '아나운서' },
+  { value: 'Audiobook', label: '오디오북' },
+  { value: 'Conversational', label: '대화' },
+  { value: 'Documentary', label: '다큐멘터리' },
+  { value: 'E-learning', label: '이러닝' },
+  { value: 'Rapper', label: '랩' },
+  { value: 'Tiktok/Reels', label: '틱톡/릴스' },
+  { value: 'News', label: '뉴스' },
+  { value: 'Podcast', label: '팟캐스트' },
+  { value: 'Voicemail', label: '보이스메일' },
+  { value: 'Ads', label: '광고' },
+];
+const GENDER_LABEL: Record<string, string> = Object.fromEntries(GENDER_OPTIONS.map((o) => [o.value, o.label]));
+const AGE_LABEL: Record<string, string> = Object.fromEntries(AGE_OPTIONS.map((o) => [o.value, o.label]));
+
+/** select 옵션 한 줄 표시용: 이름 · 성별 · 나이 · 용도(첫 항목만, 여러 개면 대표 1개). */
+function voiceLabel(v: TtsVoice): string {
+  const parts = [v.name];
+  if (v.gender) parts.push(GENDER_LABEL[v.gender] ?? v.gender);
+  if (v.age) parts.push(AGE_LABEL[v.age] ?? v.age);
+  if (v.useCases?.length) parts.push(v.useCases[0]);
+  return parts.join(' · ');
+}
 
 /**
  * Typecast 성우 테스트 패널 — 두 가지 모드로 쓰인다.
@@ -52,6 +99,8 @@ export default function VoiceLab({
   // (내부 함수들은 en/ja 도 받을 수 있게 locale 로 유지, 화면에만 노출 안 함).
   const [lang, setLang] = useState<Locale>(baseLocale);
   const [voiceId, setVoiceId] = useState(char.voice?.voiceId ?? '');
+  // 표시 전용(하위호환 optional) — 카드 요약 칩에 쓰려고 저장 시 이름도 함께 남긴다.
+  const [voiceName, setVoiceName] = useState<string | undefined>(char.voice?.voiceName);
   const [model, setModel] = useState(char.voice?.model || aiConfig.voice.defaultModel);
   const [emotion, setEmotion] = useState(char.voice?.emotion ?? SMART_EMOTION);
   const [intensity, setIntensity] = useState(char.voice?.intensity ?? 1);
@@ -74,6 +123,17 @@ export default function VoiceLab({
 
   const [voices, setVoices] = useState<TtsVoice[]>([]);
   const [loadingVoices, setLoadingVoices] = useState(false);
+  // 성별/나이/용도 필터(클라이언트 필터 — 전체 목록은 이미 로드돼 있어 즉시 반응). 직접 입력 토글은
+  // 목록 로딩 실패 시 자동으로도 켜진다(폴백).
+  const [genderFilter, setGenderFilter] = useState('');
+  const [ageFilter, setAgeFilter] = useState('');
+  const [useCaseFilter, setUseCaseFilter] = useState('');
+  const [manualEntry, setManualEntry] = useState(false);
+  // ✨ 자연어 추천 검색(GET v1/voices/recommendations) 상태.
+  const [recQuery, setRecQuery] = useState('');
+  const [recBusy, setRecBusy] = useState(false);
+  const [recResults, setRecResults] = useState<VoiceRecommendation[]>([]);
+  const [recError, setRecError] = useState('');
   const [audioUrl, setAudioUrl] = useState<string>();
   const [seconds, setSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -95,16 +155,61 @@ export default function VoiceLab({
   const emotionPresets = selectedVoice?.models.find((m) => m.version === model)?.emotions ?? [];
   const text = isLineMode ? ((lang === baseLocale ? undefined : line!.i18n?.[lang]) ?? line!.text) : previewText;
 
-  const loadVoices = async () => {
+  // 패널이 열리면(마운트 시) 키가 있는 한 자동으로 전체 목록을 로드한다 — 모듈 캐시 히트면 사실상
+  // 즉시 반영(getAllVoices). 예전엔 "🔍 음성 검색"을 직접 눌러야만 select 로 바뀌는 수동 구조였는데,
+  // 실패하면 "직접 입력"으로 자동 강등해 최소한 voice_id 를 손으로 넣어 계속 진행할 수 있게 한다.
+  useEffect(() => {
     if (!typecastKey) return;
+    let cancelled = false;
     setLoadingVoices(true);
     setError('');
+    getAllVoices(typecastKey)
+      .then((list) => {
+        if (!cancelled) setVoices(list);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError((e as Error).message);
+          setManualEntry(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingVoices(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [typecastKey]);
+
+  // 필터는 서버에 다시 묻지 않고 이미 받아둔 전체 목록을 클라이언트에서 거른다(즉각 반응).
+  const filteredVoices = voices.filter(
+    (v) =>
+      (!genderFilter || v.gender === genderFilter) &&
+      (!ageFilter || v.age === ageFilter) &&
+      (!useCaseFilter || v.useCases?.includes(useCaseFilter)),
+  );
+
+  const pickVoice = (id: string, name: string | undefined) => {
+    setVoiceId(id);
+    setVoiceName(name);
+  };
+
+  // ✨ 자연어 추천 — 결과엔 메타(성별·나이)가 없어(문서 확인) 캐시된 전체 목록과 voiceId 로 조인해 보강.
+  const runRecommend = async () => {
+    if (!typecastKey || !recQuery.trim()) return;
+    setRecBusy(true);
+    setRecError('');
+    setRecResults([]);
     try {
-      setVoices(await listVoices({ model }, typecastKey));
+      const results = await recommendVoices(recQuery.trim(), 5, typecastKey);
+      setRecResults(results);
+      if (results.length === 0) {
+        setRecError('추천 결과가 없습니다 — 영어로 다시 시도해보세요(예: "warm friendly young woman").');
+      }
     } catch (e) {
-      setError((e as Error).message);
+      setRecError(`${(e as Error).message} — 영어 쿼리가 더 정확할 수 있어요.`);
     } finally {
-      setLoadingVoices(false);
+      setRecBusy(false);
     }
   };
 
@@ -161,7 +266,7 @@ export default function VoiceLab({
 
   const saveToCharacter = () => {
     if (!voiceId) return;
-    updateChar(char.name, { voice: { voiceId, model, emotion, intensity, settings } });
+    updateChar(char.name, { voice: { voiceId, voiceName, model, emotion, intensity, settings } });
   };
 
   const attachToLine = async (blob: Blob) => {
@@ -184,7 +289,11 @@ export default function VoiceLab({
   };
 
   return (
-    <div className="card border-edge p-2.5 mt-1.5 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
+    // character 모드는 이제 AssetsTab 이 오버레이 모달로 감싸므로(카드 인라인이 아님) 위쪽 여백이 필요 없다.
+    <div
+      className={`card border-edge p-2.5 flex flex-col gap-1.5 ${mode === 'line' ? 'mt-1.5' : ''}`}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="flex items-center justify-between">
         <span className="label">
           {mode === 'character' ? `🎤 ${char.name} 보이스 설정` : `🎙 ${char.name} 보이스 테스트 (Typecast)`}
@@ -221,9 +330,7 @@ export default function VoiceLab({
                 onChange={(e) => setPreviewText(e.target.value)}
                 placeholder="미리 들어볼 문장을 입력하세요"
               />
-              <button className="btn-ghost text-[11px]" onClick={loadVoices} disabled={loadingVoices}>
-                {loadingVoices ? <Spinner /> : '🔍 음성 검색'}
-              </button>
+              {loadingVoices && <Spinner />}
             </div>
           ) : (
             <div className="flex items-center gap-1.5">
@@ -239,9 +346,7 @@ export default function VoiceLab({
                   </option>
                 ))}
               </select>
-              <button className="btn-ghost text-[11px]" onClick={loadVoices} disabled={loadingVoices}>
-                {loadingVoices ? <Spinner /> : '🔍 음성 검색'}
-              </button>
+              {loadingVoices && <Spinner />}
             </div>
           )}
 
@@ -257,25 +362,124 @@ export default function VoiceLab({
             </select>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-gray-500 w-11 shrink-0">음성</span>
-            {voices.length > 0 ? (
-              <select className="field flex-1 text-xs" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
-                <option value="">선택…</option>
-                {voices.map((v) => (
-                  <option key={v.voiceId} value={v.voiceId}>
-                    {v.name}
-                    {v.gender ? ` · ${v.gender}` : ''}
+          {!manualEntry && voices.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-gray-500 w-11 shrink-0">필터</span>
+              <select className="field text-xs" value={genderFilter} onChange={(e) => setGenderFilter(e.target.value)}>
+                <option value="">성별 전체</option>
+                {GENDER_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
                   </option>
                 ))}
               </select>
-            ) : (
+              <select className="field text-xs" value={ageFilter} onChange={(e) => setAgeFilter(e.target.value)}>
+                <option value="">나이 전체</option>
+                {AGE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <select className="field text-xs" value={useCaseFilter} onChange={(e) => setUseCaseFilter(e.target.value)}>
+                <option value="">용도 전체</option>
+                {USE_CASE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-gray-500 w-11 shrink-0">음성</span>
+            {manualEntry || (!loadingVoices && voices.length === 0) ? (
               <input
                 className="field flex-1 text-xs"
                 placeholder="voice_id 직접 입력(tc_/uc_ 접두사, Typecast 대시보드에서 복사)"
                 value={voiceId}
-                onChange={(e) => setVoiceId(e.target.value)}
+                onChange={(e) => pickVoice(e.target.value, undefined)}
               />
+            ) : (
+              <select
+                className="field flex-1 text-xs"
+                value={voiceId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  pickVoice(id, filteredVoices.find((v) => v.voiceId === id)?.name);
+                }}
+              >
+                <option value="">
+                  선택…{filteredVoices.length !== voices.length ? ` (필터됨 ${filteredVoices.length}개)` : ''}
+                </option>
+                {filteredVoices.map((v) => (
+                  <option key={v.voiceId} value={v.voiceId}>
+                    {voiceLabel(v)}
+                  </option>
+                ))}
+              </select>
+            )}
+            {voices.length > 0 && (
+              <button
+                type="button"
+                className="btn-ghost text-[10px] shrink-0"
+                onClick={() => setManualEntry((m) => !m)}
+              >
+                {manualEntry ? '목록에서 선택' : '직접 입력'}
+              </button>
+            )}
+          </div>
+
+          {/* ✨ 자연어 추천 — "밝고 씩씩한 10대 소녀" 처럼 설명하면 점수순 상위 5개를 보여준다.
+              결과 클릭 = 바로 선택(위 select/필터와 무관하게 즉시 voiceId 반영). */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-gray-500 w-11 shrink-0">✨ 추천</span>
+              <input
+                className="field flex-1 text-xs"
+                placeholder="예: 밝고 씩씩한 10대 소녀"
+                value={recQuery}
+                onChange={(e) => setRecQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') runRecommend();
+                }}
+              />
+              <button
+                type="button"
+                className="btn-ghost text-[11px] shrink-0"
+                disabled={!recQuery.trim() || recBusy}
+                onClick={runRecommend}
+              >
+                {recBusy ? <Spinner /> : '검색'}
+              </button>
+            </div>
+            {recError && <p className="text-[10px] text-amber-600">{recError}</p>}
+            {recResults.length > 0 && (
+              <div className="flex flex-col gap-0.5">
+                {recResults.map((r) => {
+                  const meta = voices.find((v) => v.voiceId === r.voiceId);
+                  const active = voiceId === r.voiceId;
+                  return (
+                    <button
+                      key={r.voiceId}
+                      type="button"
+                      className={`text-left text-[11px] rounded px-1.5 py-1 border transition-colors ${
+                        active ? 'border-accent bg-accent/10 text-accent' : 'border-edge hover:bg-panel2 text-gray-300'
+                      }`}
+                      onClick={() => {
+                        pickVoice(r.voiceId, r.name);
+                        setManualEntry(false);
+                      }}
+                    >
+                      {r.name}
+                      {meta?.gender ? ` · ${GENDER_LABEL[meta.gender] ?? meta.gender}` : ''}
+                      {meta?.age ? ` · ${AGE_LABEL[meta.age] ?? meta.age}` : ''}
+                      <span className="text-gray-500"> · 점수 {r.score.toFixed(2)}</span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
 
@@ -360,24 +564,28 @@ export default function VoiceLab({
             </div>
           )}
 
-          <p className="text-[10px] text-gray-500 leading-relaxed">
-            {mode === 'character' ? (
-              <>
-                "▶ 미리듣기"는 <b className="text-gray-400">실제 생성</b>이라 텍스트 길이만큼 소액 크레딧이
-                듭니다(Typecast 보이스 목록엔 무료 사전 샘플이 없음). 단, 같은 설정 조합(보이스·모델·감정·
-                강도+텍스트)이면 <b className="text-gray-400">캐시에서 재청취는 크레딧 0</b>입니다. "💾 저장 후
-                닫기"를 눌러야 이 보이스 레시피가 캐릭터에 남고, 그래야 "전체 대사 일괄 생성"이 이 설정을 씁니다.
-              </>
-            ) : (
-              <>
-                "▶ 생성"을 누르면 그 결과가 <b className="text-gray-400">자동으로 이 대사·이 언어에
-                바로 적용</b>됩니다(별도로 누를 버튼 없음 — Ren'Py 내보내기에 그대로 반영). 다시 생성하면
-                직전 것을 교체합니다. "💾 캐릭터에 저장"은 오디오와 무관하게, 다음에 이 캐릭터 대사를 열 때
-                프리필되는 보이스 설정 레시피만 남깁니다(전체 대사 일괄 생성이 이 레시피를 씀). 언어별로
-                따로 적용되고, 자막 언어와 무관하게 플레이어가 설정 화면에서 음성 언어만 골라 들을 수 있습니다.
-              </>
-            )}
-          </p>
+          {/* 긴 도움말은 접어서 패널 높이를 줄인다(카드가 넘치는 문제의 원인 중 하나였음). */}
+          <details className="text-[10px] text-gray-500">
+            <summary className="cursor-pointer select-none text-gray-400 hover:text-gray-300">ⓘ 도움말</summary>
+            <p className="leading-relaxed mt-1">
+              {mode === 'character' ? (
+                <>
+                  "▶ 미리듣기"는 <b className="text-gray-400">실제 생성</b>이라 텍스트 길이만큼 소액 크레딧이
+                  듭니다(Typecast 보이스 목록엔 무료 사전 샘플이 없음). 단, 같은 설정 조합(보이스·모델·감정·
+                  강도+텍스트)이면 <b className="text-gray-400">캐시에서 재청취는 크레딧 0</b>입니다. "💾 저장 후
+                  닫기"를 눌러야 이 보이스 레시피가 캐릭터에 남고, 그래야 "전체 대사 일괄 생성"이 이 설정을 씁니다.
+                </>
+              ) : (
+                <>
+                  "▶ 생성"을 누르면 그 결과가 <b className="text-gray-400">자동으로 이 대사·이 언어에
+                  바로 적용</b>됩니다(별도로 누를 버튼 없음 — Ren'Py 내보내기에 그대로 반영). 다시 생성하면
+                  직전 것을 교체합니다. "💾 캐릭터에 저장"은 오디오와 무관하게, 다음에 이 캐릭터 대사를 열 때
+                  프리필되는 보이스 설정 레시피만 남깁니다(전체 대사 일괄 생성이 이 레시피를 씀). 언어별로
+                  따로 적용되고, 자막 언어와 무관하게 플레이어가 설정 화면에서 음성 언어만 골라 들을 수 있습니다.
+                </>
+              )}
+            </p>
+          </details>
         </>
       )}
     </div>

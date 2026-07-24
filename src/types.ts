@@ -146,6 +146,11 @@ export interface Character {
   voice?: {
     /** Typecast voice_id. 정식 보이스는 tc_, 클론한 커스텀 보이스는 uc_ 접두사. */
     voiceId: string;
+    /**
+     * 보이스 표시 이름(선택, 표시 전용). VoiceLab 에서 저장할 때 목록 조회 결과와 함께 기록한다.
+     * 옛 프로젝트나 직접 입력 저장분엔 없을 수 있어 optional — 없으면 카드 요약 칩에서 voiceId 로 대체.
+     */
+    voiceName?: string;
     model?: string;
     /** 'smart'(문맥 자동) 또는 감정 프리셋 이름(normal/happy/sad/angry/whisper/toneup/tonedown 등). */
     emotion?: string;

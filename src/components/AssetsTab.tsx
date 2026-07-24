@@ -493,8 +493,8 @@ function CharacterCard({ name }: { name: string }) {
         {c.voice ? (
           isTypecastVoiceId(c.voice.voiceId) ? (
             <span className="chip border-edge text-gray-400" title={`voice_id: ${c.voice.voiceId}`}>
-              {c.voice.emotion && c.voice.emotion !== 'smart' ? `${c.voice.emotion} · ` : ''}
-              속도 {c.voice.settings?.tempo ?? 1}
+              🎤 {c.voice.voiceName ?? c.voice.voiceId} ·{' '}
+              {c.voice.emotion && c.voice.emotion !== 'smart' ? c.voice.emotion : '스마트'}
             </span>
           ) : (
             <span
@@ -508,13 +508,22 @@ function CharacterCard({ name }: { name: string }) {
           <span className="chip border-amber-500/50 text-amber-600">미설정</span>
         )}
       </div>
+      {/* 예전엔 여기 카드 인라인으로 펼쳐져 필터·추천 UI 가 늘면서 카드가 넘쳤다 — 오버레이 모달로
+          전환(LeftPanel 의 AnalyzeMergeModal 관용구 재사용: fixed inset-0 z-[60] + 배경 클릭 닫기). */}
       {voiceSettingsOpen && (
-        <VoiceLab
-          char={c}
-          baseLocale={baseLocaleOf(project)}
-          mode="character"
-          onClose={() => setVoiceSettingsOpen(false)}
-        />
+        <div
+          className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
+          onClick={() => setVoiceSettingsOpen(false)}
+        >
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <VoiceLab
+              char={c}
+              baseLocale={baseLocaleOf(project)}
+              mode="character"
+              onClose={() => setVoiceSettingsOpen(false)}
+            />
+          </div>
+        </div>
       )}
       {/* 보이스 일괄 생성 — VoiceLab 에서 저장해둔 프리셋(c.voice)으로 이 캐릭터의 모든 대사를
           순차 생성·적용(이미 있는 언어 음성은 건너뜀). 대본이 수백 줄이어도 하나하나 안 해도 됨 —
