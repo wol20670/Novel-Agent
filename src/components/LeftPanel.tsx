@@ -33,6 +33,7 @@ export default function LeftPanel() {
   const exportProject = useStore((s) => s.exportProject);
   const importProject = useStore((s) => s.importProject);
   const setToast = useStore((s) => s.setToast);
+  const saveError = useStore((s) => s.saveError);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const projFileRef = useRef<HTMLInputElement>(null);
@@ -43,6 +44,12 @@ export default function LeftPanel() {
   const [checkingCredits, setCheckingCredits] = useState(false);
   // 재분석(엑셀/텍스트) 결과가 파싱됐지만 기존 장면 처리 방식을 아직 못 고른 상태(모달 표시 중).
   const [pending, setPending] = useState<{ parsed: BuildResult; rawText?: string } | null>(null);
+  // previewMerge 는 라인 단위까지 훑어 비교하는 무거운 계산 — 모달이 떠 있을 때만, pending/scenes 가
+  // 바뀔 때만 계산한다(API 키 입력 등 LeftPanel 의 매 렌더마다 다시 돌리지 않도록).
+  const mergePreview = useMemo(
+    () => (pending ? previewMerge(project.scenes, pending.parsed.scenes) : null),
+    [pending, project.scenes],
+  );
 
   /** 파싱 결과를 받아 기존 장면 유무에 따라 곧장 반영하거나(0개) 모달로 방식을 고른다. */
   const startAnalysis = (parsed: BuildResult, rawText?: string) => {
@@ -118,6 +125,15 @@ export default function LeftPanel() {
   return (
     <>
     <div className="p-3.5 flex flex-col gap-5 text-sm">
+      {/* 저장 실패 배너 — toast(3.5초)와 달리 저장이 계속 안 되는 동안 계속 떠 있다. 화면은 멀쩡해
+          보여도 실제로는 아무것도 저장되지 않는 상태를 놓치지 않도록. */}
+      {saveError && (
+        <div className="rounded-lg border border-rose-500/50 bg-rose-500/10 p-2.5 text-[11px] text-rose-500 leading-snug">
+          ⚠️ <b>저장 실패</b> — {saveError}
+          <br />
+          지금 바로 아래 <b>📤 내보내기</b>로 백업해두세요(브라우저 저장소가 꽉 찼을 수 있습니다).
+        </div>
+      )}
       {/* 상단 액션 */}
       <div className="flex flex-col gap-2">
         <div className="flex gap-2">
@@ -329,7 +345,7 @@ export default function LeftPanel() {
     </div>
     {pending && (
       <AnalyzeMergeModal
-        preview={previewMerge(project.scenes, pending.parsed.scenes)}
+        preview={mergePreview!}
         newCount={pending.parsed.scenes.length}
         prevCount={project.scenes.length}
         onMerge={() => resolveMode('merge')}
@@ -394,9 +410,48 @@ function AnalyzeMergeModal({
           <span className="text-[11px] text-gray-400">
             유지 {preview.kept} · 추가 {preview.added} · 제거 {preview.removed}
           </span>
+          {preview.linesChanged === 0 &&
+          preview.linesRespelled === 0 &&
+          preview.linesRemoved === 0 &&
+          preview.scenesAttrChanged === 0 ? (
+            <span className="text-[11px] text-emerald-600">✅ 대사·배경 변경 없음 — 병합해도 내용은 그대로입니다</span>
+          ) : (
+            <span className="text-[11px] text-gray-300">
+              {/* 표기 수정(띄어쓰기·부호만)은 음성이 살아남는 값싼 변경이라 따로 보여준다 —
+                  "대사 수정 0줄"만 보고 아무것도 안 바뀐다고 오해하지 않도록. */}
+              {preview.linesChanged > 0 && `✏️ 대사 수정·추가 ${preview.linesChanged}줄`}
+              {preview.linesChanged > 0 && preview.linesRespelled > 0 && ' · '}
+              {preview.linesRespelled > 0 && `🔤 표기 수정 ${preview.linesRespelled}줄`}
+              {preview.linesRemoved > 0 && ` · ➖ 삭제 ${preview.linesRemoved}줄`}
+              {preview.scenesAttrChanged > 0 && ` · 🖼 배경·BGM 변경 ${preview.scenesAttrChanged}개 장면`}
+            </span>
+          )}
           {preview.removed > 0 && (
             <span className="text-[11px] text-amber-600">
               ⚠️ 새 결과에 없는 기존 장면 {preview.removed}개가 삭제됩니다
+            </span>
+          )}
+          {preview.voiceLoss > 0 && (
+            <span className="text-[11px] text-amber-600">
+              ⚠️ 음성 {preview.voiceLoss}개가 폐기돼 다시 생성해야 합니다(크레딧 소모)
+            </span>
+          )}
+          {preview.voiceCarriedLoose > 0 && (
+            <span className="text-[11px] text-sky-500">
+              🔁 음성 {preview.voiceCarriedLoose}줄은 그대로 승계됩니다(띄어쓰기·문장부호만 변경)
+            </span>
+          )}
+          {preview.i18nLoss > 0 && (
+            <span className="text-[11px] text-amber-600">⚠️ 번역 {preview.i18nLoss}칸이 사라집니다</span>
+          )}
+          {preview.statusReset > 0 && (
+            <span className="text-[11px] text-amber-600">
+              ⚠️ 승인 {preview.statusReset}개 장면이 검토중으로 돌아갑니다
+            </span>
+          )}
+          {preview.assetUnlink > 0 && (
+            <span className="text-[11px] text-amber-600">
+              ⚠️ 배경·BGM 연결이 {preview.assetUnlink}개 장면에서 끊깁니다 — 이름이 바뀌어 다시 업로드해야 합니다
             </span>
           )}
         </button>

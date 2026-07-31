@@ -9,6 +9,7 @@ import {
   characterOutfits,
   isTypecastVoiceId,
   type Expression,
+  type Locale,
   type Scene,
 } from '../types';
 import { backgroundKey, bgmKey, hasBgm } from '../renpy/generate';
@@ -73,8 +74,9 @@ function cgGroups(scenes: Scene[]): CgGroup[] {
 }
 
 export default function AssetsTab() {
-  const characters = useStore((s) => s.project.characters);
-  const scenes = useStore((s) => s.project.scenes);
+  const project = useStore((s) => s.project);
+  const characters = project.characters;
+  const scenes = project.scenes;
 
   // scenes 전체를 4회 순회하는 그룹핑 — 렌더마다가 아니라 scenes 가 실제로 바뀔 때만 재계산.
   // (early return 보다 먼저 둬야 함: Hook 은 조건부 return 위에서 항상 같은 순서로 호출돼야 한다.)
@@ -85,6 +87,12 @@ export default function AssetsTab() {
   const cgs = useMemo(() => cgGroups(scenes), [scenes]);
   const bgms = useMemo(() => groupBy(scenes, bgmKey, (s) => s.bgm ?? '', (s) => s.bgmAssetId, hasBgm), [scenes]);
   const items = useMemo(() => itemNames(scenes), [scenes]);
+  // effectiveTextLocales 는 전체 장면·라인을 훑는다 — 예전엔 캐릭터 카드마다(카드 수만큼) 반복
+  // 호출했는데, 여기서 한 번만 계산해 CharacterCard 에 내려준다.
+  const nameLocales = useMemo(() => {
+    const base = baseLocaleOf(project);
+    return effectiveTextLocales(project).filter((l) => l !== base);
+  }, [project]);
 
   if (scenes.length === 0)
     return <p className="text-gray-500 text-sm text-center mt-16">먼저 스토리를 분석하세요.</p>;
@@ -110,7 +118,7 @@ export default function AssetsTab() {
         {characters.length === 0 && <p className="text-gray-600 text-sm">등장 캐릭터 없음</p>}
         <div className="grid grid-cols-2 gap-3">
           {characters.filter((c) => !c.isProtagonist).map((c) => (
-            <CharacterCard key={c.name} name={c.name} />
+            <CharacterCard key={c.name} name={c.name} nameLocales={nameLocales} />
           ))}
         </div>
         <NarrationOnlyRow />
@@ -219,9 +227,12 @@ function VoiceSection() {
   const base = baseLocaleOf(project);
   const [reviewOpen, setReviewOpen] = useState(false);
 
-  const hasAnyPreset = project.characters.some((c) => c.voice);
-  const hasAnyVoiced = project.scenes.some((sc) =>
-    sc.lines.some((l) => l.kind === 'dialogue' && l.voiceAssetIds?.[base]),
+  // 캐릭터 수·대사 수에 비례하는 스캔 — VoiceSection 은 busy/voiceEstimate 변화로도 리렌더되므로
+  // (배치 생성 중 매우 잦음) project.characters/scenes 가 실제로 안 바뀌면 재계산하지 않는다.
+  const hasAnyPreset = useMemo(() => project.characters.some((c) => c.voice), [project.characters]);
+  const hasAnyVoiced = useMemo(
+    () => project.scenes.some((sc) => sc.lines.some((l) => l.kind === 'dialogue' && l.voiceAssetIds?.[base])),
+    [project.scenes, base],
   );
 
   return (
@@ -423,7 +434,7 @@ function ExpressionEditor() {
   );
 }
 
-function CharacterCard({ name }: { name: string }) {
+function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Locale[] }) {
   const c = useStore((s) => s.project.characters.find((x) => x.name === name))!;
   const updateChar = useStore((s) => s.updateCharacter);
   const importSprite = useStore((s) => s.importSprite);
@@ -436,8 +447,8 @@ function CharacterCard({ name }: { name: string }) {
   const exprList = effectiveExpressions(useStore((s) => s.project.expressions));
   // 이름표 번역칸은 자막 언어가(원문 외에) 실제로 켜져 있을 때만 보인다 — 꺼져 있으면 내보내기에
   // 반영될 곳이 없어 입력칸만 있어도 혼란스럽다(자동 번역 켜면 자연히 나타남).
+  // nameLocales 는 부모(AssetsTab)가 한 번만 계산해 내려준다(effectiveTextLocales 가 전체 장면을 훑음).
   const project = useStore((s) => s.project);
-  const nameLocales = effectiveTextLocales(project).filter((l) => l !== baseLocaleOf(project));
 
   // 현재 편집 중인 의상(기본/추가 의상). 업로드·썸네일이 모두 이 의상을 대상으로 한다.
   const [outfit, setOutfit] = useState('기본');

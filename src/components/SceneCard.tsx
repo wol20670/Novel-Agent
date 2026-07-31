@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store';
-import { SCENE_STATUS_LABEL, effectiveExpressions, emojiFor, baseLocaleOf, LOCALE_LABEL, type SceneStatus, type Expression, type Line, type Locale } from '../types';
+import { SCENE_STATUS_LABEL, effectiveExpressions, emojiFor, baseLocaleOf, LOCALE_LABEL, type SceneStatus, type Expression, type Line, type Locale, type Character } from '../types';
 import { inferEmotion } from '../generators/emotion';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
@@ -14,7 +14,7 @@ const STATUS_BTN: Record<SceneStatus, { on: string; dot: string }> = {
 };
 const STATUSES = Object.keys(SCENE_STATUS_LABEL) as SceneStatus[];
 
-export default function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
+function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
   const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId))!;
   const update = useStore((s) => s.updateScene);
   const setStatus = useStore((s) => s.setSceneStatus);
@@ -23,6 +23,10 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
   const importBg = useStore((s) => s.importBackground);
   const importBgm = useStore((s) => s.importBgm);
   const bgUrl = useAssetUrl(scene.backgroundAssetId);
+  // 이름→캐릭터 맵을 카드당 한 번만 만들어(useMemo) 라인마다 반복되는 characters.find() O(n) 탐색을
+  // LineRow/LineEmotion 에서 O(1) 조회로 바꾼다(장면당 대사 수십 줄 × 캐릭터 목록 스캔 방지).
+  const characters = useStore((s) => s.project.characters);
+  const charMap = useMemo(() => new Map(characters.map((c) => [c.name, c])), [characters]);
   // 협업 — 지금 이 장면을 보고 있는 상대방(있으면 편집 충돌을 피하라는 신호).
   // .filter(...) 는 매 렌더마다 새 배열이라 Object.is 비교가 항상 실패 → useShallow 로 배열
   // 내용을 비교해야 장면 수백 개에서도 관계없는 상태 변경마다 전체 카드가 리렌더되지 않는다.
@@ -140,6 +144,7 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
             line={l}
             background={scene.background}
             direction={scene.direction}
+            charMap={charMap}
           />
         ))}
         {scene.cg.map((c, i) => (
@@ -179,6 +184,8 @@ export default function SceneCard({ sceneId, index }: { sceneId: string; index: 
   );
 }
 
+export default memo(SceneCard);
+
 type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
 
 /**
@@ -192,24 +199,25 @@ function LineRow({
   line,
   background,
   direction,
+  charMap,
 }: {
   sceneId: string;
   index: number;
   line: Line;
   background?: string;
   direction: string[];
+  charMap: Map<string, Character>;
 }) {
   const [editing, setEditing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const setText = useStore((s) => s.setLineText);
   const setTr = useStore((s) => s.setLineTranslation);
   const base = useStore((s) => baseLocaleOf(s.project));
-  const characters = useStore((s) => s.project.characters);
   // 번역 대상 = base 를 제외한 지원 로케일(en·ja) — 엑셀 C/D열과 동일.
   const targets = (Object.keys(LOCALE_LABEL) as Locale[]).filter((l) => l !== base);
   // 성우 테스트는 단일 화자 대사 + 그 화자가 주인공(내레이션 전용)이 아닐 때만(히로인 등).
   const isSingleSpeaker = line.kind === 'dialogue' && !line.members?.length;
-  const speakerChar = isSingleSpeaker ? characters.find((c) => c.name === (line as DialogueLine).speaker) : undefined;
+  const speakerChar = isSingleSpeaker ? charMap.get((line as DialogueLine).speaker) : undefined;
   const canVoice = !!speakerChar && !speakerChar.isProtagonist;
 
   // CG 배경 전환 라인 — 이 지점부터 배경이 CG 로 바뀌고 등장인물이 사라진다(장면 끝까지).
@@ -317,6 +325,7 @@ function LineRow({
             line={line as DialogueLine}
             background={background}
             direction={direction}
+            charMap={charMap}
           />
         )}
       </div>
@@ -335,22 +344,28 @@ function LineEmotion({
   line,
   background,
   direction,
+  charMap,
 }: {
   sceneId: string;
   index: number;
   line: DialogueLine;
   background?: string;
   direction: string[];
+  charMap: Map<string, Character>;
 }) {
   const setEmotion = useStore((s) => s.setLineEmotion);
   const exprList = effectiveExpressions(useStore((s) => s.project.expressions));
   // 화면에 안 서는 화자(주인공 등)는 표정 의미가 없으니 선택기를 숨긴다.
-  const narrationOnly = useStore(
-    (s) => !line.members?.length && !!s.project.characters.find((c) => c.name === line.speaker)?.isProtagonist,
+  const narrationOnly = !line.members?.length && !!charMap.get(line.speaker)?.isProtagonist;
+  // inferEmotion 은 대사 분석(휴리스틱)이라 가볍지 않다 — 텍스트/연출/배경이 그대로면 매 렌더 재계산하지 않는다.
+  const directionKey = direction.join('|');
+  const auto = useMemo(
+    () => inferEmotion(line.text, { direction, background }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [line.text, directionKey, background],
   );
   if (narrationOnly) return null;
 
-  const auto = inferEmotion(line.text, { direction, background });
   const value = (line.emotion as Expression | undefined) ?? '';
   return (
     <select

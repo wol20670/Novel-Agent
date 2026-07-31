@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeScenes, previewMerge } from '../src/project/mergeScenes';
+import { mergeScenes, previewMerge, diffMatchedScene } from '../src/project/mergeScenes';
 import type { Scene, Line } from '../src/types';
 
 function scene(id: string, title: string, patch: Partial<Scene> = {}): Scene {
@@ -142,7 +142,7 @@ describe('mergeScenes: 재분석(엑셀/텍스트) 시 기존 에셋·번역·�
     const next: Scene[] = [scene('n1', '장면1'), scene('n2', '장면4')]; // 장면2·3 삭제, 장면4 신규
 
     const preview = previewMerge(prev, next);
-    expect(preview).toEqual({ kept: 1, added: 1, removed: 2 });
+    expect(preview).toMatchObject({ kept: 1, added: 1, removed: 2 });
 
     const result = mergeScenes(prev, next, 'merge');
     expect(result.map((s) => s.title)).toEqual(['장면1', '장면4']);
@@ -177,7 +177,7 @@ describe('mergeScenes: 재분석(엑셀/텍스트) 시 기존 에셋·번역·�
     ];
 
     const preview = previewMerge(prev, next);
-    expect(preview).toEqual({ kept: 1, added: 0, removed: 0 });
+    expect(preview).toMatchObject({ kept: 1, added: 0, removed: 0 });
 
     const result = mergeScenes(prev, next, 'merge');
     expect(result).toHaveLength(1);
@@ -212,7 +212,7 @@ describe('mergeScenes: 재분석(엑셀/텍스트) 시 기존 에셋·번역·�
     ];
 
     const preview = previewMerge(prev, next);
-    expect(preview).toEqual({ kept: 0, added: 1, removed: 1 });
+    expect(preview).toMatchObject({ kept: 0, added: 1, removed: 1 });
 
     const result = mergeScenes(prev, next, 'merge');
     expect(result).toHaveLength(1);
@@ -236,5 +236,163 @@ describe('mergeScenes: 재분석(엑셀/텍스트) 시 기존 에셋·번역·�
     expect(result[0].status).toBe('approved');
     expect(result[1].id).toBe('s2');
     expect(result[1].status).toBe('needs_fix');
+  });
+});
+
+describe('previewMerge: 줄 단위 diff — 재분석 모달이 사용자가 실제로 잃는 것을 보여주는지', () => {
+  it('대사 한 줄의 텍스트가 실제로 바뀌면 linesChanged/linesRemoved 가 늘고, 그 줄의 음성이 voiceLoss 로 집계된다(사용자 시나리오)', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', {
+        lines: [
+          {
+            kind: 'dialogue',
+            speaker: '민주',
+            text: '오늘 날씨가 좋네요',
+            voiced: true,
+            voiceAssetIds: { ko: 'va-ko', en: 'va-en' },
+          },
+        ],
+      }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', {
+        lines: [{ kind: 'dialogue', speaker: '민주', text: '오늘 날씨가 정말 좋네요' }], // 오타 아닌 실제 수정
+      }),
+    ];
+
+    const preview = previewMerge(prev, next);
+
+    expect(preview.linesChanged).toBe(1);
+    expect(preview.linesRemoved).toBe(1);
+    expect(preview.voiceLoss).toBe(2); // ko/en 두 로케일 폐기
+    expect(preview.voiceCarriedLoose).toBe(0);
+  });
+
+  it('공백·문장부호만 바뀐 줄은 voiceCarriedLoose 로 잡히고 voiceLoss 는 0이며, 실제 병합에서도 음성이 승계되고 텍스트는 새 표기로 바뀐다', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', {
+        lines: [
+          {
+            kind: 'dialogue',
+            speaker: '민주',
+            text: '안녕, 반가워!',
+            voiced: true,
+            voiceAssetIds: { ko: 'va-ko' },
+          },
+        ],
+      }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', {
+        lines: [{ kind: 'dialogue', speaker: '민주', text: '안녕 반가워.' }], // 공백/문장부호만 다름 — 발음 동일
+      }),
+    ];
+
+    const preview = previewMerge(prev, next);
+    expect(preview.voiceCarriedLoose).toBe(1);
+    expect(preview.voiceLoss).toBe(0);
+    expect(preview.linesRemoved).toBe(0);
+    // 표기가 실제로 바뀐 줄이므로 "변경 없음"으로 보이면 안 된다(모달이 이 값으로 판단).
+    expect(preview.linesRespelled).toBe(1);
+    expect(preview.linesChanged).toBe(0);
+
+    const merged = mergeScenes(prev, next, 'merge');
+    const line = merged[0].lines[0] as Extract<Line, { kind: 'dialogue' }>;
+    expect(line.text).toBe('안녕 반가워.'); // 철자는 next(새 표기) 승
+    expect(line.voiceAssetIds).toEqual({ ko: 'va-ko' }); // 음성은 승계
+  });
+
+  it('완전히 동일한 대본을 다시 넣으면 표기 수정도 0 — 모달이 "변경 없음"이라고 말할 수 있는 조건', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', {
+        lines: [{ kind: 'dialogue', speaker: '민주', text: '안녕, 반가워!', voiced: true, voiceAssetIds: { ko: 'va-ko' } }],
+      }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', { lines: [{ kind: 'dialogue', speaker: '민주', text: '안녕, 반가워!' }] }),
+    ];
+    const preview = previewMerge(prev, next);
+    expect(preview.linesChanged).toBe(0);
+    expect(preview.linesRespelled).toBe(0);
+    expect(preview.linesRemoved).toBe(0);
+    expect(preview.scenesAttrChanged).toBe(0);
+    expect(preview.voiceLoss).toBe(0);
+  });
+
+  it('배경 이름이 업로드 연결 없는 새 이름으로 바뀌면 assetUnlink/scenesAttrChanged 가 1이 된다', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', {
+        background: '학교',
+        backgroundAssetId: 'bgA',
+        lines: [{ kind: 'narration', text: '문장A' }],
+      }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', {
+        background: '폐교', // 이전에 없던 새 이름 — 재연결 실패
+        lines: [{ kind: 'narration', text: '문장A' }],
+      }),
+    ];
+
+    const preview = previewMerge(prev, next);
+    expect(preview.assetUnlink).toBe(1);
+    expect(preview.scenesAttrChanged).toBe(1);
+  });
+
+  it('승인된 장면의 내용이 바뀌면 statusReset=1, 내용이 그대로면 statusReset=0', () => {
+    const linesA: Line[] = [{ kind: 'dialogue', speaker: '민주', text: '안녕' }];
+    const prev: Scene[] = [
+      scene('s1', '장면1', { status: 'approved', lines: linesA }),
+      scene('s2', '장면2', { status: 'approved', lines: linesA }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', { lines: [{ kind: 'dialogue', speaker: '민주', text: '완전히 다른 대사' }] }),
+      scene('n2', '장면2', { lines: linesA }),
+    ];
+
+    const preview = previewMerge(prev, next);
+    expect(preview.statusReset).toBe(1);
+  });
+
+  it('일관성: previewMerge 의 라인 수치가 diffMatchedScene/실제 mergeScenes 결과와 어긋나지 않는다', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '안녕', voiced: true, voiceAssetIds: { ko: 'v1' } },
+          { kind: 'dialogue', speaker: '민주', text: '반가워!', voiced: true, voiceAssetIds: { ko: 'v2', en: 'v2en' } },
+          { kind: 'narration', text: '지워질 문장' },
+        ],
+      }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '안녕' }, // 정확 일치 — 승계
+          { kind: 'dialogue', speaker: '민주', text: '반가워.' }, // 느슨 일치(문장부호만) — 승계
+          { kind: 'dialogue', speaker: '민주', text: '새로운 대사' }, // 신규
+        ],
+      }),
+    ];
+
+    const preview = previewMerge(prev, next);
+    const diff = diffMatchedScene(prev[0], next[0]);
+
+    // previewMerge 는 diffMatchedScene 을 그대로 합산한 값이어야 한다(장면 1개뿐이므로 동일).
+    expect(preview.linesCarried).toBe(diff.linesCarried);
+    expect(preview.linesChanged).toBe(diff.linesChanged);
+    expect(preview.linesRemoved).toBe(diff.linesRemoved);
+    expect(preview.voiceCarriedLoose).toBe(diff.voiceCarriedLoose);
+    expect(preview.voiceLoss).toBe(diff.voiceLoss);
+
+    // 실제 병합 결과에서 voiceAssetIds 를 가진 줄 수 = (승계된 줄 수) 와 일치해야 한다
+    // (이 픽스처에서는 승계되는 두 줄 모두 음성을 갖고 있었으므로 정확히 2개).
+    const merged = mergeScenes(prev, next, 'merge');
+    const voicedLines = merged[0].lines.filter(
+      (l): l is Extract<Line, { kind: 'dialogue' }> => l.kind === 'dialogue' && !!l.voiceAssetIds,
+    );
+    expect(voicedLines).toHaveLength(2);
+    expect(diff.linesCarried).toBe(2);
+    expect(diff.linesRemoved).toBe(1); // '지워질 문장' 나레이션
+    expect(diff.voiceCarriedLoose).toBe(1); // '반가워!' -> '반가워.' 느슨 매칭
   });
 });

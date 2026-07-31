@@ -5,10 +5,22 @@ import type { Project, AssetMeta } from '../types';
 const PROJECT_KEY = 'novel-agent:project';
 const ASSETS_KEY = 'novel-agent:assets';
 
-export function saveProject(project: Project, assets: Record<string, AssetMeta>): void {
+// localStorage 한도(약 5MB)의 60% — 이 이상이면 조만간 QuotaExceededError 로 저장이 통째로 막힐 수
+// 있다는 조기 경고 기준선(문자 수 기준, UTF-16 이라 바이트 수와는 다르지만 대략적인 가늠으로 충분).
+const SIZE_WARN_THRESHOLD = 3_000_000;
+
+/**
+ * 프로젝트 메타데이터를 저장한다. ASSETS 를 먼저 쓰고 PROJECT 를 나중에 쓴다 — 프로젝트가 자기보다
+ * 오래된 에셋 맵을 참조하는 상태(저장 중간에 실패했을 때)를 피하려고 에셋을 먼저 쓴다.
+ * 반환값은 "합산 크기가 경고 기준선을 넘었는지"(nearQuota) — 호출측(store.ts)이 세션당 1회만
+ * 경고하는 데 쓴다. 쿼터 초과 자체는 기존과 동일하게 예외를 던진다(호출측이 처리).
+ */
+export function saveProject(project: Project, assets: Record<string, AssetMeta>): boolean {
+  const assetsRaw = JSON.stringify(assets);
+  const projectRaw = JSON.stringify(project);
   try {
-    localStorage.setItem(PROJECT_KEY, JSON.stringify(project));
-    localStorage.setItem(ASSETS_KEY, JSON.stringify(assets));
+    localStorage.setItem(ASSETS_KEY, assetsRaw);
+    localStorage.setItem(PROJECT_KEY, projectRaw);
   } catch (e) {
     // QuotaExceededError 등 — 대본이 매우 크면 localStorage(약 5MB) 한도를 넘을 수 있다.
     // 바이너리는 IndexedDB 라 보통 텍스트(대본·메타)만으로 한도를 넘는 건 드물지만, 넘으면
@@ -18,6 +30,7 @@ export function saveProject(project: Project, assets: Record<string, AssetMeta>)
         '"프로젝트 내보내기"로 파일 백업을 권장합니다. (' + ((e as Error).message || 'QuotaExceeded') + ')',
     );
   }
+  return assetsRaw.length + projectRaw.length > SIZE_WARN_THRESHOLD;
 }
 
 export function loadProject(): { project: Project; assets: Record<string, AssetMeta> } | null {

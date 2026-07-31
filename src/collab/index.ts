@@ -33,6 +33,19 @@ export interface CollabHooks {
 let unsubscribeProject: (() => void) | null = null;
 let unsubscribePresence: (() => void) | null = null;
 
+// hasPendingLocalSave() 가 true 인 동안 들어온 원격 갱신은 반영하지 않고 그냥 버린다(아래 구독
+// 콜백). 주석은 "유예"라고 했지만 실제로 나중에 다시 적용하지 않으므로 — 이 카운터로 최소한
+// "몇 건이 버려졌는지"는 알 수 있게 해 store.ts 가 저장 직후 사용자에게 새로고침을 권할 수 있다.
+// 진짜 병합은 하지 않는다(범위 밖) — 정직한 임시방편.
+let droppedRemoteCount = 0;
+
+/** 직전 debounce 저장 구간 동안 버려진 원격 갱신 수를 가져오고 카운터를 리셋한다. */
+export function takeDroppedRemoteCount(): number {
+  const n = droppedRemoteCount;
+  droppedRemoteCount = 0;
+  return n;
+}
+
 function teardownChannels(): void {
   unsubscribeProject?.();
   unsubscribeProject = null;
@@ -83,7 +96,11 @@ export async function startCollab(hooks: CollabHooks): Promise<void> {
 
   unsubscribeProject = subscribeProject((payload) => {
     markApplied(payload.version); // 버전 카운터는 유지 — 내 다음 push가 더 높은 version을 갖게
-    if (hooks.hasPendingLocalSave()) return; // 내 편집이 디바운스 대기 중 — 곧 내 push가 이기므로 반영 유예
+    if (hooks.hasPendingLocalSave()) {
+      // 내 편집이 디바운스 대기 중이라 이번 원격 갱신은 반영하지 않고 버린다(재적용하지 않음).
+      droppedRemoteCount += 1;
+      return;
+    }
     withApplyingRemoteGuard(() => hooks.applyRemoteProject(payload.data));
   });
   unsubscribePresence = startPresence(hooks.getPresenceSelf(), (peers) => hooks.setPeers(peers));

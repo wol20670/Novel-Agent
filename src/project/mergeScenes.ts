@@ -14,6 +14,29 @@ export interface MergePreview {
   added: number;
   /** 새 결과에 없어 삭제되는 기존 장면 개수(merge 모드에서만 실제로 삭제됨). */
   removed: number;
+  /** 텍스트가 그대로(정확 일치 또는 공백·문장부호만 다른 느슨한 일치)라 메타가 승계되는 줄 수. */
+  linesCarried: number;
+  /** 텍스트가 실제로 바뀌었거나 새로 생긴 줄 수(신규 장면의 줄 포함) — 메타 승계 없이 새것 그대로. */
+  linesChanged: number;
+  /**
+   * 표기만 고쳐진 줄 수(띄어쓰기·문장부호만 달라 메타는 승계되지만 본문 글자는 새것으로 바뀜).
+   * linesCarried 에도 포함되지만, 이게 0이 아니면 "변경 없음"이라고 말하면 안 되므로 따로 센다.
+   */
+  linesRespelled: number;
+  /** 사라지는 줄 수(매칭된 장면에서 없어진 줄 + 삭제되는 장면 전체의 줄). */
+  linesRemoved: number;
+  /** 배경·BGM·CG 중 하나라도 바뀐, 매칭된(살아남는) 장면 수. */
+  scenesAttrChanged: number;
+  /** 공백·문장부호만 달라 성우 음성이 그대로 승계되는 줄 수(발음 동일 판정). */
+  voiceCarriedLoose: number;
+  /** 폐기되는 성우 음성 개수(줄 × 로케일 합산) — 다시 생성해야 하는 크레딧 소모분. */
+  voiceLoss: number;
+  /** 사라지는 번역 칸 수(줄 × 로케일 합산, next 가 같은 로케일을 다시 채워준 경우는 제외). */
+  i18nLoss: number;
+  /** 승인(approved)·수정필요 상태였다가 내용 변경으로 검토중(review)으로 되돌아가는 장면 수. */
+  statusReset: number;
+  /** 배경/BGM 이름이 바뀌어 업로드 에셋 연결이 끊기는(재연결 실패) 매칭된 장면 수. */
+  assetUnlink: number;
 }
 
 /**
@@ -63,22 +86,87 @@ function carryLineMeta(next: Line, prev: Line): Line {
 }
 
 /**
- * prev 라인을 키(FIFO 큐)로 소비하며 next 라인에 메타를 승계한다. 텍스트가 바뀐(키가 없는) 라인은
- * next 그대로 유지. 동명 라인이 여러 개면 등장 순서대로 소비(스마트 병합 장면 매칭과 동일 철학).
+ * 발음이 같은 줄로 볼 수 있는 느슨한 키 — kind·화자는 그대로 두고 본문에서 공백·문장부호만 제거한다.
+ * item/cg 는 이름·설명이 곧 판정 기준이라 느슨화할 게 없어 lineKey 를 그대로 재사용한다.
+ * 정규식은 보수적으로(한글·영문·숫자는 항상 보존) 흔한 문장부호·공백류만 걸러낸다.
+ */
+function loosePronKey(line: Line): string {
+  if (line.kind === 'item' || line.kind === 'cg') return lineKey(line);
+  const strip = (s: string) =>
+    s.replace(/[\s.,!?…‥~·:;"'“”‘’「」『』()[\]{}<>《》〈〉ㆍ―—\-–．，！？：；（）]/g, '');
+  if (line.kind === 'dialogue') return `dialogue|${line.speaker}|${strip(line.text)}`;
+  return `narration||${strip(line.text)}`;
+}
+
+interface LinePair {
+  next: Line;
+  prev?: Line;
+  /** true 면 정확 일치가 아니라 느슨(발음 동일) 매칭으로 짝지어졌다. */
+  loose: boolean;
+}
+
+/**
+ * prev·next 라인을 2단계로 짝짓는다 — carryLines(실제 병합)와 diffMatchedScene(미리보기)가
+ * 이 함수 하나를 공유해야 미리보기 수치와 실제 병합 결과가 어긋나지 않는다.
+ * 1단계: lineKey 정확 일치 FIFO(기존 동작과 동일). 2단계: 1단계에서 못 짝지은 next 를,
+ * 아직 안 쓰인 prev 중 loosePronKey(공백·문장부호 제거) 가 같은 것과 FIFO로 짝짓는다.
+ * 반환 pairs 는 next 순서·길이 그대로, unmatchedPrev 는 끝까지 안 쓰인 prev 라인들.
+ */
+function pairLines(prevLines: Line[], nextLines: Line[]): { pairs: LinePair[]; unmatchedPrev: Line[] } {
+  const consumed = new Array<boolean>(prevLines.length).fill(false);
+  const pairs: LinePair[] = new Array(nextLines.length);
+
+  // 1단계: 정확 일치(lineKey) FIFO.
+  const exactQueues = new Map<string, number[]>();
+  prevLines.forEach((l, i) => {
+    const k = lineKey(l);
+    const q = exactQueues.get(k);
+    if (q) q.push(i);
+    else exactQueues.set(k, [i]);
+  });
+  nextLines.forEach((l, i) => {
+    const q = exactQueues.get(lineKey(l));
+    const idx = q && q.length ? q.shift() : undefined;
+    if (idx !== undefined) {
+      consumed[idx] = true;
+      pairs[i] = { next: l, prev: prevLines[idx], loose: false };
+    }
+  });
+
+  // 2단계: 남은 prev 만 대상으로 느슨(발음 동일) 일치 FIFO.
+  const looseQueues = new Map<string, number[]>();
+  prevLines.forEach((l, i) => {
+    if (consumed[i]) return;
+    const k = loosePronKey(l);
+    const q = looseQueues.get(k);
+    if (q) q.push(i);
+    else looseQueues.set(k, [i]);
+  });
+  nextLines.forEach((l, i) => {
+    if (pairs[i]) return;
+    const q = looseQueues.get(loosePronKey(l));
+    const idx = q && q.length ? q.shift() : undefined;
+    if (idx !== undefined) {
+      consumed[idx] = true;
+      pairs[i] = { next: l, prev: prevLines[idx], loose: true };
+    }
+  });
+
+  nextLines.forEach((l, i) => {
+    if (!pairs[i]) pairs[i] = { next: l, loose: false };
+  });
+
+  const unmatchedPrev = prevLines.filter((_, i) => !consumed[i]);
+  return { pairs, unmatchedPrev };
+}
+
+/**
+ * pairLines 로 prev 라인을 next 라인에 짝지어 메타를 승계한다. 느슨 매칭이면 철자는 next(새 표기)가
+ * 이기고 음성·번역 등 메타만 승계된다(carryLineMeta 규칙 재사용). 순서/길이는 nextLines 그대로.
  */
 function carryLines(prevLines: Line[], nextLines: Line[]): Line[] {
-  const queues = new Map<string, Line[]>();
-  for (const l of prevLines) {
-    const k = lineKey(l);
-    const q = queues.get(k);
-    if (q) q.push(l);
-    else queues.set(k, [l]);
-  }
-  return nextLines.map((l) => {
-    const q = queues.get(lineKey(l));
-    const prevLine = q && q.length ? q.shift() : undefined;
-    return prevLine ? carryLineMeta(l, prevLine) : l;
-  });
+  const { pairs } = pairLines(prevLines, nextLines);
+  return pairs.map((p) => (p.prev ? carryLineMeta(p.next, p.prev) : p.next));
 }
 
 /** 장면 하나의 "내용"이 완전히 같은지(배경명·BGM명·CG 설명·라인 시퀀스) — status 승계 판정 기준. */
@@ -93,6 +181,78 @@ function sceneContentEqual(prev: Scene, next: Scene): boolean {
 interface SceneMatch {
   next: Scene;
   prevMatch?: Scene;
+}
+
+/** dialogue 라인의 성우 음성 로케일 수(음성이 없는 kind·라인은 0). */
+function voiceCount(line: Line): number {
+  return line.kind === 'dialogue' ? Object.keys(line.voiceAssetIds ?? {}).length : 0;
+}
+
+/** dialogue/narration 라인의 번역(i18n) 로케일 수(그 외 kind 는 0). */
+function i18nCount(line: Line): number {
+  return line.kind === 'dialogue' || line.kind === 'narration' ? Object.keys(line.i18n ?? {}).length : 0;
+}
+
+export interface SceneDiff {
+  /** 텍스트가 그대로(정확·느슨 매칭 포함)라 메타가 승계되는 줄 수. */
+  linesCarried: number;
+  /** 텍스트가 바뀌었거나 새로 생긴 줄 수. */
+  linesChanged: number;
+  /** 표기만 고쳐진(느슨 매칭된) 줄 수 — 메타는 승계되지만 본문 글자는 새것으로 바뀐다. */
+  linesRespelled: number;
+  /** 이 장면에서 사라지는(next 에 대응 없는) prev 줄 수. */
+  linesRemoved: number;
+  /** 느슨(발음 동일) 매칭으로 음성이 그대로 승계되는 줄 수. */
+  voiceCarriedLoose: number;
+  /** 사라지는 줄들이 갖고 있던 성우 음성 개수(줄 × 로케일). */
+  voiceLoss: number;
+  /** 사라지는 줄들이 갖고 있던 번역 칸 수(줄 × 로케일). */
+  i18nLoss: number;
+  /** 배경·BGM·CG 중 하나라도 바뀌었는지. */
+  attrChanged: boolean;
+}
+
+/**
+ * 매칭된 (prev,next) 장면 쌍의 변경 내역 — carryLines 와 동일한(pairLines 공유) 키·FIFO 의미로
+ * 계산해 미리보기와 실제 병합이 어긋나지 않게 한다.
+ */
+export function diffMatchedScene(prev: Scene, next: Scene): SceneDiff {
+  const { pairs, unmatchedPrev } = pairLines(prev.lines, next.lines);
+
+  let linesCarried = 0;
+  let linesChanged = 0;
+  let linesRespelled = 0;
+  let voiceCarriedLoose = 0;
+  for (const p of pairs) {
+    if (p.prev) {
+      linesCarried += 1;
+      // 느슨 매칭 = lineKey 가 달랐다는 뜻 = 본문 글자가 실제로 바뀌었다(발음만 같을 뿐).
+      if (p.loose) linesRespelled += 1;
+      if (p.loose && voiceCount(p.prev) > 0) voiceCarriedLoose += 1;
+    } else {
+      linesChanged += 1;
+    }
+  }
+
+  const voiceLoss = unmatchedPrev.reduce((sum, l) => sum + voiceCount(l), 0);
+  const i18nLoss = unmatchedPrev.reduce((sum, l) => sum + i18nCount(l), 0);
+
+  const attrChanged =
+    (prev.background ?? '') !== (next.background ?? '') ||
+    (prev.bgm ?? '') !== (next.bgm ?? '') ||
+    prev.cg.length !== next.cg.length ||
+    !prev.cg.every((d, i) => d.trim() === next.cg[i].trim());
+
+  return {
+    linesCarried,
+    linesChanged,
+    linesRespelled,
+    linesRemoved: unmatchedPrev.length,
+    voiceCarriedLoose,
+    voiceLoss,
+    i18nLoss,
+    attrChanged,
+  };
 }
 
 /**
@@ -135,7 +295,7 @@ function contentOverlapRatio(a: Scene, b: Scene): number {
  * 내용이 반쯤 같으면 같은 장면으로 보고 TTS·번역·승인 메타를 승계한다. 라인이 0개인 장면은
  * (본문이 없어 유사도 판정이 무의미하므로) 폴백 매칭 대상에서 제외한다.
  */
-function matchScenes(prev: Scene[], next: Scene[]): { matches: SceneMatch[]; unmatchedPrevCount: number } {
+function matchScenes(prev: Scene[], next: Scene[]): { matches: SceneMatch[]; unmatchedPrev: Scene[] } {
   const { matches, unmatchedPrev } = matchScenesByTitle(prev, next);
   const pool = [...unmatchedPrev];
   for (const m of matches) {
@@ -155,7 +315,7 @@ function matchScenes(prev: Scene[], next: Scene[]): { matches: SceneMatch[]; unm
       pool.splice(bestIdx, 1);
     }
   }
-  return { matches, unmatchedPrevCount: pool.length };
+  return { matches, unmatchedPrev: pool };
 }
 
 /**
@@ -190,11 +350,81 @@ function reconnectAssets(scenes: Scene[], prev: Scene[]): Scene[] {
   });
 }
 
-/** 병합 전 미리보기(유지/추가/제거 개수) — 모달에 표시. mergeScenes(mode:'merge')와 같은 매칭 규칙. */
+/**
+ * 병합 전 미리보기 — 모달에 표시. mergeScenes(mode:'merge')와 같은 매칭·라인 승계 규칙
+ * (matchScenes/diffMatchedScene 공유)이라 여기 수치와 실제 병합 결과가 어긋나지 않는다.
+ */
 export function previewMerge(prev: Scene[], next: Scene[]): MergePreview {
-  const { matches, unmatchedPrevCount } = matchScenes(prev, next);
+  const { matches, unmatchedPrev } = matchScenes(prev, next);
   const kept = matches.filter((m) => m.prevMatch).length;
-  return { kept, added: matches.length - kept, removed: unmatchedPrevCount };
+
+  // reconnectAssets 과 동일한 이름→assetId 맵 — 배경/BGM 연결이 끊기는지 판정하는 데만 쓴다.
+  const bgMap = new Map<string, string>();
+  const bgmMap = new Map<string, string>();
+  for (const sc of prev) {
+    if (sc.backgroundAssetId) bgMap.set(backgroundKey(sc), sc.backgroundAssetId);
+    if (sc.bgmAssetId) bgmMap.set(bgmKey(sc), sc.bgmAssetId);
+  }
+
+  let linesCarried = 0;
+  let linesChanged = 0;
+  let linesRespelled = 0;
+  let linesRemoved = 0;
+  let scenesAttrChanged = 0;
+  let voiceCarriedLoose = 0;
+  let voiceLoss = 0;
+  let i18nLoss = 0;
+  let statusReset = 0;
+  let assetUnlink = 0;
+
+  for (const m of matches) {
+    if (!m.prevMatch) {
+      // 신규 장면 — 매칭 상대가 없으니 모든 라인이 "새로 생긴 줄"로 집계된다.
+      linesChanged += m.next.lines.length;
+      continue;
+    }
+    const prevSc = m.prevMatch;
+    const diff = diffMatchedScene(prevSc, m.next);
+    linesCarried += diff.linesCarried;
+    linesChanged += diff.linesChanged;
+    linesRespelled += diff.linesRespelled;
+    linesRemoved += diff.linesRemoved;
+    voiceCarriedLoose += diff.voiceCarriedLoose;
+    voiceLoss += diff.voiceLoss;
+    i18nLoss += diff.i18nLoss;
+    if (diff.attrChanged) scenesAttrChanged += 1;
+
+    if (!sceneContentEqual(prevSc, m.next) && prevSc.status !== 'review') statusReset += 1;
+
+    const bgBroken = !!prevSc.backgroundAssetId && !bgMap.has(backgroundKey(m.next));
+    const bgmBroken = !!prevSc.bgmAssetId && !bgmMap.has(bgmKey(m.next));
+    if (bgBroken || bgmBroken) assetUnlink += 1;
+  }
+
+  // 매칭 안 된(사라지는) 기존 장면 — 라인·음성·번역 손실에 더한다.
+  for (const sc of unmatchedPrev) {
+    linesRemoved += sc.lines.length;
+    for (const l of sc.lines) {
+      voiceLoss += voiceCount(l);
+      i18nLoss += i18nCount(l);
+    }
+  }
+
+  return {
+    kept,
+    added: matches.length - kept,
+    removed: unmatchedPrev.length,
+    linesCarried,
+    linesChanged,
+    linesRespelled,
+    linesRemoved,
+    scenesAttrChanged,
+    voiceCarriedLoose,
+    voiceLoss,
+    i18nLoss,
+    statusReset,
+    assetUnlink,
+  };
 }
 
 /**

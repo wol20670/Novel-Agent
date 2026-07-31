@@ -102,7 +102,20 @@ export function subscribeProject(onRemote: (payload: RemoteProjectPayload) => vo
         const row = (payload.new ?? payload.old) as
           | { data: Project; version: number; updated_by: string | null; client_id: string | null }
           | undefined;
-        if (!row || typeof row.version !== 'number') return;
+        // Supabase Realtime 은 행이 크기 상한을 넘으면 컬럼을 잘라내고 payload.errors 를 채운다 —
+        // 예전엔 row 가 비정상이면 그냥 조용히 무시해, 대본이 커지면 상대 변경을 계속 놓치면서도
+        // 화면(collabStatus)은 "정상 연결"로 보이는 문제가 있었다. 이젠 badge 를 error 로 반영한다.
+        if (payload.errors && payload.errors.length > 0) {
+          console.warn('[협업] 원격 갱신 수신 실패(대본이 커서 페이로드 상한 초과 의심):', payload.errors);
+          pushStatusHandler?.('error');
+          return;
+        }
+        // DELETE 는 old 에 키만 실려 오는 게 정상이라 오류가 아니다(방 데이터가 지워진 경우).
+        if (payload.eventType === 'DELETE') return;
+        if (!row || typeof row.version !== 'number') {
+          console.warn('[협업] 원격 갱신 형식이 예상과 다릅니다(무시):', payload);
+          return;
+        }
         if (row.client_id === clientId) return; // 방금 내가 보낸 것(에코) — version 동률과 무관하게 판정
         localVersion = Math.max(localVersion, row.version); // 순서 참고용 카운터만 갱신
         onRemote({ data: row.data, version: row.version, updatedBy: row.updated_by ?? null });

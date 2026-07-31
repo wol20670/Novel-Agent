@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { generateRenpyFiles } from '../renpy/generate';
 import { buildRenpyZip, downloadBlob } from '../zip/buildZip';
@@ -13,13 +13,17 @@ export default function RenpyTab() {
 
   const approvedCount = project.scenes.filter((s) => s.status === 'approved').length;
 
+  // 좌측 패널 타이핑(크레딧 문구 등) 중에도 project 는 계속 바뀌는데, 전체 .rpy 재생성은 무거워
+  // 이 탭이 열려 있으면 매 키 입력마다 다시 돌게 된다. useDeferredValue 로 미리보기만 지연시켜
+  // 입력 반응성을 지키고, ZIP/폴더쓰기(아래 onZip·syncToFolder)는 항상 최신 project 를 그대로 쓴다.
+  const deferredProject = useDeferredValue(project);
   const files = useMemo(() => {
     try {
-      return generateRenpyFiles(project).files;
+      return generateRenpyFiles(deferredProject).files;
     } catch (e) {
       return [{ path: 'error', content: String(e) }];
     }
-  }, [project]);
+  }, [deferredProject]);
 
   const onZip = async () => {
     if (approvedCount === 0) {

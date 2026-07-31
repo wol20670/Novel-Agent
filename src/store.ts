@@ -33,6 +33,7 @@ import {
   persistCollabConfig,
   pushProject as collabPushProject,
   pushAsset as collabPushAsset,
+  takeDroppedRemoteCount,
   updatePresence,
   type CollabStatus,
   type PeerPresence,
@@ -60,6 +61,47 @@ function safeFileName(s: string): string {
   );
 }
 
+/** 보이스 일괄 생성 중 attachVoiceQuiet 가 즉시 커밋하지 않고 모아두는 항목 하나. */
+interface VoiceAttachUpdate {
+  sceneId: string;
+  lineIndex: number;
+  locale: Locale;
+  assetId: string;
+}
+
+/**
+ * attachVoiceQuiet 가 모아둔 항목들을 scenes 에 한 번에 반영하는 순수 함수(부수효과 없음) —
+ * 배치 중 매 줄마다 전체 scenes 를 재빌드하던 것을 배치 끝에 1회로 줄인다(autoTranslateAll 의
+ * updates Map 누적 → 단일 커밋 패턴과 동일). voiceLocales 에 새로 추가할 로케일 집합도 함께 반환.
+ */
+function applyVoiceUpdates(scenes: Scene[], updates: VoiceAttachUpdate[]): { scenes: Scene[]; locales: Locale[] } {
+  if (!updates.length) return { scenes, locales: [] };
+  const bySceneLine = new Map<string, Map<number, Partial<Record<Locale, string>>>>();
+  const localeSet = new Set<Locale>();
+  for (const u of updates) {
+    localeSet.add(u.locale);
+    let lineMap = bySceneLine.get(u.sceneId);
+    if (!lineMap) {
+      lineMap = new Map();
+      bySceneLine.set(u.sceneId, lineMap);
+    }
+    lineMap.set(u.lineIndex, { ...lineMap.get(u.lineIndex), [u.locale]: u.assetId });
+  }
+  const nextScenes = scenes.map((sc) => {
+    const lineMap = bySceneLine.get(sc.id);
+    if (!lineMap) return sc;
+    return {
+      ...sc,
+      lines: sc.lines.map((l, i) => {
+        const lineUpdate = lineMap.get(i);
+        if (!lineUpdate || l.kind !== 'dialogue') return l;
+        return { ...l, voiced: true, voiceAssetIds: { ...l.voiceAssetIds, ...lineUpdate } };
+      }),
+    };
+  });
+  return { scenes: nextScenes, locales: [...localeSet] };
+}
+
 interface State {
   project: Project;
   assets: Record<string, AssetMeta>;
@@ -68,6 +110,11 @@ interface State {
   busy: Record<string, boolean>; // `batch:translate` 등 진행 중 표시 키
   toast: string | null;
   toastType: 'info' | 'success' | 'error';
+  /**
+   * 가장 최근 자동저장 실패 메시지(성공하면 null) — toast 는 3.5초면 사라져 그 뒤엔 저장이 계속
+   * 실패해도 화면이 멀쩡해 보인다. 이건 실패가 이어지는 동안 계속 떠 있는 배너용(LeftPanel 상단).
+   */
+  saveError: string | null;
 
   // 입력/분석
   setRawInput: (text: string) => void;
@@ -229,22 +276,40 @@ export const useStore = create<State>((set, get) => {
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   // 같은 저장 실패 메시지를 매 디바운스마다 반복해서 띄우지 않도록 1회만 알린다.
   let warnedSaveQuota = false;
+  // 저장 용량이 한도에 근접했다는 경고도 세션당 1회만(매 자동저장마다 뜨면 시끄럽다).
+  let warnedSize = false;
   const autoSave = () => {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null; // ⚠️ 먼저 비워야 함 — 안 그러면 "저장 대기 중" 상태(hasPendingLocalSave)가 영원히 true 로 남아 원격 갱신이 계속 막힘.
       const { project, assets } = get();
       try {
-        saveProject(project, assets);
+        const nearQuota = saveProject(project, assets);
         warnedSaveQuota = false;
+        if (get().saveError !== null) set({ saveError: null });
+        if (nearQuota && !warnedSize) {
+          warnedSize = true;
+          flash('저장 용량이 브라우저 한도에 가까워졌습니다 — "📤 내보내기"로 백업해두는 걸 권장합니다.', 'error');
+        }
       } catch (e) {
+        const message = (e as Error).message;
+        set({ saveError: message });
+        // 배너(saveError)는 실패가 이어지는 동안 계속 보이지만, 방금 저장을 시도했다는 즉시 신호로
+        // 토스트도 1회 함께 띄운다(반복 플래시는 warnedSaveQuota 로 계속 억제).
         if (!warnedSaveQuota) {
           warnedSaveQuota = true;
-          flash((e as Error).message, 'error');
+          flash(message, 'error');
         }
       }
       // 협업이 켜져 있으면 같은 저장 시점에 상대방에게도 반영(가벼운 공유 — 키 입력마다 아님).
-      if (get().collabEnabled) void collabPushProject(project);
+      if (get().collabEnabled) {
+        void collabPushProject(project);
+        // 방금 끝난 디바운스 대기 동안 hasPendingLocalSave() 가드로 버려진 원격 갱신이 있었는지
+        // 확인한다 — 진짜 병합은 안 하지만(범위 밖), 최소한 놓쳤을 수 있다고 알려서 새로고침을 권한다.
+        if (takeDroppedRemoteCount() > 0) {
+          flash('상대의 변경을 받지 못했을 수 있습니다 — 새로고침하면 최신 상태를 받습니다.', 'error');
+        }
+      }
     }, 600);
   };
 
@@ -346,12 +411,17 @@ export const useStore = create<State>((set, get) => {
   // attachLineVoice 의 핵심 로직만 분리(autoSave/flash 없음) — 일괄 생성(batchVoiceCharacter)이
   // 수백 줄을 반복 호출할 때 매번 저장·토스트가 튀지 않도록, 루프 안에선 이걸로 조용히 누적하고
   // autoSave()/flash() 는 호출측이 끝나고 한 번만 부른다. 단일 적용(attachLineVoice)도 이걸 재사용.
+  // collector 를 주면(배치 경로) scenes 전체 재빌드 set() 을 즉시 하지 않고 목록에만 쌓아둔다 —
+  // 호출측이 배치 끝에 applyVoiceUpdates 로 딱 1번만 커밋한다(autoTranslateAll 과 동일한 절충).
+  // 업로드(uploadAsset)·이전 에셋 삭제는 배치 여부와 무관하게 항상 즉시 수행(에셋 자체는 배치가
+  // 중단돼도 남아 있어야 함 — commitAssetSwap 의 "set→autoSave→delete" 관례와 같은 이유).
   const attachVoiceQuiet = async (
     sceneId: string,
     lineIndex: number,
     locale: Locale,
     blob: Blob,
     charName: string,
+    collector?: VoiceAttachUpdate[],
   ): Promise<void> => {
     const scene = get().project.scenes.find((s) => s.id === sceneId);
     const line = scene?.lines[lineIndex];
@@ -363,26 +433,30 @@ export const useStore = create<State>((set, get) => {
     });
     const id = await uploadAsset(file, 'voice', file.name);
     const prev = line.voiceAssetIds?.[locale];
-    set((s) => ({
-      project: {
-        ...s.project,
-        voiceLocales: s.project.voiceLocales?.includes(locale)
-          ? s.project.voiceLocales
-          : [...(s.project.voiceLocales ?? []), locale],
-        scenes: s.project.scenes.map((sc) =>
-          sc.id === sceneId
-            ? {
-                ...sc,
-                lines: sc.lines.map((l, i) =>
-                  i === lineIndex && l.kind === 'dialogue'
-                    ? { ...l, voiced: true, voiceAssetIds: { ...l.voiceAssetIds, [locale]: id } }
-                    : l,
-                ),
-              }
-            : sc,
-        ),
-      },
-    }));
+    if (collector) {
+      collector.push({ sceneId, lineIndex, locale, assetId: id });
+    } else {
+      set((s) => ({
+        project: {
+          ...s.project,
+          voiceLocales: s.project.voiceLocales?.includes(locale)
+            ? s.project.voiceLocales
+            : [...(s.project.voiceLocales ?? []), locale],
+          scenes: s.project.scenes.map((sc) =>
+            sc.id === sceneId
+              ? {
+                  ...sc,
+                  lines: sc.lines.map((l, i) =>
+                    i === lineIndex && l.kind === 'dialogue'
+                      ? { ...l, voiced: true, voiceAssetIds: { ...l.voiceAssetIds, [locale]: id } }
+                      : l,
+                  ),
+                }
+              : sc,
+          ),
+        },
+      }));
+    }
     if (prev) await deleteAsset(prev).catch(() => {});
   };
 
@@ -406,6 +480,7 @@ export const useStore = create<State>((set, get) => {
     voicePreset: NonNullable<Character['voice']>,
     items: VoiceBatchItem[],
     key: string,
+    collector: VoiceAttachUpdate[],
   ): Promise<{ done: number; failed: number; totalSeconds: number; creditsExhausted: boolean }> => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     // 연속 호출을 곧바로 이어 붙이면 매 줄이 레이트리밋(429)에 걸림(실사용에서 확인) — 요청 사이에
@@ -453,7 +528,7 @@ export const useStore = create<State>((set, get) => {
       }
       totalSeconds += result.seconds;
       try {
-        await attachVoiceQuiet(item.sceneId, item.lineIndex, locale, result.blob, charName);
+        await attachVoiceQuiet(item.sceneId, item.lineIndex, locale, result.blob, charName, collector);
         done++;
       } catch (e) {
         failed++;
@@ -480,6 +555,7 @@ export const useStore = create<State>((set, get) => {
     voiceEstimate: null,
     toast: null,
     toastType: 'info',
+    saveError: null,
     folderSupported: isFolderSyncSupported(),
     folderName: null,
 
@@ -1130,9 +1206,22 @@ export const useStore = create<State>((set, get) => {
       const busyKey = `batch:voice:${charName}`;
       set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
       let outcome: { done: number; failed: number; totalSeconds: number; creditsExhausted: boolean };
+      const collector: VoiceAttachUpdate[] = [];
       try {
-        outcome = await runCharacterVoiceBatch(charName, locale, voicePreset, items, key);
+        outcome = await runCharacterVoiceBatch(charName, locale, voicePreset, items, key, collector);
       } finally {
+        // 배치 동안 모아둔 음성 적용분을 여기서 딱 1번만 커밋 — 중간에 크레딧 소진으로 중단돼도
+        // 그때까지 생성된 음성은 반드시 반영/저장된다(autoTranslateAll 과 동일한 절충).
+        if (collector.length) {
+          const { scenes, locales } = applyVoiceUpdates(get().project.scenes, collector);
+          set((s) => ({
+            project: {
+              ...s.project,
+              scenes,
+              voiceLocales: Array.from(new Set([...(s.project.voiceLocales ?? []), ...locales])),
+            },
+          }));
+        }
         set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
       }
       autoSave();
@@ -1186,13 +1275,16 @@ export const useStore = create<State>((set, get) => {
       let totalFailed = 0;
       let totalSeconds = 0;
       let creditsExhausted = false;
+      // 여러 캐릭터를 순차 처리하는 배치 전체가 collector 하나를 공유 — 캐릭터마다 커밋하면
+      // 여전히 캐릭터 수만큼 리렌더/자동저장이 튀므로, 전체를 한 번에 묶어야 실질 효과가 있다.
+      const collector: VoiceAttachUpdate[] = [];
       try {
         for (const { char, items } of targets) {
           const busyKey = `batch:voice:${char.name}`;
           set((s) => ({ busy: { ...s.busy, [busyKey]: true } }));
           let outcome;
           try {
-            outcome = await runCharacterVoiceBatch(char.name, locale, char.voice, items, key);
+            outcome = await runCharacterVoiceBatch(char.name, locale, char.voice, items, key, collector);
           } finally {
             set((s) => ({ busy: { ...s.busy, [busyKey]: false } }));
           }
@@ -1205,6 +1297,16 @@ export const useStore = create<State>((set, get) => {
           }
         }
       } finally {
+        if (collector.length) {
+          const { scenes, locales } = applyVoiceUpdates(get().project.scenes, collector);
+          set((s) => ({
+            project: {
+              ...s.project,
+              scenes,
+              voiceLocales: Array.from(new Set([...(s.project.voiceLocales ?? []), ...locales])),
+            },
+          }));
+        }
         set((s) => ({ busy: { ...s.busy, 'batch:voice:all': false } }));
       }
       autoSave();
