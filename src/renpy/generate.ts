@@ -449,6 +449,7 @@ function scriptBody(
   items: ItemRef[],
   sideById: Map<string, 'left' | 'right' | 'auto'>,
   outfitRules: OutfitRule[] | undefined,
+  characterScale: number | undefined,
 ): string {
   const resolve = makeResolver(refs);
   const itemTag = new Map(items.map((it) => [it.name, it.tag]));
@@ -456,17 +457,21 @@ function scriptBody(
   for (const sp of sprites) {
     (spritesByChar.get(sp.charId) ?? spritesByChar.set(sp.charId, []).get(sp.charId)!).push(sp);
   }
-  // 캐릭터 키 높이 = 화면의 90%(머리 잘림 방지). 원본 해상도 무관하게 fit 으로 정규화.
-  const charH = Math.round(screenH * 0.9);
+  // VN 표준 구도: 전신을 다 욱여넣는 대신 머리~허벅지 정도만 화면에 담고 발은 화면 밖(대사창 뒤)으로
+  // 내린다 — 실사용 스프라이트가 전신 컷이라 90% 축소로는 "멀리서 찍은 사진"처럼 작게 보이던 문제.
+  // k=1.15 가 기본(사용자 슬라이더 characterScale 로 추가 배율), 머리 위 2% 여백을 두고 그만큼 아래로 내린다.
+  const k = 1.15 * (characterScale ?? 1);
+  const charH = Math.round(screenH * k);
+  const charYpos = (k + 0.02).toFixed(3);
   const out: string[] = [];
   out.push('# 자동 생성: 메인 스크립트', '');
-  // 캐릭터 배치·크기 transform — xpct(0~100) 중심, 바닥 정렬, 화면 높이에 맞춰 스케일.
-  out.push('# 캐릭터 배치: 가로 0~100 중심 좌표, 바닥 정렬, 화면 높이 90%로 스케일(어떤 해상도 이미지든 자동 맞춤)');
+  // 캐릭터 배치·크기 transform — xpct(0~100) 중심, 머리~허벅지 구도(발은 화면 아래로 크롭).
+  out.push('# 캐릭터 배치: 가로 0~100 중심 좌표, 머리 위 2% 여백 두고 확대(발은 화면 밖·대사창 뒤로 크롭)');
   out.push('transform vn_char(xpct=50.0):');
   out.push(`${indent(1)}fit "contain"`);
   out.push(`${indent(1)}ysize ${charH}`);
   out.push(`${indent(1)}xanchor 0.5 yanchor 1.0`);
-  out.push(`${indent(1)}xpos (xpct / 100.0) ypos 1.0`);
+  out.push(`${indent(1)}xpos (xpct / 100.0) ypos ${charYpos}`);
   out.push('');
   // 배경: 화면 전체를 채우도록 fit cover(레터박스 0). NovelAI 가로 출력은 1216×832(3:2)라
   // 16:9 게임에선 위아래가 다소 잘리지만(비율 유지·왜곡 없음), 검은 띠·여백 없이 꽉 찬다.
@@ -934,7 +939,7 @@ export function generateRenpyFiles(project: Project): {
   const items = resolveItems(project);
 
   const files: RenpyFile[] = [
-    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules) },
+    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules, project.guiOverrides?.characterScale) },
     { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites, items) },
     { path: 'game/options.rpy', content: optionsRpy(project) },

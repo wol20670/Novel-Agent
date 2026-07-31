@@ -913,6 +913,7 @@ function DialogueGuiControls() {
   const outline = ov.outline ?? false;
   const outlineColor = ov.outlineColor ?? '#000000';
   const gradient = ov.dialogueGradient ?? false;
+  const characterScale = ov.characterScale ?? 1.0;
 
   return (
     <div className="flex flex-col gap-2 pt-1 border-t border-edge/50">
@@ -931,6 +932,19 @@ function DialogueGuiControls() {
           className="flex-1"
         />
         <span className="w-9 text-right">{Math.round(opacity * 100)}%</span>
+      </label>
+      <label className="flex items-center gap-2 text-[11px] text-gray-400">
+        <span className="w-20 shrink-0">캐릭터 크기</span>
+        <input
+          type="range"
+          min={0.8}
+          max={1.6}
+          step={0.05}
+          value={characterScale}
+          onChange={(e) => setOv({ characterScale: Number(e.target.value) })}
+          className="flex-1"
+        />
+        <span className="w-9 text-right">{characterScale.toFixed(2)}배</span>
       </label>
       <label className="flex items-center gap-1.5 text-[11px] text-gray-400">
         <input
@@ -969,7 +983,8 @@ function DialogueGuiControls() {
           ov.outline ||
           ov.outlineColor ||
           ov.bodyFontId ||
-          ov.nameFontId) && (
+          ov.nameFontId ||
+          ov.characterScale != null) && (
           <button className="text-[10px] text-gray-500 hover:text-rose-600 ml-auto" onClick={() => update({ guiOverrides: undefined })}>
             기본값
           </button>

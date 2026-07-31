@@ -33,6 +33,60 @@ async function blobForBgm(assetId: string | undefined): Promise<Blob | undefined
   return assetId ? getAsset(assetId) : undefined;
 }
 
+/**
+ * 스프라이트 PNG 의 완전 투명한 여백을 잘라낸다(캐릭터 몸통 기준으로 ysize 정규화하기 위해).
+ * 의상마다 캔버스 하단 여백 비율이 제각각이라(같은 캐릭터인데 4.6% vs 12.7%) vn_char 의
+ * ysize 스케일이 캔버스 전체 높이를 기준으로 삼으면 의상 전환마다 캐릭터가 위아래로 튀고
+ * 발이 대사창 위로 뜨는 문제가 있었다 — 여백을 미리 지워 "몸통 실제 높이"만 남긴다.
+ * 배경/CG/아이템 등 다른 종류의 에셋에는 적용하지 않는다(스프라이트 전용).
+ */
+async function trimSpriteMargins(blob: Blob): Promise<Blob> {
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const { width, height } = bitmap;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close?.();
+    const { data } = ctx.getImageData(0, 0, width, height);
+
+    // 알파 > 8(거의 완전 투명은 제외)인 픽셀들의 바운딩 박스를 한 번의 스캔으로 구한다.
+    let minX = width;
+    let maxX = -1;
+    let minY = height;
+    let maxY = -1;
+    for (let y = 0; y < height; y++) {
+      const rowBase = y * width;
+      for (let x = 0; x < width; x++) {
+        if (data[(rowBase + x) * 4 + 3] > 8) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX < 0) return blob; // 완전 투명 이미지 — 원본 그대로
+
+    const trimmedW = maxX - minX + 1;
+    const trimmedH = maxY - minY + 1;
+    // 1% 미만으로 줄면(=사실상 여백 없음) 재인코딩 비용을 아끼고 원본을 그대로 쓴다.
+    const shrankEnough = (width - trimmedW) / width > 0.01 || (height - trimmedH) / height > 0.01;
+    if (!shrankEnough) return blob;
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = trimmedW;
+    outCanvas.height = trimmedH;
+    const outCtx = outCanvas.getContext('2d')!;
+    outCtx.drawImage(canvas, minX, minY, trimmedW, trimmedH, 0, 0, trimmedW, trimmedH);
+    return await new Promise<Blob>((resolve) => outCanvas.toBlob((b) => resolve(b ?? blob), 'image/png'));
+  } catch {
+    return blob; // 실패해도 내보내기가 깨지면 안 되므로 원본으로 폴백
+  }
+}
+
 export interface ZipResult {
   blob: Blob;
   filename: string;
@@ -78,6 +132,8 @@ export async function collectProjectFiles(
   for (const f of fontResult.files) out.push(f);
 
   // 캐릭터 스프라이트 (생성된 assetId → blob, 없으면 Canvas 폴백)
+  // 업로드본은 의상마다 캔버스 하단 투명 여백이 제각각이라, vn_char 의 ysize 정규화 전에
+  // 여백을 미리 잘라 "몸통 실제 높이" 기준으로 맞춘다(대량 스프라이트라 순차 처리).
   for (const sp of sprites) {
     let blob = sp.assetId ? await getAsset(sp.assetId) : undefined;
     if (!blob) {
@@ -85,6 +141,7 @@ export async function collectProjectFiles(
       blob = await canvasSprite(sp.charName, sp.expr, color);
       placeholders++;
     }
+    blob = await trimSpriteMargins(blob);
     out.push({ path: `game/images/${sp.file}`, data: blob });
   }
   // 배경/BGM/CG 는 "이름" 기준으로 공유되므로, 파일 1개당 1회만 생성한다.

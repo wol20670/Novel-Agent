@@ -106,7 +106,8 @@ define gui.show_name = True
 
 
 ## 대사창 ######################################################################
-define gui.textbox_height = gui.scale(185)
+## 720p 스케일값 대신 화면 높이의 1/4 로 고정(대사창이 화면 대비 너무 얇아지는 문제 방지).
+define gui.textbox_height = ${Math.round(height / 4)}
 define gui.textbox_yalign = 1.0
 
 define gui.name_xpos = gui.scale(240)

@@ -263,6 +263,8 @@ export interface GuiOverrides {
    */
   bodyFontId?: string;
   nameFontId?: string;
+  /** 캐릭터 스프라이트 크기 배수(기본 1.0). 클수록 화면에서 크게(=가깝게) 보인다. */
+  characterScale?: number;
 }
 
 /** 테마 위에 사용자 GUI 조정(대사창 색·불투명도·글자색·이름색)을 덮어쓴 새 테마. */

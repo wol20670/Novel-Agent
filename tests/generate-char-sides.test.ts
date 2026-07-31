@@ -108,6 +108,30 @@ describe('generateRenpyFiles: 캐릭터 좌우 고정 위치', () => {
   });
 });
 
+describe('generateRenpyFiles: vn_char 캐릭터 프레이밍(머리~허벅지 구도)', () => {
+  it('1080p 기본(characterScale 미지정)이면 ysize 1242, ypos 1.170', () => {
+    const A = charWithSprite('A');
+    const project = projectWith([A], [sceneWithSpeakers(['A'])]);
+    const { files } = generateRenpyFiles(project);
+    const s = files.find((f) => f.path === 'game/script.rpy')!.content;
+    expect(s).toContain('ysize 1242');
+    expect(s).toContain('ypos 1.170');
+  });
+
+  it('characterScale: 1.4 면 그만큼 커진 값이 나온다', () => {
+    const A = charWithSprite('A');
+    const project: Project = {
+      ...projectWith([A], [sceneWithSpeakers(['A'])]),
+      guiOverrides: { characterScale: 1.4 },
+    };
+    const { files } = generateRenpyFiles(project);
+    const s = files.find((f) => f.path === 'game/script.rpy')!.content;
+    // k = 1.15 * 1.4 = 1.61 → ysize round(1080*1.61)=1739, ypos (1.61+0.02).toFixed(3)=1.630
+    expect(s).toContain('ysize 1739');
+    expect(s).toContain('ypos 1.630');
+  });
+});
+
 describe('generateRenpyFiles: 배경 키워드 의상 규칙(outfitRules)', () => {
   it('배경 이름이 규칙 키워드를 포함하면 show 문이 기본 의상이 아닌 규칙이 지정한 의상 속성을 쓴다', () => {
     const A: Character = {

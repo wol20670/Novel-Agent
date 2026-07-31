@@ -273,6 +273,8 @@ export interface Project {
      */
     bodyFontId?: string;
     nameFontId?: string;
+    /** 캐릭터 스프라이트 크기 배수(기본 1.0). 클수록 화면에서 크게(=가깝게) 보인다. */
+    characterScale?: number;
   };
   /**
    * 배경 이름 키워드 → 캐릭터 의상 자동 지정 규칙(프로젝트 단위, 에셋 탭 캐릭터 카드에서 편집).

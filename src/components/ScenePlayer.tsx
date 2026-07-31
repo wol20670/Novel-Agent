@@ -14,17 +14,23 @@ import { emojiFor, spriteAssetId, resolveOutfit, type Scene, type Character, typ
 const speakersOf = (l: Line): string[] =>
   l.kind === 'dialogue' ? (l.members?.length ? l.members : [l.speaker]) : [];
 
-/** 한 캐릭터의 (의상·표정) 스프라이트 — 에셋이 있으면 그것, 없으면 Canvas 임시 이미지. */
+/**
+ * 한 캐릭터의 (의상·표정) 스프라이트 — 에셋이 있으면 그것, 없으면 Canvas 임시 이미지.
+ * 실제 생성 게임(vn_char, generate.ts)과 같은 구도로 그린다: 머리 위 2% 여백을 두고
+ * k(=1.15×characterScale) 배로 키워 발은 화면 아래로 크롭(스테이지의 overflow-hidden 이 잘라냄).
+ */
 function PreviewSprite({
   char,
   expr,
   outfit,
   xpct,
+  k,
 }: {
   char: Character;
   expr: Expression;
   outfit?: string;
   xpct: number;
+  k: number;
 }) {
   const assetId = spriteAssetId(char, outfit, expr);
   const [url, setUrl] = useState<string>();
@@ -48,8 +54,8 @@ function PreviewSprite({
   return (
     <img
       src={url}
-      className="absolute bottom-0 h-[92%] max-w-[48%] object-contain pointer-events-none"
-      style={{ left: `${xpct}%`, transform: 'translateX(-50%)' }}
+      className="absolute max-w-[48%] object-contain pointer-events-none"
+      style={{ left: `${xpct}%`, top: '2%', height: `${k * 100}%`, transform: 'translateX(-50%)' }}
     />
   );
 }
@@ -58,6 +64,9 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
   const characters = useStore((s) => s.project.characters);
   // 배경 키워드 의상 규칙 — project 전체가 아니라 이 배열만 좁게 구독(불필요 리렌더 방지).
   const outfitRules = useStore((s) => s.project.outfitRules);
+  // 캐릭터 크기 슬라이더 — generate.ts 의 vn_char 와 동일 공식(기본 1.15배, 사용자 배율 곱).
+  const characterScale = useStore((s) => s.project.guiOverrides?.characterScale);
+  const charK = 1.15 * (characterScale ?? 1);
   const [step, setStep] = useState(0);
   useEffect(() => setStep(0), [scene.id]);
 
@@ -153,7 +162,12 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
 
   return (
     <div>
-      <div className="relative aspect-video rounded-xl border border-edge bg-ink overflow-hidden">
+      {/* 컨테이너 크기 기준 단위(cqh)를 쓰려고 size 컨테이너로 선언 — 대사창 글자 크기를 미리보기
+          크기와 무관하게 "실제 게임의 화면 높이 대비 비율"과 똑같이 맞추기 위함. */}
+      <div
+        className="relative aspect-video rounded-xl border border-edge bg-ink overflow-hidden"
+        style={{ containerType: 'size' }}
+      >
         {cgUrl ? (
           // CG 배경: 뒤판 = cover+blur 확대(여백 채움), 앞판 = contain 원본(Ren'Py 출력과 동일 연출)
           <>
@@ -170,22 +184,30 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
         {activeCgIdx < 0 && [...visible].map(([nm, ex]) => {
           const c = charByName.get(nm);
           return c ? (
-            <PreviewSprite key={nm} char={c} expr={ex} outfit={resolveOutfit(outfitRules, scene, nm)} xpct={xpos.get(nm) ?? 50} />
+            <PreviewSprite key={nm} char={c} expr={ex} outfit={resolveOutfit(outfitRules, scene, nm)} xpct={xpos.get(nm) ?? 50} k={charK} />
           ) : null;
         })}
         {cur && (
-          <div className="absolute inset-x-0 bottom-0 bg-black/55 backdrop-blur-[1px] px-3 py-2 min-h-[26%]">
+          // 높이 25% = 실제 생성 게임의 textbox_height(화면 높이의 1/4)와 동일 비율.
+          <div className="absolute inset-x-0 bottom-0 h-[25%] bg-black/55 backdrop-blur-[1px] px-3 py-1.5 overflow-hidden">
             {name && (
-              <div className="font-bold text-sm mb-0.5" style={{ color: nameColor ?? '#ffffff' }}>
+              // 글자 크기는 화면 높이 대비 비율(cqh)로 — 실제 게임의 45/1080(이름)·33/1080(본문)과 동일 비율.
+              // 다만 미리보기가 작을 땐 그대로 두면 읽을 수 없어 최소 px 바닥을 둔다(비율 유지 + 가독성).
+              <div
+                className="font-bold mb-0.5"
+                style={{ color: nameColor ?? '#ffffff', fontSize: 'max(13px, 4.17cqh)' }}
+              >
                 {name}
                 {showEmo && (
-                  <span className="ml-1.5 text-[11px] font-normal opacity-90">
+                  <span className="ml-1.5 font-normal opacity-90" style={{ fontSize: 'max(10px, 2.6cqh)' }}>
                     {emojiFor(curEmo)} {curEmo}
                   </span>
                 )}
               </div>
             )}
-            <div className="text-white text-sm leading-snug">{curText}</div>
+            <div className="text-white leading-snug" style={{ fontSize: 'max(11px, 3.06cqh)' }}>
+              {curText}
+            </div>
           </div>
         )}
       </div>
