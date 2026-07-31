@@ -49,6 +49,29 @@ describe('collectUntranslated', () => {
     expect(batches[0].items.map((i) => i.i)).toEqual([0, 2]);
     expect(batches[0].items[1].narration).toBe(true);
   });
+
+  it('줄마다 "실제로 비어 있는 언어"만 missing 에 담는다 — 이미 있는 번역을 다시 요청·덮어쓰지 않도록', () => {
+    const p: Project = {
+      ...emptyProject(),
+      scenes: [
+        {
+          id: 's1',
+          title: 's',
+          direction: [],
+          cg: [],
+          choices: [],
+          status: 'review',
+          lines: [
+            { kind: 'dialogue', speaker: '민주', text: '안녕', i18n: { en: 'Hi' } }, // ja 만 필요
+            { kind: 'dialogue', speaker: '민주', text: '잘가', i18n: { ja: 'またね' } }, // en 만 필요
+            { kind: 'narration', text: '비가 내렸다' }, // 둘 다 필요
+          ],
+        },
+      ],
+    };
+    const items = collectUntranslated(p, ['en', 'ja'])[0].items;
+    expect(items.map((it) => it.missing)).toEqual([['ja'], ['en'], ['en', 'ja']]);
+  });
 });
 
 function mkItems(n: number, koLen = 3): TranslateItem[] {

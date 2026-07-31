@@ -23,6 +23,12 @@ export interface TranslateItem {
   ko: string;
   speaker?: string;
   narration?: boolean;
+  /**
+   * 이 줄에 아직 번역이 없는 언어들(collectUntranslated 가 채움). 호출측이 이 조합별로 줄을 묶어
+   * 필요한 언어만 요청하는 데 쓴다 — 프롬프트로 전송되지는 않는다(translateBatch 가 필드를 골라 담음).
+   * 없으면(직접 호출 등) 호출측이 넘긴 targets 전체를 대상으로 본다.
+   */
+  missing?: Locale[];
 }
 
 function systemPrompt(targets: Locale[]): string {

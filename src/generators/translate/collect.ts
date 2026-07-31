@@ -20,12 +20,16 @@ export function collectUntranslated(
     sc.lines.forEach((line, i) => {
       if (line.kind !== 'dialogue' && line.kind !== 'narration') return;
       if (!line.text.trim()) return;
-      if (missingTargets(line.i18n, targets).length === 0) return; // 이미 다 채워짐
+      const missing = missingTargets(line.i18n, targets);
+      if (missing.length === 0) return; // 이미 다 채워짐
       items.push({
         i,
         ko: line.text,
         speaker: line.kind === 'dialogue' ? line.speaker : undefined,
         narration: line.kind === 'narration',
+        // 이 줄에 "실제로 없는" 언어만 기록 — 호출측이 이것만 요청해서 이미 있는 번역(엑셀 C/D열이나
+        // 앱에서 손본 검수본)을 새 번역으로 덮어쓰지 않도록 한다(불필요한 토큰 소모도 방지).
+        missing,
       });
     });
     if (items.length) out.push({ sceneId: sc.id, items });

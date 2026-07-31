@@ -687,33 +687,46 @@ export const useStore = create<State>((set, get) => {
       try {
         outer: for (const { sceneId, items } of batches) {
           let sceneFailed = false;
-          for (const chunk of chunkItems(items)) {
-            if (callIndex > 0) await sleep(PACE_MS);
-            callIndex++;
-            try {
-              const result = await translateBatch(chunk, targets, model, key);
-              for (const it of chunk) {
-                const tr = result[it.i];
-                if (!tr) continue;
-                for (const loc of targets) {
-                  const v = tr[loc];
-                  if (v && v.trim()) {
-                    let sceneUpdates = updates.get(sceneId);
-                    if (!sceneUpdates) {
-                      sceneUpdates = new Map();
-                      updates.set(sceneId, sceneUpdates);
+          // "이 줄에 없는 언어" 조합이 같은 줄끼리 묶어 그 언어만 요청한다 — 예전엔 항상 en·ja 를
+          // 통째로 요청해서, 한쪽만 비어 있던 줄은 멀쩡한 기존 번역(엑셀 C/D열·손본 검수본)까지
+          // 새 번역으로 덮어썼고 토큰도 두 배로 썼다.
+          const groups = new Map<string, { targets: Locale[]; items: typeof items }>();
+          for (const it of items) {
+            const need = it.missing?.length ? it.missing : targets;
+            const sig = need.join(',');
+            const g = groups.get(sig);
+            if (g) g.items.push(it);
+            else groups.set(sig, { targets: need, items: [it] });
+          }
+          for (const { targets: groupTargets, items: groupItems } of groups.values()) {
+            for (const chunk of chunkItems(groupItems)) {
+              if (callIndex > 0) await sleep(PACE_MS);
+              callIndex++;
+              try {
+                const result = await translateBatch(chunk, groupTargets, model, key);
+                for (const it of chunk) {
+                  const tr = result[it.i];
+                  if (!tr) continue;
+                  for (const loc of groupTargets) {
+                    const v = tr[loc];
+                    if (v && v.trim()) {
+                      let sceneUpdates = updates.get(sceneId);
+                      if (!sceneUpdates) {
+                        sceneUpdates = new Map();
+                        updates.set(sceneId, sceneUpdates);
+                      }
+                      sceneUpdates.set(it.i, { ...sceneUpdates.get(it.i), [loc]: v });
+                      done++;
                     }
-                    sceneUpdates.set(it.i, { ...sceneUpdates.get(it.i), [loc]: v });
-                    done++;
                   }
                 }
-              }
-            } catch (e) {
-              sceneFailed = true;
-              console.warn('[자동번역] 청크 실패:', sceneId, e);
-              if (isFatalTranslateError(e)) {
-                aborted = true;
-                break outer;
+              } catch (e) {
+                sceneFailed = true;
+                console.warn('[자동번역] 청크 실패:', sceneId, e);
+                if (isFatalTranslateError(e)) {
+                  aborted = true;
+                  break outer;
+                }
               }
             }
           }
