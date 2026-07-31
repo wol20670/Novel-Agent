@@ -158,6 +158,12 @@ interface State {
   // 캐릭터 의상(복장) — 의상마다 표정 세트를 따로 가진다. #복장 태그로 장면별 지정.
   addOutfit: (charName: string, name: string) => void;
   removeOutfit: (charName: string, name: string) => Promise<void>;
+  /**
+   * 배경 이름 키워드 → 캐릭터 의상 자동 지정 규칙(프로젝트 단위). 53개 장면에 일일이 #복장을
+   * 안 적어도 배경 이름으로 의상이 자동 결정되게 — resolveOutfit(types.ts)이 우선순위를 정한다.
+   */
+  addOutfitRule: (charName: string, outfit: string, keyword: string) => void;
+  removeOutfitRule: (index: number) => void;
   /** 이 캐릭터의 모든 업로드 입화를 비운다(표정 세트는 유지, 다시 업로드 가능). */
   clearCharacterSprites: (name: string) => Promise<void>;
   /** 캐릭터 이름표의 언어별 번역 설정(에셋 탭 캐릭터 카드). 비우면(value='') 그 언어 번역을 지운다. */
@@ -973,11 +979,31 @@ export const useStore = create<State>((set, get) => {
               delete m[charName];
               return { ...sc, outfits: m };
             }),
+            // 이 의상을 가리키던 배경 키워드 규칙도 함께 제거(가리키는 대상이 사라짐).
+            outfitRules: s.project.outfitRules?.filter((r) => !(r.charName === charName && r.outfit === name)),
           },
         }),
         toDelete,
       );
       flash(`'${charName}'의 '${name}' 의상을 삭제했습니다.`);
+    },
+
+    addOutfitRule: (charName, outfit, keyword) => {
+      const kw = keyword.trim();
+      if (!kw) return;
+      set((s) => {
+        const rules = s.project.outfitRules ?? [];
+        if (rules.some((r) => r.charName === charName && r.outfit === outfit && r.keyword === kw)) return s;
+        return { project: { ...s.project, outfitRules: [...rules, { charName, outfit, keyword: kw }] } };
+      });
+      autoSave();
+    },
+
+    removeOutfitRule: (index) => {
+      set((s) => ({
+        project: { ...s.project, outfitRules: (s.project.outfitRules ?? []).filter((_, i) => i !== index) },
+      }));
+      autoSave();
     },
 
     importBackground: async (sceneId, file) => {

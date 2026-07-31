@@ -220,6 +220,19 @@ describe('mergeScenes: 재분석(엑셀/텍스트) 시 기존 에셋·번역·�
     expect(result[0].status).toBe('review');
   });
 
+  it('merge: 앱에서 지정한 scene.outfits 는 새 파싱 결과에 없으면 승계되고, 새 파싱(#복장)에 있으면 그게 이긴다', () => {
+    const prev: Scene[] = [scene('s1', '장면1', { outfits: { 한지수: '수영복' } })];
+    // 새 파싱에 #복장이 없는 경우 — 앱에서 지정한 예외를 승계.
+    const nextNoTag: Scene[] = [scene('n1', '장면1')];
+    const resultCarried = mergeScenes(prev, nextNoTag, 'merge');
+    expect(resultCarried[0].outfits).toEqual({ 한지수: '수영복' });
+
+    // 새 파싱에 #복장이 있는 경우 — 대본(엑셀/텍스트)이 정본이라 그게 이긴다.
+    const nextWithTag: Scene[] = [scene('n2', '장면1', { outfits: { 한지수: '교복' } })];
+    const resultOverridden = mergeScenes(prev, nextWithTag, 'merge');
+    expect(resultOverridden[0].outfits).toEqual({ 한지수: '교복' });
+  });
+
   it('동명 장면이 여럿이면 등장 순서대로(FIFO) 매칭된다', () => {
     const prev: Scene[] = [
       scene('s1', '교실', { status: 'approved', lines: [{ kind: 'narration', text: '아침' }] }),

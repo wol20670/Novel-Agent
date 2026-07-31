@@ -110,6 +110,19 @@ export interface Scene {
   outfits?: Record<string, string>;
 }
 
+/**
+ * 배경 이름에 keyword 가 포함되면 그 캐릭터에게 outfit 을 입힌다(부분 일치).
+ * 한 배경이 여러 키워드에 걸리면 **더 구체적인(긴) 키워드**가 이긴다 — 예: '밤 카페 안'은
+ * '카페'(2자)와 '밤 카페'(4자) 규칙에 모두 걸리지만 '밤 카페' 쪽이 적용된다. 길이가 같으면 먼저 추가한 순.
+ * (순서를 사용자가 직접 조정하게 두면, 정작 우선순위가 걸리는 건 "같은 캐릭터의 다른 의상 규칙 사이"인데
+ *  UI 는 의상별로 나뉘어 있어 조정 자체가 불가능했다 — 길이 기준이 조정 없이도 의도대로 동작한다.)
+ */
+export interface OutfitRule {
+  keyword: string;
+  charName: string;
+  outfit: string;
+}
+
 /** 캐릭터 의상(복장) — 의상마다 표정 세트를 따로 가진다. '기본' 의상은 Character.expressions 자체. */
 export interface Outfit {
   /** 의상 이름(예: '수영복', '교복'). '기본'은 예약어. */
@@ -261,6 +274,12 @@ export interface Project {
     bodyFontId?: string;
     nameFontId?: string;
   };
+  /**
+   * 배경 이름 키워드 → 캐릭터 의상 자동 지정 규칙(프로젝트 단위, 에셋 탭 캐릭터 카드에서 편집).
+   * 장면마다 `#복장`을 반복해 적지 않아도, 배경 이름에 키워드가 들어가면 자동으로 그 의상을 입힌다.
+   * 우선순위는 resolveOutfit/outfitForScene 참고(장면 직접 지정 > 규칙 첫 일치 > '기본').
+   */
+  outfitRules?: OutfitRule[];
 }
 
 export type GuiOverrides = NonNullable<Project['guiOverrides']>;
@@ -284,6 +303,29 @@ export function spriteAssetId(c: Character, outfit: string | undefined, expr: Ex
     if (id) return id;
   }
   return c.expressions[expr];
+}
+
+/**
+ * 1) 장면 직접 지정(#복장·장면 카드) → 2) 배경 이름에 키워드가 든 규칙 중 **가장 긴 키워드** →
+ * 3) '기본'. 길이가 같으면 먼저 추가된 규칙이 이긴다.
+ */
+export function resolveOutfit(rules: OutfitRule[] | undefined, scene: Scene, charName: string): string {
+  const explicit = scene.outfits?.[charName];
+  if (explicit) return explicit;
+  const bg = scene.background ?? '';
+  let best: { outfit: string; len: number } | undefined;
+  for (const r of rules ?? []) {
+    const kw = r.keyword.trim();
+    if (!kw || r.charName !== charName || !bg.includes(kw)) continue;
+    // 더 구체적인(긴) 키워드가 이긴다. 동률이면 먼저 추가된 규칙 유지(> 가 아니라 >= 를 쓰지 않는 이유).
+    if (!best || kw.length > best.len) best = { outfit: r.outfit, len: kw.length };
+  }
+  return best?.outfit ?? '기본';
+}
+
+/** resolveOutfit 의 project 편의 래퍼. */
+export function outfitForScene(project: Project, scene: Scene, charName: string): string {
+  return resolveOutfit(project.outfitRules, scene, charName);
 }
 
 /** 프로젝트의 base 로케일(대본 원문 언어). 미지정이면 'ko'. */

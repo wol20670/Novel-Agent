@@ -449,6 +449,9 @@ export function mergeScenes(prev: Scene[], next: Scene[], mode: AnalyzeMode): Sc
       id: prevMatch.id, // 선택 상태·협업 프레즌스 안정
       lines: carryLines(prevMatch.lines, ns.lines),
       status: contentSame ? prevMatch.status : 'review',
+      // 대본에 #복장이 있으면 그게 정본(next 우선), 없으면 앱에서 지정한 예외(장면 카드 수동 지정)를
+      // 승계 — carryLineMeta 의 "엑셀이 정본" 원칙과 동일.
+      outfits: ns.outfits ?? prevMatch.outfits,
     };
   });
 }

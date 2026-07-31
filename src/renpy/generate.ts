@@ -1,8 +1,8 @@
 // 승인된 장면들로 Ren'Py 프로젝트 파일 집합을 생성한다.
 // 파일 본문(텍스트)만 만들고, 바이너리 에셋(PNG/WAV)은 zip 빌더가 채운다.
 
-import type { Project, Scene, Line, Character, Expression } from '../types';
-import { RENPY_LANG, LOCALE_LABEL, baseLocaleOf, effectiveTextLocales, effectiveVoiceLocales } from '../types';
+import type { Project, Scene, Line, Character, Expression, OutfitRule } from '../types';
+import { RENPY_LANG, LOCALE_LABEL, baseLocaleOf, effectiveTextLocales, effectiveVoiceLocales, resolveOutfit } from '../types';
 import { SlugMap } from './slug';
 import { generateGuiFiles, resolveTheme, withGuiOverrides } from './gui';
 import { CONFIRM_STRINGS, UI_STRINGS, uiTr } from './gui/uiStrings';
@@ -448,6 +448,7 @@ function scriptBody(
   screenH: number,
   items: ItemRef[],
   sideById: Map<string, 'left' | 'right' | 'auto'>,
+  outfitRules: OutfitRule[] | undefined,
 ): string {
   const resolve = makeResolver(refs);
   const itemTag = new Map(items.map((it) => [it.name, it.tag]));
@@ -572,8 +573,9 @@ function scriptBody(
         for (const sid of cgActive ? [] : speakerIds) {
           const owned = spritesByChar.get(sid);
           if (!owned || !owned.length) continue;
-          // 이 장면에서 입을 의상(없으면 기본). 해당 의상 스프라이트가 없으면 기본 의상으로 폴백.
-          const wantedOutfit = s.outfits?.[owned[0].charName] ?? '기본';
+          // 이 장면에서 입을 의상 — 장면 직접 지정 > 배경 키워드 규칙 > 기본(resolveOutfit 우선순위).
+          // 해당 의상 스프라이트가 없으면 기본 의상으로 폴백.
+          const wantedOutfit = resolveOutfit(outfitRules, s, owned[0].charName);
           let pool = owned.filter((o) => o.outfit === wantedOutfit);
           if (!pool.length) pool = owned.filter((o) => o.outfit === '기본');
           if (!pool.length) pool = owned;
@@ -932,7 +934,7 @@ export function generateRenpyFiles(project: Project): {
   const items = resolveItems(project);
 
   const files: RenpyFile[] = [
-    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById) },
+    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules) },
     { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites, items) },
     { path: 'game/options.rpy', content: optionsRpy(project) },

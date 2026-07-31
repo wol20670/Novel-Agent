@@ -9,7 +9,7 @@ import { canvasSprite } from '../generators/image/canvasSprite';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { getAsset } from '../storage/assetStore';
 import { spreadPositions } from '../renpy/generate';
-import { emojiFor, spriteAssetId, type Scene, type Character, type Expression, type Line } from '../types';
+import { emojiFor, spriteAssetId, resolveOutfit, type Scene, type Character, type Expression, type Line } from '../types';
 
 const speakersOf = (l: Line): string[] =>
   l.kind === 'dialogue' ? (l.members?.length ? l.members : [l.speaker]) : [];
@@ -56,6 +56,8 @@ function PreviewSprite({
 
 export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: string }) {
   const characters = useStore((s) => s.project.characters);
+  // 배경 키워드 의상 규칙 — project 전체가 아니라 이 배열만 좁게 구독(불필요 리렌더 방지).
+  const outfitRules = useStore((s) => s.project.outfitRules);
   const [step, setStep] = useState(0);
   useEffect(() => setStep(0), [scene.id]);
 
@@ -168,7 +170,7 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
         {activeCgIdx < 0 && [...visible].map(([nm, ex]) => {
           const c = charByName.get(nm);
           return c ? (
-            <PreviewSprite key={nm} char={c} expr={ex} outfit={scene.outfits?.[nm]} xpct={xpos.get(nm) ?? 50} />
+            <PreviewSprite key={nm} char={c} expr={ex} outfit={resolveOutfit(outfitRules, scene, nm)} xpct={xpos.get(nm) ?? 50} />
           ) : null;
         })}
         {cur && (

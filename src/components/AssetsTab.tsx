@@ -441,6 +441,8 @@ function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Local
   const clearAll = useStore((s) => s.clearCharacterSprites);
   const addOutfit = useStore((s) => s.addOutfit);
   const removeOutfit = useStore((s) => s.removeOutfit);
+  const addOutfitRule = useStore((s) => s.addOutfitRule);
+  const removeOutfitRule = useStore((s) => s.removeOutfitRule);
   const setI18nName = useStore((s) => s.setCharacterI18nName);
   const batchVoiceCharacter = useStore((s) => s.batchVoiceCharacter);
   const voiceBatchBusy = useStore((s) => !!s.busy[`batch:voice:${name}`]);
@@ -453,12 +455,33 @@ function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Local
   // 현재 편집 중인 의상(기본/추가 의상). 업로드·썸네일이 모두 이 의상을 대상으로 한다.
   const [outfit, setOutfit] = useState('기본');
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
+  const [ruleKw, setRuleKw] = useState('');
   const outfits = characterOutfits(c);
   const activeOutfit = outfit === '기본' ? undefined : c.outfits?.find((o) => o.name === outfit);
   const exprStore: Partial<Record<string, string>> = outfit === '기본' ? c.expressions : activeOutfit?.expressions ?? {};
   const hasAny = exprList.some((ex) => exprStore[ex]);
   // 이름이 바뀐 뒤 사라진 의상을 가리키면 기본으로 복귀.
   if (outfit !== '기본' && !activeOutfit) setOutfit('기본');
+
+  // 이 (캐릭터, 의상)에 걸린 배경 키워드 규칙 — project.outfitRules 는 프로젝트 전체 배열이라
+  // 표시는 필터링하되, 삭제/이동은 항상 그 안의 진짜 index 를 써야 한다(필터링된 위치와 다름).
+  const allRules = project.outfitRules ?? [];
+  const myRuleIdxs = useMemo(
+    () => allRules.reduce<number[]>((acc, r, i) => {
+      if (r.charName === name && r.outfit === outfit) acc.push(i);
+      return acc;
+    }, []),
+    [allRules, name, outfit],
+  );
+  // 키워드별 적용 장면 수(배경 이름에 그 키워드가 포함된 장면) — 반복마다 다시 훑지 않도록 캐싱.
+  const ruleCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const idx of myRuleIdxs) {
+      const kw = allRules[idx].keyword;
+      if (!map.has(kw)) map.set(kw, project.scenes.filter((sc) => (sc.background ?? '').includes(kw)).length);
+    }
+    return map;
+  }, [myRuleIdxs, allRules, project.scenes]);
 
   return (
     <div className="card border-edge p-3">
@@ -614,6 +637,67 @@ function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Local
           >
             의상 삭제
           </button>
+        </div>
+      )}
+
+      {/* 배경 키워드 규칙 — 장면마다 #복장을 반복해 적지 않아도, 배경 이름에 키워드가 들어가면
+          이 의상이 자동으로 입혀진다(resolveOutfit). 위에 있는 규칙이 먼저 적용된다(첫 일치 승). */}
+      {outfit !== '기본' && (
+        <div className="rounded-lg border border-edge p-2 mb-2 bg-panel2/40">
+          <div className="flex items-center gap-1 mb-1">
+            <span className="text-[10px] text-gray-500">🏷 이 의상을 입을 배경 키워드</span>
+          </div>
+          {myRuleIdxs.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-1.5">
+              {myRuleIdxs.map((idx) => {
+                const r = allRules[idx];
+                const n = ruleCounts.get(r.keyword) ?? 0;
+                return (
+                  <span
+                    key={idx}
+                    className={`chip text-[10px] flex items-center gap-1 ${
+                      n === 0 ? 'border-amber-500/50 text-amber-600' : 'border-edge text-gray-400'
+                    }`}
+                    title={n === 0 ? '이 키워드를 배경 이름에 포함한 장면이 없습니다(오타 확인)' : `${n}개 장면에 적용됨`}
+                  >
+                    {r.keyword} ×{n}
+                    <button className="hover:text-rose-600" onClick={() => removeOutfitRule(idx)} title="규칙 삭제">
+                      ✕
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex gap-1">
+            <input
+              className="field text-xs flex-1"
+              placeholder="예: 카페, 워터파크"
+              value={ruleKw}
+              onChange={(e) => setRuleKw(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && ruleKw.trim()) {
+                  addOutfitRule(name, outfit, ruleKw);
+                  setRuleKw('');
+                }
+              }}
+            />
+            <button
+              className="btn-ghost text-[11px] shrink-0"
+              disabled={!ruleKw.trim()}
+              onClick={() => {
+                addOutfitRule(name, outfit, ruleKw);
+                setRuleKw('');
+              }}
+            >
+              ＋ 추가
+            </button>
+          </div>
+          <p className="text-[10px] text-gray-500 leading-snug mt-1">
+            배경 이름에 이 키워드가 들어간 장면에 자동으로 입힙니다. 한 배경이 여러 키워드에 걸리면 더 구체적인(긴)
+            키워드가 이기고, 아무 규칙에도 안 걸리면 기본 의상입니다. 특정 장면만 다르게 하려면 장면 카드에서 직접
+            고르세요.
+          </p>
         </div>
       )}
 

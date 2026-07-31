@@ -1,7 +1,20 @@
 import { memo, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store';
-import { SCENE_STATUS_LABEL, effectiveExpressions, emojiFor, baseLocaleOf, LOCALE_LABEL, type SceneStatus, type Expression, type Line, type Locale, type Character } from '../types';
+import {
+  SCENE_STATUS_LABEL,
+  effectiveExpressions,
+  emojiFor,
+  baseLocaleOf,
+  LOCALE_LABEL,
+  characterOutfits,
+  resolveOutfit,
+  type SceneStatus,
+  type Expression,
+  type Line,
+  type Locale,
+  type Character,
+} from '../types';
 import { inferEmotion } from '../generators/emotion';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
@@ -27,6 +40,21 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
   // LineRow/LineEmotion 에서 O(1) 조회로 바꾼다(장면당 대사 수십 줄 × 캐릭터 목록 스캔 방지).
   const characters = useStore((s) => s.project.characters);
   const charMap = useMemo(() => new Map(characters.map((c) => [c.name, c])), [characters]);
+  // 배경 키워드 의상 규칙 — project 전체가 아니라 이 배열만 좁게 구독(SceneCard 는 memo 라 불필요한
+  // 전체 리렌더를 피해야 한다).
+  const outfitRules = useStore((s) => s.project.outfitRules);
+  // 이 장면에 등장하는(대사 화자) 캐릭터 중 추가 의상을 가진 캐릭터만 — 의상 지정 UI 대상.
+  const outfitChars = useMemo(() => {
+    const names = new Set<string>();
+    for (const l of scene.lines) {
+      if (l.kind !== 'dialogue') continue;
+      if (l.members?.length) l.members.forEach((m) => names.add(m));
+      else names.add(l.speaker);
+    }
+    return [...names]
+      .map((nm) => charMap.get(nm))
+      .filter((c): c is Character => !!c && (c.outfits?.length ?? 0) > 0);
+  }, [scene.lines, charMap]);
   // 협업 — 지금 이 장면을 보고 있는 상대방(있으면 편집 충돌을 피하라는 신호).
   // .filter(...) 는 매 렌더마다 새 배열이라 Object.is 비교가 항상 실패 → useShallow 로 배열
   // 내용을 비교해야 장면 수백 개에서도 관계없는 상태 변경마다 전체 카드가 리렌더되지 않는다.
@@ -132,6 +160,42 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
           />
         </div>
       </div>
+
+      {/* 의상 지정 — 배경 키워드 규칙(에셋 탭)에 맡기거나, 이 장면만 직접 지정(#복장과 동일 효과). */}
+      {outfitChars.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3" onClick={(e) => e.stopPropagation()}>
+          <span className="label w-full mb-0">👗 의상</span>
+          {outfitChars.map((c) => {
+            const current = scene.outfits?.[c.name] ?? '';
+            return (
+              <div key={c.name} className="flex items-center gap-1">
+                <span className="text-[11px] text-gray-400">{c.name}</span>
+                <select
+                  className="field text-xs"
+                  value={current}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const next = { ...(scene.outfits ?? {}) };
+                    if (v) next[c.name] = v;
+                    else delete next[c.name];
+                    update(sceneId, { outfits: Object.keys(next).length ? next : undefined });
+                  }}
+                >
+                  <option value="">자동(규칙)</option>
+                  {characterOutfits(c).map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+                {!current && (
+                  <span className="text-[10px] text-gray-500">→ {resolveOutfit(outfitRules, scene, c.name)}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* 대사/지문 미리보기 */}
       <div className="bg-ink/70 rounded-lg border border-edge p-3 max-h-44 overflow-y-auto text-sm mb-3 space-y-0.5">
