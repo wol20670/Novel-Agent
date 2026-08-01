@@ -379,6 +379,10 @@ screen quick_menu():
                 textbutton _("기록") action [ShowMenu('history'), SetVariable("quick_menu_expanded", False)]
                 textbutton _("스킵") action [Skip(), SetVariable("quick_menu_expanded", False)] alternate Skip(fast=True, confirm=True)
                 textbutton _("자동") action [Preference("auto-forward", "toggle"), SetVariable("quick_menu_expanded", False)]
+                # 대사창·메뉴를 숨기고 CG/배경을 감상 — 아무 곳이나 클릭하면 자동으로 돌아온다
+                # (Ren'Py 기본 h 키·가운데 클릭과 동일한 동작을 버튼으로도 노출). 드롭다운을 먼저
+                # 접어야(SetVariable 먼저) HideInterface 가 클릭을 기다리는 동안 메뉴가 깔끔하게 사라진다.
+                textbutton _("숨기기") action [SetVariable("quick_menu_expanded", False), HideInterface()]
                 textbutton _("저장") action [ShowMenu('save'), SetVariable("quick_menu_expanded", False)]
                 textbutton _("빠른저장") action [QuickSave(), SetVariable("quick_menu_expanded", False)]
                 textbutton _("빠른불러오기") action [QuickLoad(), SetVariable("quick_menu_expanded", False)]
@@ -1398,6 +1402,8 @@ screen quick_menu():
             textbutton _("뒤로") action Rollback()
             textbutton _("스킵") action Skip() alternate Skip(fast=True, confirm=True)
             textbutton _("자동") action Preference("auto-forward", "toggle")
+            # 터치에는 h 키·가운데 클릭이 없어 이 버튼이 대사창을 숨기는 유일한 방법이다.
+            textbutton _("숨기기") action [SetVariable("quick_menu_expanded", False), HideInterface()]
             textbutton _("메뉴") action ShowMenu()
 
 

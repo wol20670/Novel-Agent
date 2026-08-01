@@ -381,6 +381,17 @@ function AnalyzeMergeModal({
 }) {
   // 장면 태그(#S/장면:)가 인식 안 돼 대본 전체가 한 장면으로 뭉개진 흔한 실수를 여기서 바로 알린다.
   const suspiciouslyFew = newCount === 1 && prevCount >= 3;
+  // 변경 요약 — 해당되는 항목만 모아 ' · ' 로 잇는다(빈 항목 때문에 앞에 구분자가 남지 않도록).
+  // 표기 수정(띄어쓰기·부호만)은 음성이 살아남는 값싼 변경이라 대사 수정과 나눠 보여준다.
+  const changeSummary: string[] = [
+    preview.linesChanged > 0 && `✏️ 대사 수정·추가 ${preview.linesChanged}줄`,
+    preview.linesRespelled > 0 && `🔤 표기 수정 ${preview.linesRespelled}줄`,
+    preview.linesRemoved > 0 && `➖ 삭제 ${preview.linesRemoved}줄`,
+    preview.scenesAttrChanged > 0 && `🖼 배경·BGM 변경 ${preview.scenesAttrChanged}개 장면`,
+    preview.scenesTagChanged > 0 &&
+      `🏷 태그 변경(점프·선택지·의상·연출) ${preview.scenesTagChanged}개 장면` +
+        `(${preview.tagChangedTitles.join(', ')}${preview.scenesTagChanged > preview.tagChangedTitles.length ? ' 외' : ''})`,
+  ].filter((s): s is string => !!s);
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="card w-full max-w-md p-4 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
@@ -410,21 +421,10 @@ function AnalyzeMergeModal({
           <span className="text-[11px] text-gray-400">
             유지 {preview.kept} · 추가 {preview.added} · 제거 {preview.removed}
           </span>
-          {preview.linesChanged === 0 &&
-          preview.linesRespelled === 0 &&
-          preview.linesRemoved === 0 &&
-          preview.scenesAttrChanged === 0 ? (
-            <span className="text-[11px] text-emerald-600">✅ 대사·배경 변경 없음 — 병합해도 내용은 그대로입니다</span>
+          {changeSummary.length === 0 ? (
+            <span className="text-[11px] text-emerald-600">✅ 대사·배경·태그 변경 없음 — 병합해도 내용은 그대로입니다</span>
           ) : (
-            <span className="text-[11px] text-gray-300">
-              {/* 표기 수정(띄어쓰기·부호만)은 음성이 살아남는 값싼 변경이라 따로 보여준다 —
-                  "대사 수정 0줄"만 보고 아무것도 안 바뀐다고 오해하지 않도록. */}
-              {preview.linesChanged > 0 && `✏️ 대사 수정·추가 ${preview.linesChanged}줄`}
-              {preview.linesChanged > 0 && preview.linesRespelled > 0 && ' · '}
-              {preview.linesRespelled > 0 && `🔤 표기 수정 ${preview.linesRespelled}줄`}
-              {preview.linesRemoved > 0 && ` · ➖ 삭제 ${preview.linesRemoved}줄`}
-              {preview.scenesAttrChanged > 0 && ` · 🖼 배경·BGM 변경 ${preview.scenesAttrChanged}개 장면`}
-            </span>
+            <span className="text-[11px] text-gray-300">{changeSummary.join(' · ')}</span>
           )}
           {preview.removed > 0 && (
             <span className="text-[11px] text-amber-600">

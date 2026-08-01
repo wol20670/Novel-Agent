@@ -37,6 +37,10 @@ export interface MergePreview {
   statusReset: number;
   /** 배경/BGM 이름이 바뀌어 업로드 에셋 연결이 끊기는(재연결 실패) 매칭된 장면 수. */
   assetUnlink: number;
+  /** 태그성 필드(점프·선택지·의상·연출) 중 하나라도 바뀐, 매칭된(살아남는) 장면 수. */
+  scenesTagChanged: number;
+  /** scenesTagChanged 장면들의 next 제목(최대 3개 — 나머지는 개수로만 안내). */
+  tagChangedTitles: string[];
 }
 
 /**
@@ -169,12 +173,42 @@ function carryLines(prevLines: Line[], nextLines: Line[]): Line[] {
   return pairs.map((p) => (p.prev ? carryLineMeta(p.next, p.prev) : p.next));
 }
 
-/** 장면 하나의 "내용"이 완전히 같은지(배경명·BGM명·CG 설명·라인 시퀀스) — status 승계 판정 기준. */
+/**
+ * 태그성 필드(점프·선택지·의상·연출)가 달라졌는지 — diffMatchedScene(미리보기 표시)과
+ * sceneContentEqual(승인 승계 판정)이 같은 기준을 쓰도록 한 곳에 모은다.
+ * affectsGame: 점프·선택지·의상 중 하나라도 다르면(빌드되는 게임 자체가 달라짐).
+ * any: affectsGame 이거나 연출(#연출)이 다르면 — 연출은 AI 프롬프트용 메모라 게임 출력에는
+ *      영향이 없지만, 미리보기에는 "달라졌다"고 알려주는 게 사용자에게 유용하다.
+ */
+function tagFieldsChanged(prev: Scene, next: Scene): { any: boolean; affectsGame: boolean } {
+  const jumpChanged = (prev.jumpTo ?? '') !== (next.jumpTo ?? '');
+  const choicesChanged =
+    prev.choices.length !== next.choices.length ||
+    !prev.choices.every(
+      (c, i) => c.text === next.choices[i].text && (c.target ?? '') === (next.choices[i].target ?? '')
+    );
+  const prevOutfitKeys = Object.keys(prev.outfits ?? {}).sort();
+  const nextOutfitKeys = Object.keys(next.outfits ?? {}).sort();
+  const outfitsChanged =
+    prevOutfitKeys.length !== nextOutfitKeys.length ||
+    !prevOutfitKeys.every((k, i) => k === nextOutfitKeys[i] && prev.outfits![k] === next.outfits![k]);
+  const directionChanged = prev.direction.join('\n') !== next.direction.join('\n');
+
+  const affectsGame = jumpChanged || choicesChanged || outfitsChanged;
+  return { any: affectsGame || directionChanged, affectsGame };
+}
+
+/**
+ * 장면 하나의 "내용"이 완전히 같은지(배경명·BGM명·CG 설명·라인 시퀀스·점프/선택지/의상) — status 승계 판정 기준.
+ * 연출(#연출)은 일부러 제외한다 — AI 프롬프트용 메모라 실제 게임 출력에 영향이 없어서, 메모만 고쳤다고
+ * 승인이 통째로 풀리면 곤란하다(미리보기에는 표시하되 승인은 유지 — tagFieldsChanged 의 any/affectsGame 구분과 동일한 취지).
+ */
 function sceneContentEqual(prev: Scene, next: Scene): boolean {
   if ((prev.background ?? '') !== (next.background ?? '')) return false;
   if ((prev.bgm ?? '') !== (next.bgm ?? '')) return false;
   if (prev.cg.length !== next.cg.length) return false;
   if (!prev.cg.every((d, i) => d.trim() === next.cg[i].trim())) return false;
+  if (tagFieldsChanged(prev, next).affectsGame) return false;
   return linesIdentical(prev.lines, next.lines);
 }
 
@@ -210,6 +244,8 @@ export interface SceneDiff {
   i18nLoss: number;
   /** 배경·BGM·CG 중 하나라도 바뀌었는지. */
   attrChanged: boolean;
+  /** 태그성 필드(점프·선택지·의상·연출) 중 하나라도 바뀌었는지. */
+  tagChanged: boolean;
 }
 
 /**
@@ -243,6 +279,8 @@ export function diffMatchedScene(prev: Scene, next: Scene): SceneDiff {
     prev.cg.length !== next.cg.length ||
     !prev.cg.every((d, i) => d.trim() === next.cg[i].trim());
 
+  const tagChanged = tagFieldsChanged(prev, next).any;
+
   return {
     linesCarried,
     linesChanged,
@@ -252,6 +290,7 @@ export function diffMatchedScene(prev: Scene, next: Scene): SceneDiff {
     voiceLoss,
     i18nLoss,
     attrChanged,
+    tagChanged,
   };
 }
 
@@ -376,6 +415,8 @@ export function previewMerge(prev: Scene[], next: Scene[]): MergePreview {
   let i18nLoss = 0;
   let statusReset = 0;
   let assetUnlink = 0;
+  let scenesTagChanged = 0;
+  const tagChangedTitles: string[] = [];
 
   for (const m of matches) {
     if (!m.prevMatch) {
@@ -393,6 +434,10 @@ export function previewMerge(prev: Scene[], next: Scene[]): MergePreview {
     voiceLoss += diff.voiceLoss;
     i18nLoss += diff.i18nLoss;
     if (diff.attrChanged) scenesAttrChanged += 1;
+    if (diff.tagChanged) {
+      scenesTagChanged += 1;
+      if (tagChangedTitles.length < 3) tagChangedTitles.push(m.next.title);
+    }
 
     if (!sceneContentEqual(prevSc, m.next) && prevSc.status !== 'review') statusReset += 1;
 
@@ -424,6 +469,8 @@ export function previewMerge(prev: Scene[], next: Scene[]): MergePreview {
     i18nLoss,
     statusReset,
     assetUnlink,
+    scenesTagChanged,
+    tagChangedTitles,
   };
 }
 

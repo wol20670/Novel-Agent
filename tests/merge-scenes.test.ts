@@ -409,3 +409,74 @@ describe('previewMerge: 줄 단위 diff — 재분석 모달이 사용자가 실
     expect(diff.voiceCarriedLoose).toBe(1); // '반가워!' -> '반가워.' 느슨 매칭
   });
 });
+
+describe('previewMerge/mergeScenes: 태그성 필드(점프·선택지·의상·연출) 변경 감지 — "변경 없음" 오탐 방지', () => {
+  it('사용자 실제 사례: 대사·배경은 그대로인데 #끝(jumpTo) 만 추가되면 scenesTagChanged=1, 나머지 "변경 없음" 판정용 수치는 모두 0', () => {
+    const lines: Line[] = [{ kind: 'dialogue', speaker: '민주', text: '안녕' }];
+    const prev: Scene[] = [scene('s1', '장면1', { lines })];
+    const next: Scene[] = [scene('n1', '장면1', { lines, jumpTo: '끝' })];
+
+    const preview = previewMerge(prev, next);
+
+    expect(preview.scenesTagChanged).toBe(1);
+    expect(preview.tagChangedTitles).toContain('장면1');
+    // 옛 조건(변경 없음 판정에 쓰던 값들)은 여전히 전부 0 — 그래서 예전엔 "변경 없음"이라고 잘못 표시됐다.
+    expect(preview.linesChanged).toBe(0);
+    expect(preview.linesRespelled).toBe(0);
+    expect(preview.linesRemoved).toBe(0);
+    expect(preview.scenesAttrChanged).toBe(0);
+  });
+
+  it('choices 가 바뀌면 scenesTagChanged=1', () => {
+    const lines: Line[] = [{ kind: 'dialogue', speaker: '민주', text: '안녕' }];
+    const prev: Scene[] = [scene('s1', '장면1', { lines, choices: [{ text: '간다', target: '장면2' }] })];
+    const next: Scene[] = [scene('n1', '장면1', { lines, choices: [{ text: '간다', target: '장면3' }] })];
+
+    const preview = previewMerge(prev, next);
+    expect(preview.scenesTagChanged).toBe(1);
+  });
+
+  it('outfits 가 바뀌면 scenesTagChanged=1', () => {
+    const lines: Line[] = [{ kind: 'dialogue', speaker: '민주', text: '안녕' }];
+    const prev: Scene[] = [scene('s1', '장면1', { lines, outfits: { 한지수: '교복' } })];
+    const next: Scene[] = [scene('n1', '장면1', { lines, outfits: { 한지수: '수영복' } })];
+
+    const preview = previewMerge(prev, next);
+    expect(preview.scenesTagChanged).toBe(1);
+  });
+
+  it('승인된 장면의 jumpTo 가 바뀌면 statusReset=1 이고, 실제 병합 결과는 review 로 되돌아간다', () => {
+    const lines: Line[] = [{ kind: 'dialogue', speaker: '민주', text: '안녕' }];
+    const prev: Scene[] = [scene('s1', '장면1', { lines, status: 'approved' })];
+    const next: Scene[] = [scene('n1', '장면1', { lines, jumpTo: '끝' })];
+
+    const preview = previewMerge(prev, next);
+    expect(preview.statusReset).toBe(1);
+
+    const merged = mergeScenes(prev, next, 'merge');
+    expect(merged[0].status).toBe('review');
+  });
+
+  it('승인된 장면의 연출(direction)만 바뀌면 scenesTagChanged=1 이지만 statusReset=0 이고 승인 상태가 유지된다(의도적 비대칭)', () => {
+    const lines: Line[] = [{ kind: 'dialogue', speaker: '민주', text: '안녕' }];
+    const prev: Scene[] = [scene('s1', '장면1', { lines, status: 'approved', direction: ['어두운 톤'] })];
+    const next: Scene[] = [scene('n1', '장면1', { lines, direction: ['밝은 톤'] })];
+
+    const preview = previewMerge(prev, next);
+    expect(preview.scenesTagChanged).toBe(1);
+    expect(preview.statusReset).toBe(0);
+
+    const merged = mergeScenes(prev, next, 'merge');
+    expect(merged[0].status).toBe('approved');
+  });
+
+  it('완전히 동일한 대본이면 scenesTagChanged=0 이고 tagChangedTitles 는 비어있다(회귀 가드)', () => {
+    const lines: Line[] = [{ kind: 'dialogue', speaker: '민주', text: '안녕' }];
+    const prev: Scene[] = [scene('s1', '장면1', { lines, jumpTo: '끝', choices: [{ text: '간다' }] })];
+    const next: Scene[] = [scene('n1', '장면1', { lines, jumpTo: '끝', choices: [{ text: '간다' }] })];
+
+    const preview = previewMerge(prev, next);
+    expect(preview.scenesTagChanged).toBe(0);
+    expect(preview.tagChangedTitles).toEqual([]);
+  });
+});

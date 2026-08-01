@@ -69,6 +69,7 @@ export const UI_STRINGS: UiTr[] = [
   { ko: '스킵', en: 'Skip', ja: 'スキップ' },
   { ko: '스킵 중', en: 'Skipping', ja: 'スキップ中' },
   { ko: '자동', en: 'Auto', ja: 'オート' },
+  { ko: '숨기기', en: 'Hide UI', ja: 'UIを隠す' },
   { ko: '빠른 저장', en: 'Quick Save', ja: 'クイックセーブ' },
   { ko: '빠른저장', en: 'Quick Save', ja: 'クイックセーブ' },
   { ko: '빠른불러오기', en: 'Quick Load', ja: 'クイックロード' },
