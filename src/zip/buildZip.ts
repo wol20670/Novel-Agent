@@ -8,7 +8,7 @@ import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName, extFromMime
 import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
-import { canvasMenuArt, solidPng, buttonBgAssets, textboxGradientPng, roundedPillPng, quickPillAssets } from '../generators/image/canvasMenu';
+import { menuBackdropPng, solidPng, buttonBgAssets, textboxGradientPng, roundedPillPng, quickPillAssets } from '../generators/image/canvasMenu';
 import { resolveTheme } from '../renpy/gui';
 import { loadFontCatalog, fontById, DEFAULT_FONT } from '../fonts/fontCatalog';
 import { ensureFontBlob, ensureFontLicense } from '../fonts/fontCache';
@@ -233,9 +233,9 @@ export async function collectProjectFiles(
     out.push({ path: `game/images/${it.file}`, data: blob });
   }
 
-  // 자체 GUI 메뉴 배경(테마별 Canvas 생성) — gui.rpy 가 참조하는 유일한 그림.
+  // 타이틀·메뉴 배경 — 업로드 전용(앱은 그림을 생성하지 않음). 업로드가 없으면 테마색
+  // 그라데이션 폴백만 깐다(장식 아트 없음, 게임이 안 깨지게 하는 최소한의 대비책).
   const theme = resolveTheme(project.genre, project.guiTheme);
-  // 업로드한 메뉴 배경이 있으면 그것을, 없으면 Canvas 생성본을 쓴다.
   const menuArtFor = async (which: 'main' | 'game'): Promise<Blob> => {
     const upId = project.menuArt?.[which];
     if (upId) {
@@ -243,7 +243,7 @@ export async function collectProjectFiles(
       if (up) return up;
     }
     placeholders += 1;
-    return canvasMenuArt(theme, project.width, project.height, which);
+    return menuBackdropPng(theme, project.width, project.height);
   };
   out.push({ path: 'game/gui/main_menu.png', data: await menuArtFor('main') });
   out.push({ path: 'game/gui/game_menu.png', data: await menuArtFor('game') });

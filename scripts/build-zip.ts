@@ -86,11 +86,11 @@ for (const sp of sprites) {
   out.push({ path: `game/images/${sp.file}`, data: b64ToBuf(png) });
 }
 
-// 메뉴 아트(테마)
+// 메뉴 배경(업로드 전용 — CLI 빌더엔 업로드본이 없으므로 항상 테마색 그라데이션 폴백)
 for (const variant of ['main', 'game'] as const) {
   const png = await page.evaluate(
-    async ([t, w, h, v]) => (window as any).toB64(await (window as any).Gen.canvasMenuArt(t, w, h, v)),
-    [theme, W, H, variant] as const,
+    async ([t, w, h]) => (window as any).toB64(await (window as any).Gen.menuBackdropPng(t, w, h)),
+    [theme, W, H] as const,
   );
   out.push({ path: `game/gui/${variant === 'main' ? 'main_menu' : 'game_menu'}.png`, data: b64ToBuf(png) });
 }

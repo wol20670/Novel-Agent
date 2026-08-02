@@ -21,7 +21,6 @@ Ren'Py 비주얼노벨의 메인 메뉴 & 대사 UI "색 팔레트"를 설계합
   "dialogueBox": "#rrggbb",   // 대사창 베이스색(불투명 기준)
   "dialogueText": "#rrggbb",  // 대사 글자색
   "nameText": "#rrggbb",      // 화자 이름색
-  "menuArtStyle": "gradient-soft | dark-vignette | neon-grid | noise-grunge",
   "sceneTransition": "dissolve | fade",
   "rationale": "한 줄 컨셉 설명(한국어)"
 }
@@ -29,8 +28,7 @@ Ren'Py 비주얼노벨의 메인 메뉴 & 대사 UI "색 팔레트"를 설계합
 규칙:
 - 모든 색은 #rrggbb 6자리 hex.
 - 밝은 분위기 → 라이트 배경 + 어두운 글자, 어두운 분위기 → 다크 배경 + 밝은 글자.
-- dialogueBox 위의 dialogueText 는 반드시 잘 읽히도록 높은 대비로.
-- menuArtStyle: 부드러움=gradient-soft, 어두운 무게감=dark-vignette, SF/네온=neon-grid, 거친 공포=noise-grunge.`;
+- dialogueBox 위의 dialogueText 는 반드시 잘 읽히도록 높은 대비로.`;
 
 const COLOR_KEYS = ['accent', 'bgTop', 'bgBottom', 'interfaceText', 'dialogueBox', 'dialogueText', 'nameText'] as const;
 
@@ -79,7 +77,6 @@ export async function openaiTheme(context: string, opts: OpenAIThemeOpts): Promi
   for (const k of COLOR_KEYS) {
     if (typeof parsed[k] === 'string') (out as Record<string, unknown>)[k] = parsed[k];
   }
-  if (typeof parsed.menuArtStyle === 'string') out.menuArtStyle = parsed.menuArtStyle as ThemeCore['menuArtStyle'];
   if (parsed.sceneTransition === 'fade' || parsed.sceneTransition === 'dissolve') {
     out.sceneTransition = parsed.sceneTransition;
   }

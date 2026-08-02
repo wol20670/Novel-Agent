@@ -68,7 +68,7 @@ describe('generateRenpyFiles: 아이템 팝업 + 보관함 출력', () => {
   it('screens.rpy 에 팝업·라이트박스·갤러리 화면과 내비 버튼이 들어간다', () => {
     const sc = fileOf(files, 'game/screens.rpy')!.content;
     expect(sc).toContain('screen item_popup(img, caption):');
-    expect(sc).toContain('screen item_lightbox(img, caption):');
+    expect(sc).toContain('screen gallery_lightbox(img, caption):');
     expect(sc).toContain('screen item_gallery():');
     expect(sc).toContain('textbutton _("발견한 아이템") action ShowMenu("item_gallery")');
   });

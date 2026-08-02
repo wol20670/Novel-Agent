@@ -2,7 +2,7 @@
 // 전체 GuiTheme 으로 안전하게 파생한다. 잘못된 값은 프리셋으로 클램프하고,
 // 대사/메뉴 글자는 명암대비를 강제해 가독성을 보장한다(항상 출하 가능 보장).
 
-import type { GenreId, GuiTheme, MenuArtStyle } from '../../renpy/gui/theme';
+import type { GenreId, GuiTheme } from '../../renpy/gui/theme';
 import { PRESETS } from '../../renpy/gui/theme';
 import { contrast, enforceContrast, isHex, isLight, mix, parseHex, rotateHue, toHex, withAlpha } from './color';
 
@@ -15,12 +15,9 @@ export interface ThemeCore {
   dialogueBox: string; // 불투명 베이스(투명도는 우리가 부여)
   dialogueText: string;
   nameText: string;
-  menuArtStyle: MenuArtStyle;
   sceneTransition: 'dissolve' | 'fade';
   rationale?: string;
 }
-
-const ART_STYLES: MenuArtStyle[] = ['gradient-soft', 'dark-vignette', 'neon-grid', 'noise-grunge'];
 
 const pick = (v: unknown, fallback: string): string => (isHex(v) ? (v as string) : fallback);
 
@@ -36,7 +33,6 @@ export function presetCore(genre: GenreId): ThemeCore {
     dialogueBox: opaque(p.dialogueBox),
     dialogueText: p.dialogueText,
     nameText: p.nameText,
-    menuArtStyle: p.menuArtStyle,
     sceneTransition: p.sceneTransition as 'dissolve' | 'fade',
   };
 }
@@ -48,16 +44,6 @@ function hash(str: string): number {
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
-}
-
-/** 키워드 → 메뉴 아트 스타일 힌트(오프라인 변형용). */
-function artHint(text: string): MenuArtStyle | null {
-  const t = text.toLowerCase();
-  if (/네온|사이버|사이언스|sf|우주|미래|neon|cyber/.test(t)) return 'neon-grid';
-  if (/공포|호러|피|유령|괴물|horror|blood|grunge|폐허/.test(t)) return 'noise-grunge';
-  if (/스릴러|추리|범죄|느와르|밤거리|thriller|noir|어둠/.test(t)) return 'dark-vignette';
-  if (/로맨스|일상|봄|햇살|따뜻|romance|soft|pastel/.test(t)) return 'gradient-soft';
-  return null;
 }
 
 /**
@@ -75,7 +61,6 @@ export function seededVariation(genre: GenreId, seedText: string): ThemeCore {
     bgTop: shift(core.bgTop),
     bgBottom: shift(core.bgBottom),
     nameText: shift(core.nameText),
-    menuArtStyle: artHint(seedText) ?? core.menuArtStyle,
   };
 }
 
@@ -105,9 +90,6 @@ export function buildTheme(coreIn: Partial<ThemeCore>, genre: GenreId, label: st
   let nameText = pick(coreIn.nameText, base.nameText);
   nameText = enforceContrast(nameText, dialogueBoxBase, 3.0);
 
-  const menuArtStyle = (ART_STYLES.includes(coreIn.menuArtStyle as MenuArtStyle)
-    ? coreIn.menuArtStyle
-    : base.menuArtStyle) as MenuArtStyle;
   const sceneTransition = coreIn.sceneTransition === 'fade' ? 'fade' : 'dissolve';
 
   // 선택지: 평상시 패널(가독 보장) + hover 는 accent 채움 위 대비 글자.
@@ -141,7 +123,6 @@ export function buildTheme(coreIn: Partial<ThemeCore>, genre: GenreId, label: st
     interfaceFont: p.interfaceFont,
     sceneTransition,
     uiTransition: sceneTransition === 'fade' ? 'Dissolve(0.5)' : 'Dissolve(0.25)',
-    menuArtStyle,
   };
 }
 

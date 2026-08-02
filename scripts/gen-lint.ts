@@ -39,7 +39,7 @@ if (mood) {
   const cr = contrastReport(g.theme);
   console.log(
     `테마(${g.source}) "${g.theme.label}" accent=${g.theme.accent} bgTop=${g.theme.bgTop} ` +
-      `art=${g.theme.menuArtStyle} | 대비 대사=${cr.dialogue.toFixed(2)} 이름=${cr.name.toFixed(2)}`,
+      `| 대비 대사=${cr.dialogue.toFixed(2)} 이름=${cr.name.toFixed(2)}`,
   );
 }
 

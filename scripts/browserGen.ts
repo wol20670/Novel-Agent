@@ -2,4 +2,4 @@
 // build-zip.ts 가 이 번들을 Playwright 페이지에 주입해 실제 에셋을 생성한다.
 export { canvasImage } from '../src/generators/image/canvasProvider';
 export { canvasSprite } from '../src/generators/image/canvasSprite';
-export { canvasMenuArt, solidPng } from '../src/generators/image/canvasMenu';
+export { menuBackdropPng, solidPng } from '../src/generators/image/canvasMenu';

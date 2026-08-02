@@ -139,6 +139,18 @@ export default function AssetsTab() {
       </section>
 
       <section>
+        <h3 className="section-title mb-1">🎬 타이틀·메뉴 배경</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          게임 시작 시 타이틀(메인 메뉴) 화면과 게임 중 ESC로 여는 메뉴의 배경입니다. 어떤 크기로 올려도 화면에 꽉
+          차도록(비율 유지, 넘치는 부분은 크롭) 맞춰집니다. 업로드하지 않으면 테마색 그라데이션으로 대체됩니다.
+        </p>
+        <div className="flex flex-col gap-2">
+          <MenuArtRow which="main" label="메인 메뉴(타이틀 화면)" />
+          <MenuArtRow which="game" label="게임 메뉴(ESC로 여는 인게임 메뉴)" />
+        </div>
+      </section>
+
+      <section>
         <h3 className="section-title mb-1">🎬 CG 컷 <span className="text-gray-500 font-normal text-xs">· {cgs.length}종</span></h3>
         <p className="text-xs text-gray-500 mb-3">
           대본의 <code className="text-accent">#CG 설명</code> 단위. 같은 설명이면 한 컷으로 공유됩니다. ChatGPT 등에서
@@ -189,6 +201,36 @@ export default function AssetsTab() {
       </section>
 
       <CleanupSection />
+    </div>
+  );
+}
+
+/** 타이틀·메뉴 배경 한 종(main/game) — 업로드 없으면 미업로드 표시(빌드 시 테마 그라데이션 폴백). */
+function MenuArtRow({ which, label }: { which: 'main' | 'game'; label: string }) {
+  const importMenuArt = useStore((s) => s.importMenuArt);
+  const clearMenuArt = useStore((s) => s.clearMenuArt);
+  const assetId = useStore((s) => s.project.menuArt?.[which]);
+  const url = useAssetUrl(assetId);
+  return (
+    <div className="card border-edge p-3 flex gap-3 items-center">
+      <div className="w-24 aspect-video rounded-lg border border-edge overflow-hidden bg-ink shrink-0 flex items-center justify-center text-[10px] text-gray-600">
+        {url ? <img src={url} className="w-full h-full object-cover" /> : '미업로드'}
+      </div>
+      <div className="flex-1 min-w-0">
+        <span className="text-sm text-gray-200">{label}</span>
+      </div>
+      <div className="flex flex-col gap-1 shrink-0 w-24">
+        <UploadButton
+          onFile={(f) => importMenuArt(which, f)}
+          label={url ? '✓ 교체' : '↥ 업로드'}
+          className="btn-ghost text-[11px]"
+        />
+        {url && (
+          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => clearMenuArt(which)}>
+            해제
+          </button>
+        )}
+      </div>
     </div>
   );
 }

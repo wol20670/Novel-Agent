@@ -56,35 +56,15 @@ function languagePrefsBlock(locales?: GuiLocales): string {
   return lines.join('\n') + '\n';
 }
 
-/** 아이템 팝업(인게임) + 다시보기 라이트박스 + 발견한 아이템 보관함 화면(hasItems 일 때만 방출). */
-const ITEM_SCREENS = String.raw`
-
-################################################################################
-## 아이템(소품) 팝업 + 발견한 아이템 보관함
-################################################################################
-
-## 인게임 팝업 — 배경 살짝 딤 + 중앙 컷아웃(이름 캡션은 표시 안 함, 이미지 자체에 라벨 포함).
-## zorder 를 대사창(say=0)보다 낮게 둬서 배경·인물만 어둡게 덮고 대사 글자는 안 가린다.
-## modal True 로 닫기 전까진 대사 진행이 막힌다(안 그러면 대사창의 클릭-진행 레이어가 닫기 버튼
-## 클릭을 먼저 가로챌 위험 — item_lightbox 로 이미 검증된 패턴). 이미지를 포함해 화면 아무 곳이나
-## 클릭하면 닫히도록 dismiss 사용(이전엔 텍스트버튼을 뒀으나 기본 색이 딤 배경과 대비가 약해
-## 거의 안 보였음 — 사용자 요청대로 "이미지 클릭 시 닫힘"으로 교체).
-screen item_popup(img, caption):
-    modal True
-    zorder -5
-    add Solid("#00000073")
-    add img at transform:
-        fit "contain"
-        ysize int(config.screen_height * 0.45)
-        anchor (0.5, 0.5)
-        pos (0.5, 0.42)
-        alpha 0.0 zoom 0.9
-        easein 0.22 alpha 1.0 zoom 1.0
-    key "game_menu" action Hide("item_popup")
-    dismiss action Hide("item_popup")
+/**
+ * 보관함(아이템·CG 갤러리) 공용 다시보기 라이트박스 — 모달(닫기/Esc 로 종료), tag 없음이라
+ * 어느 갤러리 위에 겹쳐 떠도 상관없다. hasItems 또는 hasCg 둘 중 하나라도 있으면 딱 1번만 방출된다
+ * (둘 다 있다고 두 번 내면 Ren'Py 의 "화면 중복 정의" 에러가 난다).
+ */
+const GALLERY_LIGHTBOX = String.raw`
 
 ## 보관함에서 다시보기 — 모달 라이트박스(닫기/Esc 로 종료). tag 없음 = 갤러리 위에 겹쳐 뜬다.
-screen item_lightbox(img, caption):
+screen gallery_lightbox(img, caption):
     modal True
     zorder 100
     add Solid("#000000cc")
@@ -101,8 +81,36 @@ screen item_lightbox(img, caption):
     textbutton _("닫기"):
         xalign 0.5
         ypos 0.9
-        action Hide("item_lightbox")
-    key "game_menu" action Hide("item_lightbox")
+        action Hide("gallery_lightbox")
+    key "game_menu" action Hide("gallery_lightbox")
+`;
+
+/** 아이템(소품) 팝업(인게임) + 발견한 아이템 보관함 화면(hasItems 일 때만 방출). */
+const ITEM_SCREENS = String.raw`
+
+################################################################################
+## 아이템(소품) 팝업 + 발견한 아이템 보관함
+################################################################################
+
+## 인게임 팝업 — 배경 살짝 딤 + 중앙 컷아웃(이름 캡션은 표시 안 함, 이미지 자체에 라벨 포함).
+## zorder 를 대사창(say=0)보다 낮게 둬서 배경·인물만 어둡게 덮고 대사 글자는 안 가린다.
+## modal True 로 닫기 전까진 대사 진행이 막힌다(안 그러면 대사창의 클릭-진행 레이어가 닫기 버튼
+## 클릭을 먼저 가로챌 위험 — gallery_lightbox 로 이미 검증된 패턴). 이미지를 포함해 화면 아무 곳이나
+## 클릭하면 닫히도록 dismiss 사용(이전엔 텍스트버튼을 뒀으나 기본 색이 딤 배경과 대비가 약해
+## 거의 안 보였음 — 사용자 요청대로 "이미지 클릭 시 닫힘"으로 교체).
+screen item_popup(img, caption):
+    modal True
+    zorder -5
+    add Solid("#00000073")
+    add img at transform:
+        fit "contain"
+        ysize int(config.screen_height * 0.45)
+        anchor (0.5, 0.5)
+        pos (0.5, 0.42)
+        alpha 0.0 zoom 0.9
+        easein 0.22 alpha 1.0 zoom 1.0
+    key "game_menu" action Hide("item_popup")
+    dismiss action Hide("item_popup")
 
 ## 발견한 아이템 보관함 — 발견=썸네일(클릭 시 라이트박스), 미발견=??? 잠김.
 screen item_gallery():
@@ -118,7 +126,7 @@ screen item_gallery():
                     if persistent.item_found.get(it_tag, False):
                         button:
                             xysize (gui.scale(200), gui.scale(200))
-                            action Show("item_lightbox", img=it_tag, caption=it_name)
+                            action Show("gallery_lightbox", img=it_tag, caption=it_name)
                             add it_tag:
                                 fit "contain"
                                 xysize (gui.scale(184), gui.scale(184))
@@ -132,11 +140,57 @@ screen item_gallery():
                         text _("???") xalign 0.5 size gui.scale(16) color gui.insensitive_color
 `;
 
-export function screensRpy(locales?: GuiLocales, hasItems?: boolean): string {
+/**
+ * 감상한 CG 갤러리(hasCg 일 때만 방출). CG 는 배경과 같은 와이드스크린 비율이라 아이템 갤러리보다
+ * 열을 줄이고(3열) 셀을 16:9-ish 로 넓게 잡는다. 감상 기록은 persistent.cg_seen(scriptBody 가
+ * scene <tag>_scene 진입 시 기록), 목록은 gui.cgs_all(cg.rpy, resolveCgs 가 assets.rpy 와 같은
+ * 태그 번호를 재사용해 계산).
+ */
+const CG_SCREENS = String.raw`
+
+################################################################################
+## 감상한 CG 갤러리
+################################################################################
+
+screen cg_gallery():
+    tag menu
+    use game_menu(_("감상한 CG"), scroll="viewport"):
+        vpgrid:
+            cols 3
+            spacing gui.scale(18)
+            for cg_tag, cg_name in gui.cgs_all:
+                vbox:
+                    spacing gui.scale(4)
+                    xsize gui.scale(300)
+                    if persistent.cg_seen.get(cg_tag, False):
+                        button:
+                            xysize (gui.scale(300), gui.scale(190))
+                            action Show("gallery_lightbox", img=cg_tag, caption=cg_name)
+                            add cg_tag:
+                                fit "contain"
+                                xysize (gui.scale(288), gui.scale(162))
+                                align (0.5, 0.5)
+                        text cg_name xalign 0.5 size gui.scale(16)
+                    else:
+                        frame:
+                            xysize (gui.scale(300), gui.scale(190))
+                            background Solid(gui.frame_bg_color)
+                            text "???" align (0.5, 0.5) size gui.scale(34) color gui.insensitive_color
+                        text _("???") xalign 0.5 size gui.scale(16) color gui.insensitive_color
+`;
+
+export function screensRpy(locales?: GuiLocales, hasItems?: boolean, hasCg?: boolean): string {
   const languagePrefs = languagePrefsBlock(locales);
-  // 아이템이 있을 때만 보관함 진입 버튼(내비)과 아이템 화면들을 낸다.
-  const galleryNav = hasItems ? '        textbutton _("발견한 아이템") action ShowMenu("item_gallery")' : '';
-  const galleryScreens = hasItems ? ITEM_SCREENS : '';
+  // 아이템/CG 가 있을 때만 각각의 보관함 진입 버튼(내비)을 낸다.
+  const galleryNav = [
+    hasItems ? '        textbutton _("발견한 아이템") action ShowMenu("item_gallery")' : '',
+    hasCg ? '        textbutton _("감상한 CG") action ShowMenu("cg_gallery")' : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  // 라이트박스는 아이템·CG 둘 중 하나라도 있으면 딱 1번만(중복 screen 정의 방지).
+  const galleryScreens =
+    (hasItems ? ITEM_SCREENS : '') + (hasCg ? CG_SCREENS : '') + (hasItems || hasCg ? GALLERY_LIGHTBOX : '');
   return String.raw`################################################################################
 ## 자동 생성: 자체 GUI 화면 (zero-PNG, Solid 기반)
 ################################################################################
@@ -507,7 +561,7 @@ screen main_menu():
 
     tag menu
 
-    add gui.main_menu_background
+    add Transform(gui.main_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))
 
     frame:
         style "main_menu_frame"
@@ -561,9 +615,9 @@ screen game_menu(title, scroll=None, yinitial=0.0, spacing=0):
     style_prefix "game_menu"
 
     if main_menu:
-        add gui.main_menu_background
+        add Transform(gui.main_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))
     else:
-        add gui.game_menu_background
+        add Transform(gui.game_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))
 
     frame:
         style "game_menu_outer_frame"

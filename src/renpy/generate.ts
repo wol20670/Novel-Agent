@@ -215,6 +215,30 @@ export function resolveSprites(
   return out;
 }
 
+/** "감상한 CG" 갤러리 항목 — 태그(assets.rpy/script.rpy 와 공유) + 갤러리 표시용 캡션. */
+export interface CgRef {
+  tag: string;
+  caption: string;
+}
+
+/**
+ * resolveSceneAssets 가 이미 계산한 cgTags 를 그대로 재사용해 갤러리 목록을 만든다(새 SlugMap 을
+ * 쓰면 번호가 assets.rpy/script.rpy 와 어긋나 갤러리가 존재하지 않는 이미지를 참조하게 된다).
+ * 같은 CG(같은 태그)가 여러 장면에 쓰여도 한 번만, 첫 등장 순서로 수집. 캡션은 그 CG 의 설명
+ * (#CG 뒤 텍스트), 비어 있으면 장면 제목으로 대체한다.
+ */
+export function resolveCgs(refs: SceneAssetRef[]): CgRef[] {
+  const seen = new Map<string, CgRef>();
+  for (const ref of refs) {
+    ref.cgTags.forEach((tag, i) => {
+      if (seen.has(tag)) return;
+      const desc = (ref.scene.cg[i] ?? '').trim();
+      seen.set(tag, { tag, caption: desc || ref.scene.title });
+    });
+  }
+  return [...seen.values()];
+}
+
 /** 승인 장면의 에셋 참조. 배경/BGM/CG 는 "이름(의미)" 기준으로 공유된다(같은 이름 = 같은 파일). */
 export interface SceneAssetRef {
   scene: Scene;
@@ -515,6 +539,7 @@ function scriptBody(
     // 대사창·TTS 는 계속. 위치 마커가 없는 기존 저장 데이터(재파싱 전)는 첫 CG 를 장면 시작부터 배경으로 폴백.
     let cgActive = false;
     if (r.cgTags.length && !s.lines.some((l) => l.kind === 'cg')) {
+      out.push(`${indent(1)}$ persistent.cg_seen["${r.cgTags[0]}"] = True`);
       out.push(`${indent(1)}scene ${r.cgTags[0]}_scene with dissolve`);
       cgActive = true;
     }
@@ -545,6 +570,7 @@ function scriptBody(
         // 같은 장면에 CG 가 또 나오면 배경만 다음 CG 로 다시 교체된다.
         const cgIdx = s.cg.findIndex((d) => d.trim() === line.desc);
         if (cgIdx >= 0 && r.cgTags[cgIdx]) {
+          out.push(`${indent(1)}$ persistent.cg_seen["${r.cgTags[cgIdx]}"] = True`);
           out.push(`${indent(1)}scene ${r.cgTags[cgIdx]}_scene with dissolve`);
           cgActive = true;
         }
@@ -777,6 +803,21 @@ function itemsRpy(items: ItemRef[]): string {
 }
 
 /**
+ * game/cg.rpy — "감상한 CG" 갤러리 데이터(items.rpy 와 같은 패턴). scriptBody 가 CG 장면
+ * (scene <tag>_scene)에 들어갈 때마다 persistent.cg_seen 에 기록하고, screens.rpy 의 cg_gallery
+ * 화면이 gui.cgs_all(전체 목록)과 대조해 감상/미감상(？？？)을 그린다.
+ */
+function cgRpy(cgs: CgRef[]): string {
+  const list = cgs.map((cg) => `("${cg.tag}", "${escRpyText(cg.caption)}")`).join(', ');
+  return [
+    '# 자동 생성: 감상한 CG 갤러리 데이터 (screens.rpy 의 cg_gallery 화면이 사용)',
+    'default persistent.cg_seen = dict()',
+    `define gui.cgs_all = [ ${list} ]`,
+    '',
+  ].join('\n');
+}
+
+/**
  * game/credits.rpy — 게임 내 "크레딧/라이선스 고지" 화면이 쓰는 데이터.
  * screens.rpy 의 credits 화면이 gui.credits_extra 를 항상 참조하므로 이 파일은 늘 생성한다.
  */
@@ -937,6 +978,8 @@ export function generateRenpyFiles(project: Project): {
   const voiceLocales = effectiveVoiceLocales(project);
   // 아이템(소품) 팝업 + "발견한 아이템" 보관함. 아이템이 하나라도 있으면 items.rpy·갤러리 화면·메뉴 진입을 낸다.
   const items = resolveItems(project);
+  // "감상한 CG" 갤러리 — CG 가 하나라도 있으면 cg.rpy·갤러리 화면·메뉴 진입을 낸다.
+  const cgs = resolveCgs(refs);
 
   const files: RenpyFile[] = [
     { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules, project.guiOverrides?.characterScale) },
@@ -948,6 +991,7 @@ export function generateRenpyFiles(project: Project): {
     { path: 'game/ui_strings.rpy', content: uiStringsRpy(project) },
     ...(voiceLocales.length ? [{ path: 'game/voices.rpy', content: voicesRpy(project) }] : []),
     ...(items.length ? [{ path: 'game/items.rpy', content: itemsRpy(items) }] : []),
+    ...(cgs.length ? [{ path: 'game/cg.rpy', content: cgRpy(cgs) }] : []),
     ...translationFiles(project, refs),
     ...uiTranslationFiles(project),
     ...generateGuiFiles(
@@ -961,6 +1005,7 @@ export function generateRenpyFiles(project: Project): {
       project.guiOverrides?.dialogueGradient ?? false,
       { text: textLocales, voice: voiceLocales },
       items.length > 0,
+      cgs.length > 0,
     ),
     { path: 'README.md', content: readme(theme) },
   ];

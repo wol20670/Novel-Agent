@@ -4,7 +4,6 @@ import { downloadExcelTemplate, downloadTextTemplate } from '../template';
 import { GENRE_OPTIONS, DEFAULT_GENRE, resolveTheme } from '../renpy/gui';
 import type { GenreId, GuiTheme } from '../renpy/gui';
 import { translateModeOf } from '../types';
-import { canvasMenuArt } from '../generators/image/canvasMenu';
 import { hasEnvCredentials, generateRoomCode } from '../collab';
 import { DEFAULT_FONT, getCachedCatalog, loadFontCatalog } from '../fonts/fontCatalog';
 import type { FontPreset } from '../fonts/fontCatalog';
@@ -14,7 +13,7 @@ import { parseText, parseWorkbook } from '../parser';
 import type { BuildResult } from '../parser';
 import { previewMerge, type AnalyzeMode, type MergePreview } from '../project/mergeScenes';
 import Spinner from './Spinner';
-import UploadButton from './UploadButton';
+import { useAssetUrl } from './useAssetUrl';
 
 export default function LeftPanel() {
   const project = useStore((s) => s.project);
@@ -706,8 +705,6 @@ function ThemeStudio() {
   const update = useStore((s) => s.updateProjectMeta);
   const generateAiTheme = useStore((s) => s.generateAiTheme);
   const clearAiTheme = useStore((s) => s.clearAiTheme);
-  const importMenuArt = useStore((s) => s.importMenuArt);
-  const clearMenuArt = useStore((s) => s.clearMenuArt);
   const busy = useStore((s) => s.aiThemeBusy);
   const openaiKey = useStore((s) => s.openaiKey);
 
@@ -748,38 +745,9 @@ function ThemeStudio() {
       </div>
 
       <ThemePreview theme={theme} />
-
-      <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
-        <span className="label">타이틀·메뉴 배경 (ChatGPT 등에서 만든 이미지 업로드)</span>
-        <div className="flex gap-2">
-          <UploadButton
-            onFile={(f) => importMenuArt('main', f)}
-            label={project.menuArt?.main ? '메인 ✓ 교체' : '↥ 메인 업로드'}
-            className="btn-ghost flex-1 text-[11px]"
-            title="외부 제작 메인 메뉴 배경 이미지 업로드"
-          />
-          <UploadButton
-            onFile={(f) => importMenuArt('game', f)}
-            label={project.menuArt?.game ? '게임 ✓ 교체' : '↥ 게임 업로드'}
-            className="btn-ghost flex-1 text-[11px]"
-            title="외부 제작 게임 메뉴(인게임 메뉴) 배경 이미지 업로드"
-          />
-        </div>
-        {(project.menuArt?.main || project.menuArt?.game) && (
-          <button
-            className="text-[10px] text-gray-500 hover:text-rose-600 self-start"
-            onClick={() => {
-              clearMenuArt('main');
-              clearMenuArt('game');
-            }}
-          >
-            업로드 해제 (Canvas 생성으로 복귀)
-          </button>
-        )}
-        <p className="text-[10px] text-gray-500 leading-snug">
-          업로드한 메뉴 배경은 ZIP·폴더쓰기 결과에 반영됩니다(위 미리보기는 Canvas 생성본 기준).
-        </p>
-      </div>
+      <p className="text-[10px] text-gray-500 leading-snug">
+        타이틀·메뉴 배경은 <b className="text-gray-400">에셋 탭 → 🎬 타이틀·메뉴 배경</b>에서 업로드합니다.
+      </p>
 
       <DialogueGuiControls />
     </div>
@@ -1007,26 +975,18 @@ const SWATCHES: { key: keyof GuiTheme; label: string }[] = [
 ];
 
 function ThemePreview({ theme }: { theme: GuiTheme }) {
-  const [url, setUrl] = useState<string>();
-
-  useEffect(() => {
-    let alive = true;
-    let made: string | undefined;
-    canvasMenuArt(theme, 384, 216, 'main').then((blob) => {
-      if (!alive) return;
-      made = URL.createObjectURL(blob);
-      setUrl(made);
-    });
-    return () => {
-      alive = false;
-      if (made) URL.revokeObjectURL(made);
-    };
-  }, [theme]);
+  // 업로드한 메인 메뉴 배경이 있으면 그것을, 없으면 테마색 그라데이션만 미리 보여준다
+  // (앱은 메뉴 아트를 더 이상 생성하지 않음 — 실제 업로드는 에셋 탭에서 한다).
+  const mainArtId = useStore((s) => s.project.menuArt?.main);
+  const url = useAssetUrl(mainArtId);
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="relative rounded-md overflow-hidden border border-edge aspect-video bg-ink">
-        {url && <img src={url} alt="테마 미리보기" className="w-full h-full object-cover" />}
+      <div
+        className="relative rounded-md overflow-hidden border border-edge aspect-video bg-ink"
+        style={url ? undefined : { background: `linear-gradient(to bottom, ${theme.bgTop}, ${theme.bgBottom})` }}
+      >
+        {url && <img src={url} alt="타이틀 배경 미리보기" className="w-full h-full object-cover" />}
         {/* 메뉴 레이아웃 근사: 좌측 내비 + 우하단 타이틀 */}
         <div
           className="absolute inset-y-0 left-0 w-[30%] flex flex-col justify-center gap-0.5 px-2"

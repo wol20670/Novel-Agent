@@ -7,9 +7,6 @@ import { fontGamePath } from '../../fonts/fontCatalog';
 
 export type GenreId = 'romance' | 'horror' | 'scifi' | 'thriller' | 'slice';
 
-/** Canvas 메뉴 배경 스타일(브라우저 canvasMenu 가 해석). */
-export type MenuArtStyle = 'gradient-soft' | 'dark-vignette' | 'neon-grid' | 'noise-grunge';
-
 export interface GuiTheme {
   id: GenreId;
   label: string; // 한글 표시명
@@ -46,9 +43,6 @@ export interface GuiTheme {
   // ── 전환/분위기 ──
   sceneTransition: string; // 장면 전환 — script.rpy `with <token>` (dissolve/fade)
   uiTransition: string; // 메뉴 enter/exit — Ren'Py 표현식 (예: "Dissolve(0.3)")
-
-  // ── 메뉴 아트 ──
-  menuArtStyle: MenuArtStyle;
 }
 
 const FONT = 'fonts/NanumGothic.ttf'; // 현재 번들 폰트(공통). 추후 장르 폰트로 분기 예정.
@@ -78,7 +72,6 @@ export const PRESETS: Record<GenreId, GuiTheme> = {
     interfaceFont: FONT,
     sceneTransition: 'dissolve',
     uiTransition: 'Dissolve(0.25)',
-    menuArtStyle: 'gradient-soft',
   },
   horror: {
     id: 'horror',
@@ -104,7 +97,6 @@ export const PRESETS: Record<GenreId, GuiTheme> = {
     interfaceFont: FONT,
     sceneTransition: 'fade',
     uiTransition: 'Dissolve(0.5)',
-    menuArtStyle: 'noise-grunge',
   },
   scifi: {
     id: 'scifi',
@@ -130,7 +122,6 @@ export const PRESETS: Record<GenreId, GuiTheme> = {
     interfaceFont: FONT,
     sceneTransition: 'dissolve',
     uiTransition: 'Dissolve(0.2)',
-    menuArtStyle: 'neon-grid',
   },
   thriller: {
     id: 'thriller',
@@ -156,7 +147,6 @@ export const PRESETS: Record<GenreId, GuiTheme> = {
     interfaceFont: FONT,
     sceneTransition: 'fade',
     uiTransition: 'Dissolve(0.2)',
-    menuArtStyle: 'dark-vignette',
   },
   slice: {
     id: 'slice',
@@ -182,7 +172,6 @@ export const PRESETS: Record<GenreId, GuiTheme> = {
     interfaceFont: FONT,
     sceneTransition: 'dissolve',
     uiTransition: 'Dissolve(0.25)',
-    menuArtStyle: 'gradient-soft',
   },
 };
 
