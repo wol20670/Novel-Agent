@@ -5,9 +5,215 @@
 //   - nvl/bubble 화면과 phone 전용(이미지) 스타일은 제외(우리는 ADV 일반 대사)
 // 테마 의존 값이 없으므로 정적이지만, 다국어 선택 UI 주입을 위해 인자를 받는다.
 
-import type { Locale } from '../../types';
-import { RENPY_LANG, LOCALE_LABEL } from '../../types';
+import type { Locale, MenuButtonSlot, MenuButtonState, MainMenuLayout } from '../../types';
+import { RENPY_LANG, LOCALE_LABEL, MAIN_MENU_SLOTS, menuButtonFile, TITLE_LOGO_FILE } from '../../types';
 import type { GuiLocales } from './index';
+
+/**
+ * 메인 메뉴 이미지 GUI 렌더 계획(generate.ts 가 project.mainMenuUi + resolveItems/resolveCgs 결과로
+ * 만들어 넘긴다). 이미지가 하나도 없으면(buttons 비고 hasLogo=false) screensRpy 는 기존 텍스트
+ * 메뉴를 글자 하나 안 바꾸고 그대로 방출한다(회귀 0 — 기존 프로젝트는 이 타입 자체를 모른다).
+ */
+export interface MainMenuPlan {
+  /** 슬롯 → 실제 존재하는 상태 이미지 집합. idle 이 없는 슬롯은 텍스트 버튼으로 폴백. */
+  buttons: Partial<Record<MenuButtonSlot, Partial<Record<MenuButtonState, true>>>>;
+  hasLogo: boolean;
+  /** 로고 원본 가로/세로 비율(naturalWidth/naturalHeight). 모르면 generate.ts 가 3(폴백)을 채운다. */
+  logoAspect: number;
+  /** 1920 기준 px(이미 mainMenuLayout() 으로 기본값 병합됨). */
+  layout: Required<MainMenuLayout>;
+  /** height / 1080 — 좌표를 이 배율로 곱해 최종 픽셀 값을 굽는다(런타임 계산 없음). */
+  scale: number;
+  /** 갤러리 버튼이 열 화면. 아이템·CG 둘 다 있으면 'hub', 하나면 그것, 없으면 버튼 비활성화. */
+  galleryTarget?: 'hub' | 'cg' | 'items';
+}
+
+/**
+ * 원본(텍스트 메뉴) screen main_menu() 정의 — base 템플릿의 `${mainMenuScreen}` 자리에 그대로
+ * 보간되는 "기본값"이다(이미지 비활성일 때). 원본 텍스트가 여기 단 한 곳에만 존재하므로(예전처럼
+ * base 템플릿 안에 같은 텍스트를 또 하드코딩해 "양쪽 일치 필수" 함정을 만들지 않는다), 항상 base 의
+ * `${mainMenuScreen}` 삽입 지점과 정확히 같은 문자열이 나온다 — 별도 검색·스플라이스 불필요.
+ */
+const DEFAULT_MAIN_MENU_SCREEN = `screen main_menu():
+
+    tag menu
+
+    add Transform(gui.main_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))
+
+    frame:
+        style "main_menu_frame"
+
+    use navigation
+
+    if gui.show_name:
+
+        vbox:
+            style "main_menu_vbox"
+
+            text "[config.name!t]":
+                style "main_menu_title"
+
+            text "[config.version]":
+                style "main_menu_version"`;
+
+/** 슬롯별 Ren'Py action(+선택 sensitive 조건식). galleryTarget 에 따라 갤러리 진입 화면이 갈린다. */
+function mainMenuAction(
+  slot: MenuButtonSlot,
+  galleryTarget: MainMenuPlan['galleryTarget'],
+): { action: string; sensitive?: string } {
+  switch (slot) {
+    case 'start':
+      return { action: 'Start()' };
+    case 'continue':
+      // renpy.newest_slot 로 가장 최근 저장 슬롯을 찾는다 — 없으면 None(비활성화 이미지/버튼).
+      // 밑줄 접두 이름(_continue_slot)은 Ren'Py 가 엔진 예약으로 취급해 continue_slot 을 쓴다.
+      return { action: 'FileLoad(continue_slot, slot=True, confirm=False)', sensitive: 'continue_slot is not None' };
+    case 'load':
+      return { action: 'ShowMenu("load")' };
+    case 'prefs':
+      return { action: 'ShowMenu("preferences")' };
+    case 'gallery':
+      if (galleryTarget === 'hub') return { action: 'ShowMenu("gallery_hub")' };
+      if (galleryTarget === 'cg') return { action: 'ShowMenu("cg_gallery")' };
+      if (galleryTarget === 'items') return { action: 'ShowMenu("item_gallery")' };
+      return { action: 'NullAction()', sensitive: 'False' }; // 아이템·CG 둘 다 없으면 갤러리 자체가 없다.
+    case 'quit':
+      return { action: 'Quit(confirm=False)' };
+  }
+}
+
+/**
+ * 이미지 기반 screen main_menu() 정의를 만든다(base 템플릿의 `${mainMenuScreen}` 자리에 보간).
+ * - vbox spacing 하나로 스펙 좌표(78px 버튼 + 12px 간격 = 90px 행 간격)를 재현(절대좌표 6개 불필요).
+ * - press(클릭 중) 이미지는 방출하지 않는다 — Ren'Py 8.5.3 엔진 소스 전수 조사 결과 activate_
+ *   프리픽스(눌림 상태)를 실제로 세팅하는 코드가 없는 죽은 슬롯이라 영원히 못 쓴다(store 단에서부터
+ *   업로드를 막는다 — renpySupported=false).
+ * - hover 시 오른쪽 이동(스펙 4번)은 hover_xoffset 으로 방출한다 — xoffset 은 Position 스타일
+ *   속성이고 hover_ 는 정식 스타일 프리픽스라(displayable.py 가 포커스 시 set_style_prefix(role+
+ *   "hover_") 를 실제로 호출) 실제로 먹는다. press 2px 이동은 press 상태 자체가 없어 대응 항목이 없다.
+ * - 정보/크레딧/도움말은 별도 vbox 가 아니라 이미지 버튼과 **같은 vbox** 안에 이어서 낸다(널 스페이서로
+ *   간격만 벌림) — 별도 vbox 로 y 를 따로 계산하면 사용자가 다른 높이의 버튼 PNG 를 올렸을 때
+ *   (78px 하드코딩과) 어긋나는데, 같은 vbox 라 항상 자연스럽게 이미지 버튼들 바로 아래에 붙는다.
+ */
+function buildImageMainMenuScreen(plan: MainMenuPlan): string {
+  const L = plan.layout;
+  const s = plan.scale;
+  const bx = Math.round(L.x * s);
+  const by = Math.round(L.y * s);
+  const bgap = Math.round(L.gap * s);
+  const hoverX = Math.round(L.hoverShiftX * s);
+  const logoX = Math.round(L.logoX * s);
+  const logoY = Math.round(L.logoY * s);
+  const logoW = Math.round(L.logoWidth * s);
+  const logoH = Math.round(logoW / plan.logoAspect);
+  const linkGap = Math.round(24 * s); // 이미지 버튼 6개와 정보/크레딧/도움말 사이 스페이서.
+
+  const I = (n: number) => ' '.repeat(n);
+  const lines: string[] = [];
+  lines.push('screen main_menu():');
+  lines.push('');
+  lines.push(`${I(4)}tag menu`);
+  lines.push('');
+  lines.push(
+    `${I(4)}add Transform(gui.main_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))`,
+  );
+  lines.push('');
+  lines.push(`${I(4)}$ continue_slot = renpy.newest_slot(r"\\d+")`);
+  lines.push('');
+  lines.push(`${I(4)}vbox:`);
+  lines.push(`${I(8)}xpos ${bx}`);
+  lines.push(`${I(8)}ypos ${by}`);
+  lines.push(`${I(8)}spacing ${bgap}`);
+  lines.push('');
+
+  for (const slotDef of MAIN_MENU_SLOTS) {
+    const states = plan.buttons[slotDef.id] ?? {};
+    const { action, sensitive } = mainMenuAction(slotDef.id, plan.galleryTarget);
+    if (states.idle) {
+      lines.push(`${I(8)}imagebutton:`);
+      lines.push(`${I(12)}idle "${menuButtonFile(slotDef.id, 'idle')}"`);
+      if (states.hover) lines.push(`${I(12)}hover "${menuButtonFile(slotDef.id, 'hover')}"`);
+      if (states.disabled) lines.push(`${I(12)}insensitive "${menuButtonFile(slotDef.id, 'disabled')}"`);
+      // focus_mask 는 쓰지 않는다 — 히트박스가 "불투명 픽셀"로 좁아지는데, 이런 메뉴 버튼 아트는
+      // 420×78 중 대부분이 투명(글자 획만 불투명)이라 hover·클릭이 사실상 불가능해진다.
+      // (실제 Ren'Py 8.5.3 + 사용자 실물 PNG 로 재현·확인함. 스펙상 버튼 박스는 사각형 420×78.)
+      if (hoverX) lines.push(`${I(12)}hover_xoffset ${hoverX}`);
+      if (sensitive) lines.push(`${I(12)}sensitive ${sensitive}`);
+      lines.push(`${I(12)}action ${action}`);
+      lines.push('');
+    } else {
+      // idle 이미지가 없는 슬롯 — 기존 navigation 스타일을 재사용한 텍스트 버튼으로 폴백.
+      const sensitivePart = sensitive ? ` sensitive ${sensitive}` : '';
+      lines.push(`${I(8)}textbutton _("${slotDef.label}") action ${action}${sensitivePart} style_prefix "navigation"`);
+      lines.push('');
+    }
+  }
+
+  lines.push(`${I(8)}null height ${linkGap}`);
+  lines.push('');
+  lines.push(`${I(8)}textbutton _("정보") action ShowMenu("about") style_prefix "mm_link"`);
+  lines.push(`${I(8)}textbutton _("크레딧") action ShowMenu("credits") style_prefix "mm_link"`);
+  lines.push('');
+  lines.push(`${I(8)}if renpy.variant("pc") or (renpy.variant("web") and not renpy.variant("mobile")):`);
+  lines.push('');
+  lines.push(`${I(12)}textbutton _("도움말") action ShowMenu("help") style_prefix "mm_link"`);
+  lines.push('');
+
+  if (plan.hasLogo) {
+    // 정적 속성만(fit/xysize/xpos/ypos) — CLAUDE.md 규칙: add 블록엔 애니메이션 ATL 금지.
+    // 박스를 로고의 실제 비율(logoAspect)에 맞춰야 한다 — 정사각 박스(w,w)+fit="contain" 이면
+    // 가로로 긴 로고가 박스 안에서 세로 중앙 정렬돼 logoY 가 "왼쪽 위" 기준에서 아래로 밀린다.
+    lines.push(`${I(4)}add Transform("${TITLE_LOGO_FILE}", fit="contain", xysize=(${logoW}, ${logoH})):`);
+    lines.push(`${I(8)}xpos ${logoX}`);
+    lines.push(`${I(8)}ypos ${logoY}`);
+  } else {
+    lines.push(`${I(4)}if gui.show_name:`);
+    lines.push('');
+    lines.push(`${I(8)}vbox:`);
+    lines.push(`${I(12)}style "main_menu_vbox"`);
+    lines.push('');
+    lines.push(`${I(12)}text "[config.name!t]":`);
+    lines.push(`${I(16)}style "main_menu_title"`);
+    lines.push('');
+    lines.push(`${I(12)}text "[config.version]":`);
+    lines.push(`${I(16)}style "main_menu_version"`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * mm_link(정보·크레딧·도움말) 전용 스타일 — navigation_button 을 상속하되 글자만 작게. 화면 정의
+ * 사이에 끼면 읽기 어려워 base 템플릿 맨 끝(갤러리 화면들 뒤)에 붙인다.
+ */
+const MM_LINK_STYLES = `
+
+style mm_link_button is navigation_button
+style mm_link_button_text is navigation_button_text
+
+style mm_link_button_text:
+    size gui.scale(16)
+`;
+
+/** galleryTarget === 'hub' 일 때만 추가되는 갤러리 허브(아이템·CG 진입점을 하나로 묶음). */
+const GALLERY_HUB_SCREEN = String.raw`
+
+################################################################################
+## 갤러리 허브 — 아이템·CG 갤러리가 둘 다 있을 때 메인 메뉴 갤러리 버튼의 진입점.
+################################################################################
+
+screen gallery_hub():
+
+    tag menu
+
+    use game_menu(_("갤러리"), scroll=None):
+
+        vbox:
+            style_prefix "navigation"
+
+            textbutton _("감상한 CG") action ShowMenu("cg_gallery")
+            textbutton _("발견한 아이템") action ShowMenu("item_gallery")
+`;
 
 /**
  * 설정 화면 preferences 에 주입할 "자막 언어 / 음성 언어" 선택 블록(Ren'Py).
@@ -179,7 +385,17 @@ screen cg_gallery():
                         text _("???") xalign 0.5 size gui.scale(16) color gui.insensitive_color
 `;
 
-export function screensRpy(locales?: GuiLocales, hasItems?: boolean, hasCg?: boolean): string {
+/** screensRpy 옵션(위치 인자가 너무 늘어나 객체로 통합 — generateGuiFiles 의 GuiGenOptions 와 동형). */
+export interface ScreensRpyOptions {
+  locales?: GuiLocales;
+  hasItems?: boolean;
+  hasCg?: boolean;
+  /** 있으면(버튼 이미지·로고 중 하나라도) 이미지 기반 main_menu 를, 없으면 기존 텍스트 메뉴를 낸다. */
+  mainMenu?: MainMenuPlan;
+}
+
+export function screensRpy(opts?: ScreensRpyOptions): string {
+  const { locales, hasItems, hasCg, mainMenu } = opts ?? {};
   const languagePrefs = languagePrefsBlock(locales);
   // 아이템/CG 가 있을 때만 각각의 보관함 진입 버튼(내비)을 낸다.
   const galleryNav = [
@@ -191,7 +407,16 @@ export function screensRpy(locales?: GuiLocales, hasItems?: boolean, hasCg?: boo
   // 라이트박스는 아이템·CG 둘 중 하나라도 있으면 딱 1번만(중복 screen 정의 방지).
   const galleryScreens =
     (hasItems ? ITEM_SCREENS : '') + (hasCg ? CG_SCREENS : '') + (hasItems || hasCg ? GALLERY_LIGHTBOX : '');
-  return String.raw`################################################################################
+
+  // 이미지가 하나도 없으면(버튼 idle 이미지 0개 + 로고 없음) mainMenuScreen 은 DEFAULT_MAIN_MENU_SCREEN
+  // 그대로 — 아래 base 템플릿의 `${mainMenuScreen}` 자리에 보간되므로 기존 프로젝트(mainMenu 미지정)는
+  // 물론, 이 화면에 로고·버튼을 하나도 안 올린 프로젝트도 텍스트 메뉴 그대로 나간다(회귀 0).
+  const active = !!mainMenu && (Object.values(mainMenu.buttons).some((st) => st?.idle) || mainMenu.hasLogo);
+  const mainMenuScreen = active && mainMenu ? buildImageMainMenuScreen(mainMenu) : DEFAULT_MAIN_MENU_SCREEN;
+  const mmLinkStyles = active ? MM_LINK_STYLES : '';
+  const galleryHubScreen = active && mainMenu?.galleryTarget === 'hub' ? GALLERY_HUB_SCREEN : '';
+
+  const base = String.raw`################################################################################
 ## 자동 생성: 자체 GUI 화면 (zero-PNG, Solid 기반)
 ################################################################################
 
@@ -557,27 +782,7 @@ style navigation_button_text:
 
 ## Main Menu screen ############################################################
 
-screen main_menu():
-
-    tag menu
-
-    add Transform(gui.main_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))
-
-    frame:
-        style "main_menu_frame"
-
-    use navigation
-
-    if gui.show_name:
-
-        vbox:
-            style "main_menu_vbox"
-
-            text "[config.name!t]":
-                style "main_menu_title"
-
-            text "[config.version]":
-                style "main_menu_version"
+${mainMenuScreen}
 
 
 style main_menu_frame is empty
@@ -1484,5 +1689,7 @@ style slider_vbox:
 style slider_slider:
     variant "small"
     xsize gui.scale(600)
-${galleryScreens}`;
+${galleryScreens}${mmLinkStyles}${galleryHubScreen}`;
+
+  return base;
 }

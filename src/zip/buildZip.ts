@@ -3,7 +3,7 @@
 // 아직 생성되지 않은 배경/CG/BGM 은 즉석 폴백(Canvas/합성)으로 채워 실행 가능한 ZIP 을 보장한다.
 
 import type { Project } from '../types';
-import { effectiveTextLocales, effectiveVoiceLocales } from '../types';
+import { effectiveTextLocales, effectiveVoiceLocales, MAIN_MENU_SLOTS, MENU_BUTTON_STATES, menuButtonFile, TITLE_LOGO_FILE } from '../types';
 import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName, extFromMime } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
@@ -247,6 +247,25 @@ export async function collectProjectFiles(
   };
   out.push({ path: 'game/gui/main_menu.png', data: await menuArtFor('main') });
   out.push({ path: 'game/gui/game_menu.png', data: await menuArtFor('game') });
+
+  // 메인 메뉴 이미지 GUI(업로드 전용) — 업로드된 버튼·로고만 배치한다. 미업로드 버튼은 선택 기능이라
+  // placeholder 카운트를 올리지 않는다("임시 에셋 N개 포함" 경고를 이 선택 기능으로 오염시키지 않기 위함).
+  // 경로는 반드시 types.ts 의 menuButtonFile/TITLE_LOGO_FILE 로 만든다(screensRpy 도 같은 헬퍼 사용 —
+  // 어긋나면 없는 파일을 참조해 런타임 크래시가 난다).
+  for (const slot of MAIN_MENU_SLOTS) {
+    for (const state of MENU_BUTTON_STATES) {
+      if (!state.renpySupported) continue; // press — 저장돼 있어도(구버전 잔존 등) 출력하지 않는다.
+      const assetId = project.mainMenuUi?.buttons?.[slot.id]?.[state.id];
+      if (!assetId) continue;
+      const blob = await getAsset(assetId);
+      if (!blob) continue;
+      out.push({ path: `game/${menuButtonFile(slot.id, state.id)}`, data: blob });
+    }
+  }
+  if (project.mainMenuUi?.logo) {
+    const blob = await getAsset(project.mainMenuUi.logo);
+    if (blob) out.push({ path: `game/${TITLE_LOGO_FILE}`, data: blob });
+  }
 
   // 버튼 배경 PNG(gui.button_properties 요구) — 제네릭 prefix 세트.
   for (const b of buttonBgAssets(theme)) {

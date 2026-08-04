@@ -282,6 +282,118 @@ export interface Project {
    * 우선순위는 resolveOutfit/outfitForScene 참고(장면 직접 지정 > 규칙 첫 일치 > '기본').
    */
   outfitRules?: OutfitRule[];
+  /** 메인 메뉴 이미지 GUI(업로드 전용). 비어 있으면 기존 텍스트 메뉴 그대로 나간다(회귀 0). */
+  mainMenuUi?: {
+    buttons?: Partial<Record<MenuButtonSlot, Partial<Record<MenuButtonState, string>>>>; // assetId
+    logo?: string; // assetId
+    /** 로고 원본 가로/세로 비율(naturalWidth/naturalHeight). importTitleLogo 가 업로드 시점에 잰다. */
+    logoAspect?: number;
+    layout?: MainMenuLayout;
+  };
+}
+
+/** 메인 메뉴 버튼 슬롯(순서 고정 — 처음부터→이어하기→불러오기→환경설정→갤러리→게임종료). */
+export type MenuButtonSlot = 'start' | 'continue' | 'load' | 'prefs' | 'gallery' | 'quit';
+/** 버튼 이미지 상태 4종(사용자 제공 에셋 기준). */
+export type MenuButtonState = 'idle' | 'hover' | 'press' | 'disabled';
+
+/**
+ * 메인 메뉴 이미지 GUI 좌표(전부 1920×1080 기준 px — 다른 해상도는 렌더 시점에 height/1080 배율을
+ * 곱해 구운다, MainMenuPlan.scale 참고). gap 은 버튼 세로 간격(78px 버튼 + 12px 간격 = 90px 행 간격이
+ * 스펙 좌표와 정확히 맞아떨어져, 절대좌표 6개 대신 vbox spacing 하나로 재현된다).
+ */
+export interface MainMenuLayout {
+  x?: number;
+  y?: number;
+  gap?: number;
+  hoverShiftX?: number;
+  logoX?: number;
+  logoY?: number;
+  logoWidth?: number;
+}
+
+/** 사용자 제공 스펙의 권장 좌표(처음부터 X96/Y350, 78px 버튼 + 12px 간격). */
+export const DEFAULT_MAIN_MENU_LAYOUT: Required<MainMenuLayout> = {
+  x: 96,
+  y: 350,
+  gap: 12,
+  hoverShiftX: 8,
+  logoX: 96,
+  logoY: 90,
+  logoWidth: 700,
+};
+
+/** 기본값 위에 프로젝트가 저장한 값을 병합한 유효 레이아웃. */
+export function mainMenuLayout(p: Project): Required<MainMenuLayout> {
+  return { ...DEFAULT_MAIN_MENU_LAYOUT, ...(p.mainMenuUi?.layout ?? {}) };
+}
+
+/** 메뉴 버튼 슬롯 정의(순서 = 메뉴 표시 순서). fileKeywords 는 일괄 업로드 파일명 자동 매칭용. */
+export const MAIN_MENU_SLOTS: { id: MenuButtonSlot; label: string; fileKeywords: string[] }[] = [
+  { id: 'start', label: '처음부터', fileKeywords: ['처음부터', '시작'] },
+  { id: 'continue', label: '이어하기', fileKeywords: ['이어하기', '계속'] },
+  { id: 'load', label: '불러오기', fileKeywords: ['불러오기', '로드'] },
+  { id: 'prefs', label: '환경설정', fileKeywords: ['환경설정', '설정'] },
+  { id: 'gallery', label: '갤러리', fileKeywords: ['갤러리'] },
+  { id: 'quit', label: '게임 종료', fileKeywords: ['게임종료', '게임 종료', '종료', '끝내기'] },
+];
+
+/**
+ * 버튼 상태 정의. fileKeywords 는 일괄 업로드 파일명 자동 매칭용.
+ * renpySupported=false(press) 는 Ren'Py imagebutton 이 "누르는 중" 전용 이미지 슬롯을 지원하지
+ * 않아(엔진 전수 조사 결과 activate_ 프리픽스를 실제로 세팅하는 코드가 없는 죽은 슬롯) 업로드는
+ * 받되 저장·출력하지 않는다 — 그래도 매칭 자체는 계속 인식해야 "건너뜀" 안내를 낼 수 있어 목록엔 남긴다.
+ */
+export const MENU_BUTTON_STATES: { id: MenuButtonState; label: string; fileKeywords: string[]; renpySupported: boolean }[] = [
+  { id: 'idle', label: '기본', fileKeywords: ['기본'], renpySupported: true },
+  { id: 'hover', label: '마우스오버', fileKeywords: ['마우스오버', '마우스 오버', '호버', 'hover'], renpySupported: true },
+  { id: 'press', label: '클릭', fileKeywords: ['클릭', '눌림', 'press'], renpySupported: false },
+  { id: 'disabled', label: '비활성화', fileKeywords: ['비활성화', '비활성', 'disabled'], renpySupported: true },
+];
+
+/**
+ * Ren'Py 프로젝트 안의 메뉴 버튼 이미지 경로(game/ 기준). screensRpy·buildZip 공용 —
+ * 파일명 규칙의 단일 소스라 여기서만 만든다(어긋나면 없는 파일 참조 → 런타임 크래시).
+ */
+export function menuButtonFile(slot: MenuButtonSlot, state: MenuButtonState): string {
+  return `gui/menu/${slot}_${state}.png`;
+}
+
+/** 타이틀 로고 이미지 경로(game/ 기준). */
+export const TITLE_LOGO_FILE = 'gui/title_logo.png';
+
+/**
+ * text 안에서 entries 의 키워드 중 가장 긴 것부터 순서대로 찾아 첫 매치의 id 를 반환한다.
+ * 긴 키워드를 먼저 검사해야 짧은 키워드가 우연히 먼저 걸려 다른(더 구체적인) 슬롯/상태를
+ * 가리키는 걸 놓치는 오탐을 막는다(예: '비활성' vs '비활성화').
+ */
+function matchLongestKeyword<T extends string>(
+  text: string,
+  entries: { id: T; fileKeywords: string[] }[],
+): T | undefined {
+  const candidates: { id: T; kw: string }[] = [];
+  for (const e of entries) {
+    for (const kw of e.fileKeywords) candidates.push({ id: e.id, kw: kw.replace(/\s+/g, '').toLowerCase() });
+  }
+  candidates.sort((a, b) => b.kw.length - a.kw.length);
+  for (const c of candidates) {
+    if (c.kw && text.includes(c.kw)) return c.id;
+  }
+  return undefined;
+}
+
+/**
+ * 파일명(예 `GUI_처음부터_기본.png`)에서 확장자·`GUI_` 접두어·공백을 제거한 뒤 슬롯·상태를
+ * keyword substring 매칭으로 판정한다. 슬롯·상태 둘 다 매칭돼야 성공, 하나라도 실패하면 undefined
+ * (importMenuButtons 가 이 결과로 매칭 실패 파일을 사용자에게 알린다 — 조용히 버리지 않기 위함).
+ */
+export function matchMenuButtonFile(filename: string): { slot: MenuButtonSlot; state: MenuButtonState } | undefined {
+  const withoutExt = filename.replace(/\.[^.]+$/, '');
+  const norm = withoutExt.replace(/^GUI_/i, '').replace(/\s+/g, '').toLowerCase();
+  const slot = matchLongestKeyword(norm, MAIN_MENU_SLOTS);
+  const state = matchLongestKeyword(norm, MENU_BUTTON_STATES);
+  if (!slot || !state) return undefined;
+  return { slot, state };
 }
 
 export type GuiOverrides = NonNullable<Project['guiOverrides']>;

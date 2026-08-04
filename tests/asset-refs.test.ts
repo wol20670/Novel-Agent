@@ -38,7 +38,22 @@ describe('collectReferencedAssetIds', () => {
     characters,
     itemAssetIds: { 편지: 'item1' },
     menuArt: { main: 'menu_main', game: 'menu_game' },
+    mainMenuUi: {
+      buttons: {
+        start: { idle: 'menu_start_idle', hover: 'menu_start_hover' },
+        continue: { idle: 'menu_continue_idle', disabled: 'menu_continue_disabled' },
+      },
+      logo: 'menu_logo',
+    },
   };
+
+  const mainMenuIds = [
+    'menu_start_idle',
+    'menu_start_hover',
+    'menu_continue_idle',
+    'menu_continue_disabled',
+    'menu_logo',
+  ];
 
   it('includeVoice: true 면 성우 음성을 포함해 모든 참조를 모은다', () => {
     const ids = collectReferencedAssetIds(project, { includeVoice: true });
@@ -56,16 +71,29 @@ describe('collectReferencedAssetIds', () => {
         'item1',
         'menu_main',
         'menu_game',
+        ...mainMenuIds,
       ]),
     );
   });
 
-  it('includeVoice: false 면 성우 음성은 제외하고 나머지는 그대로 포함한다', () => {
+  it('includeVoice: false 면 성우 음성은 제외하고 나머지는 그대로 포함한다(메인 메뉴 버튼·로고 포함)', () => {
     const ids = collectReferencedAssetIds(project, { includeVoice: false });
     expect(ids.has('voice_ko')).toBe(false);
     expect(ids.has('voice_en')).toBe(false);
     expect(ids).toEqual(
-      new Set(['bg1', 'bgm1', 'cg1', 'cg2', 'expr_base', 'expr_happy', 'outfit_base', 'item1', 'menu_main', 'menu_game']),
+      new Set([
+        'bg1',
+        'bgm1',
+        'cg1',
+        'cg2',
+        'expr_base',
+        'expr_happy',
+        'outfit_base',
+        'item1',
+        'menu_main',
+        'menu_game',
+        ...mainMenuIds,
+      ]),
     );
   });
 

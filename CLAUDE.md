@@ -16,12 +16,16 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 ## Ren'Py 생성 주의 (lint로도 못 잡는 런타임 버그)
 - 화면 언어의 `add x:` 블록엔 애니메이션 ATL(`easein` 등) 금지 — 정적 속성만. 애니메이션은 `add x at transform:`으로 감쌀 것(`src/renpy/gui/screensRpy.ts`).
 - **사용자 텍스트는 반드시 `esc`/`escRpyText`를 거칠 것**(`src/renpy/generate.ts`) — `%`·`[`·`{` 미이스케이프는 typecheck·lint 둘 다 못 잡는 **런타임** 크래시("할인 20%", "[속보]"). 새 .rpy 출력 경로를 추가할 땐 이스케이프부터 확인.
-- 검증: `scripts/gen-lint.ts`로 출력 생성(esbuild 번들→`node` 실행, OneDrive 밖 cwd 추천) → 실제 `renpy.exe <폴더> lint`(이 PC SDK: `Downloads/renpy-8.5.3-sdk`).
+- **`imagebutton`에 `focus_mask True` 금지** — 히트박스가 "불투명 픽셀"로 좁아지는데 메뉴 버튼 아트는 대개 여백이 투명(글자 획만 불투명)이라 **hover·클릭이 아예 안 먹는다**(실기 재현 확인). lint·typecheck 둘 다 못 잡음.
+- **버튼 "눌린 상태" 이미지는 엔진이 지원 안 함** — `imagebutton` 상태는 idle/hover/selected_*/insensitive 뿐. `ImageButton`에 `activate_image` 슬롯이 남아 있으나 `activate_` 프리픽스를 세팅하는 코드가 엔진에 없다(레거시). 누르는 동안엔 hover 이미지가 보인다.
+- **메뉴 버튼·로고 파일 경로는 `menuButtonFile()`/`TITLE_LOGO_FILE`(`src/types.ts`) 단일 소스**로만 만들 것 — `screensRpy.ts`(참조)와 `buildZip.ts`(배치)가 어긋나면 없는 파일 참조로 런타임 크래시(폰트 `guiOverrides` 함정과 같은 종류).
+- 검증: `scripts/gen-lint.ts`로 출력 생성(esbuild 번들→`node` 실행, OneDrive 밖 cwd 추천) → 실제 `renpy.exe <폴더> lint`(이 PC SDK: **`C:\renpy\renpy-8.5.3-sdk`**). **lint 통과 ≠ 동작** — 화면 변경은 `renpy.exe <폴더>`로 실제 실행해 스크린샷까지 볼 것(테스트용 프로젝트: `C:\renpy\renpy-scene\`).
 
 ## 데이터·구조
 - 저장: 프로젝트 메타=localStorage, 바이너리 에셋=IndexedDB — 브라우저별(기기 이동은 앱 📤/📥 `.npproj.zip`), 키도 기기별 재입력.
 - 핵심 파일: 상태=`src/store.ts`, Ren'Py 출력=`src/renpy/generate.ts`, AI 설정=`src/config/aiConfig.ts`.
 - 미업로드 에셋은 Canvas 플레이스홀더로 자동 채움 — 단 **BGM은 플레이스홀더 없음**(미업로드 씬은 `play music` 미방출, 파일명 `.mp3` 고정).
+- 메인 메뉴 이미지 GUI(`project.mainMenuUi`): 아무것도 안 올리면 `screens.rpy` 출력이 **바이트 단위로 기존과 동일**해야 한다(회귀 0 — `tests/main-menu-ui.test.ts`가 지킴). 좌표는 1920×1080 기준 px를 `height/1080` 배율로 구움 — **`gui.scale()`(720p 기준)을 쓰지 말 것**.
 - 협업(src/collab/): Supabase last-write-wins relay(저장마다 600ms 디바운스 push) + 프레즌스, 에코 판정은 세션별 client_id. 방 코드 아는 사람은 누구나 읽기·쓰기(2인 신뢰 전제 — UI 문구에서 빼지 말 것). ⚠️ `projects` 테이블·Storage `assets` 버킷 모두 **RLS on + anon 개방 정책** 필수(정책 없이 RLS만 켜면 400). 전체 SQL=`supabase/setup.sql`(idempotent) — 재구축뿐 아니라 **스키마 바뀌는 버전업 배포 전에도 재실행**(예: client_id 컬럼, 없으면 협업 저장 400).
 - 폰트(src/fonts/): GCS 공개 버킷 온디맨드 fetch→IndexedDB 캐시(기본 나눔고딕만 로컬 번들). `guiOverrides.bodyFontId`/`nameFontId`는 gui.rpy(`theme.ts`)와 zip 폰트파일(`buildZip.ts`) **양쪽 일치 필수**(하나만 바꾸면 없는 파일 참조).
 - gitignore: `.secrets/`, `docs/`, `node_modules/`, `dist/`.

@@ -18,6 +18,7 @@ import UploadButton from './UploadButton';
 import Spinner from './Spinner';
 import VoiceLab from './VoiceLab';
 import VoiceReview from './VoiceReview';
+import MainMenuGui from './MainMenuGui';
 
 // ── 이름(의미) 기준 그룹화 — 같은 이름 = 하나의 에셋(업로드 1회, 모든 장면 공유) ──
 
@@ -149,6 +150,8 @@ export default function AssetsTab() {
           <MenuArtRow which="game" label="게임 메뉴(ESC로 여는 인게임 메뉴)" />
         </div>
       </section>
+
+      <MainMenuGui />
 
       <section>
         <h3 className="section-title mb-1">🎬 CG 컷 <span className="text-gray-500 font-normal text-xs">· {cgs.length}종</span></h3>

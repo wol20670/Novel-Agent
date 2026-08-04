@@ -32,5 +32,9 @@ export function collectReferencedAssetIds(project: Project, opts?: { includeVoic
   Object.values(project.itemAssetIds ?? {}).forEach(add);
   add(project.menuArt?.main);
   add(project.menuArt?.game);
+  add(project.mainMenuUi?.logo);
+  for (const states of Object.values(project.mainMenuUi?.buttons ?? {})) {
+    Object.values(states ?? {}).forEach(add);
+  }
   return ids;
 }

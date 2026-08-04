@@ -1,10 +1,20 @@
 // 승인된 장면들로 Ren'Py 프로젝트 파일 집합을 생성한다.
 // 파일 본문(텍스트)만 만들고, 바이너리 에셋(PNG/WAV)은 zip 빌더가 채운다.
 
-import type { Project, Scene, Line, Character, Expression, OutfitRule } from '../types';
-import { RENPY_LANG, LOCALE_LABEL, baseLocaleOf, effectiveTextLocales, effectiveVoiceLocales, resolveOutfit } from '../types';
+import type { Project, Scene, Line, Character, Expression, OutfitRule, MenuButtonState } from '../types';
+import {
+  RENPY_LANG,
+  LOCALE_LABEL,
+  baseLocaleOf,
+  effectiveTextLocales,
+  effectiveVoiceLocales,
+  resolveOutfit,
+  MAIN_MENU_SLOTS,
+  MENU_BUTTON_STATES,
+  mainMenuLayout,
+} from '../types';
 import { SlugMap } from './slug';
-import { generateGuiFiles, resolveTheme, withGuiOverrides } from './gui';
+import { generateGuiFiles, resolveTheme, withGuiOverrides, type MainMenuPlan } from './gui';
 import { CONFIRM_STRINGS, UI_STRINGS, uiTr } from './gui/uiStrings';
 import { inferEmotion } from '../generators/emotion';
 import { enforceContrast } from '../generators/theme/color';
@@ -953,6 +963,41 @@ function uiTranslationFiles(project: Project): RenpyFile[] {
   return files;
 }
 
+/**
+ * project.mainMenuUi(업로드된 버튼·로고 assetId) → screensRpy 가 바로 쓸 수 있는 렌더 계획.
+ * mainMenuUi 자체가 없으면(대부분의 프로젝트, 하위호환) undefined — screensRpy 는 undefined 면
+ * 기존 텍스트 메뉴를 그대로 낸다.
+ */
+function buildMainMenuPlan(project: Project, hasItems: boolean, hasCg: boolean): MainMenuPlan | undefined {
+  const src = project.mainMenuUi;
+  if (!src) return undefined;
+  const buttons: MainMenuPlan['buttons'] = {};
+  for (const slot of MAIN_MENU_SLOTS) {
+    const states = src.buttons?.[slot.id];
+    if (!states) continue;
+    const present: Partial<Record<MenuButtonState, true>> = {};
+    for (const st of MENU_BUTTON_STATES) {
+      if (states[st.id]) present[st.id] = true;
+    }
+    if (Object.keys(present).length) buttons[slot.id] = present;
+  }
+  // 아이템·CG 둘 다 있으면 갤러리 허브(둘 다 보여주는 중간 화면), 하나면 그걸로 바로, 없으면 비활성화.
+  let galleryTarget: MainMenuPlan['galleryTarget'];
+  if (hasItems && hasCg) galleryTarget = 'hub';
+  else if (hasCg) galleryTarget = 'cg';
+  else if (hasItems) galleryTarget = 'items';
+  return {
+    buttons,
+    hasLogo: !!src.logo,
+    // 비율을 못 잰 옛 프로젝트·가져오기 대비 폴백 3(=3:1) — 가로로 긴 타이틀 로고에 흔한 비율.
+    // 정확한 값은 재업로드하면 store.importTitleLogo 가 실측해 갱신한다.
+    logoAspect: src.logoAspect ?? 3,
+    layout: mainMenuLayout(project),
+    scale: project.height / 1080,
+    galleryTarget,
+  };
+}
+
 /** Ren'Py 텍스트 파일 전체를 생성한다. */
 export function generateRenpyFiles(project: Project): {
   files: RenpyFile[];
@@ -994,19 +1039,17 @@ export function generateRenpyFiles(project: Project): {
     ...(cgs.length ? [{ path: 'game/cg.rpy', content: cgRpy(cgs) }] : []),
     ...translationFiles(project, refs),
     ...uiTranslationFiles(project),
-    ...generateGuiFiles(
-      theme,
-      project.width,
-      project.height,
-      {
+    ...generateGuiFiles(theme, project.width, project.height, {
+      outline: {
         enabled: project.guiOverrides?.outline ?? false,
         color: project.guiOverrides?.outlineColor || '#000000',
       },
-      project.guiOverrides?.dialogueGradient ?? false,
-      { text: textLocales, voice: voiceLocales },
-      items.length > 0,
-      cgs.length > 0,
-    ),
+      dialogueGradient: project.guiOverrides?.dialogueGradient ?? false,
+      locales: { text: textLocales, voice: voiceLocales },
+      hasItems: items.length > 0,
+      hasCg: cgs.length > 0,
+      mainMenu: buildMainMenuPlan(project, items.length > 0, cgs.length > 0),
+    }),
     { path: 'README.md', content: readme(theme) },
   ];
   return { files, refs, sprites, characters: project.characters };
