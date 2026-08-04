@@ -9,7 +9,13 @@ import { getAsset } from '../storage/assetStore';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
 import { menuBackdropPng, solidPng, buttonBgAssets, textboxGradientPng, roundedPillPng, quickPillAssets } from '../generators/image/canvasMenu';
-import { resolveTheme } from '../renpy/gui';
+import {
+  resolveTheme,
+  dialogueGradientMetrics,
+  dialogueGradientColor,
+  DEFAULT_GRADIENT_OPACITY,
+  DEFAULT_GRADIENT_HEIGHT,
+} from '../renpy/gui';
 import { loadFontCatalog, fontById, DEFAULT_FONT } from '../fonts/fontCatalog';
 import { ensureFontBlob, ensureFontLicense } from '../fonts/fontCache';
 
@@ -278,12 +284,21 @@ export async function collectProjectFiles(
     out.push({ path: `game/gui/${p.name}`, data: await roundedPillPng(p.fill, p.border) });
   }
 
-  // 대사창 그라데이션(투명) 켜짐 → 세로 그라데이션 텍스트박스 PNG 생성(색·불투명도는 사용자 조정값).
+  // 대사창 그라데이션(투명) 켜짐 → 세로 그라데이션 텍스트박스 PNG 생성(색·진하기·높이는 사용자 조정값).
   if (project.guiOverrides?.dialogueGradient) {
-    const boxColor = project.guiOverrides.dialogueBoxColor ?? '#000000';
-    // 기본 0.40 — 그라데이션 하단이 이 정도는 진해야 배경 위 글자 대비가 확보된다(패널 표시값과 일치).
-    const maxAlpha = project.guiOverrides.dialogueOpacity ?? 0.4;
-    out.push({ path: 'game/gui/textbox.png', data: await textboxGradientPng(boxColor, maxAlpha) });
+    // 색 미지정이면 검정이 아니라 테마의 dialogueBox 색을 쓴다 — 단색 박스 경로(withGuiOverrides)가
+    // 이미 이 색을 쓰므로, 그라데이션도 같은 색이어야 테마의 dialogueText(글자색)와 대비가 맞는다.
+    // 하드코딩 검정은 밝은 테마(romance/slice: 흰 배경 + 어두운 글자)에서 본문을 거의 안 보이게
+    // 만들었다(실기 확인 — theme 는 resolveTheme() 을 거쳐 ensureReadableMenu 까지 적용된 값).
+    const boxColor = dialogueGradientColor(theme, project.guiOverrides.dialogueBoxColor);
+    const maxAlpha = project.guiOverrides.dialogueGradientOpacity ?? DEFAULT_GRADIENT_OPACITY;
+    // guiRpy 가 계산한 것과 반드시 같은 boxHeight 를 써야 한다 — 어긋나면 gui.rpy 의 창 크기와
+    // PNG 픽셀 높이가 달라 Frame 이 이미지를 늘려/줄여 곡선이 뭉개진다(CLAUDE.md 의 "양쪽 일치 필수" 함정).
+    const { boxHeight } = dialogueGradientMetrics(
+      project.height,
+      project.guiOverrides.dialogueGradientHeight ?? DEFAULT_GRADIENT_HEIGHT,
+    );
+    out.push({ path: 'game/gui/textbox.png', data: await textboxGradientPng(boxColor, maxAlpha, boxHeight) });
   }
 
   // 한글·일본어 폰트 파일(game/fonts/)은 위에서 gui.rpy 생성 전에 이미 확보해 out 에 담아뒀다

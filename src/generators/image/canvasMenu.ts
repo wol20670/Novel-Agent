@@ -32,12 +32,35 @@ function rgbOf(hex: string): { r: number; g: number; b: number } {
   return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
 }
 
+/** 그라데이션 PNG 가로 폭 — 세로 그라데이션이라 가로는 Frame(0,0) 이 늘려 쓰므로 최소값이면 충분. */
+const GRADIENT_WIDTH = 8;
+
+/**
+ * 대사창 그라데이션 곡선 — t(0=창 맨 위, 1=창 맨 아래) → 알파(0~maxAlpha).
+ * 하단 14%(t≥0.86)는 최대 진하기로 평평(글자가 실제로 놓이는 구간의 대비를 균일하게 유지),
+ * 그 위는 smoothstep(3t²-2t³)으로 시작·끝 둘 다 부드럽게 이어 눈에 띄는 꺾임이 없게 한다.
+ * t=0.1(창 상단 10% 지점)에서 이미 maxAlpha 의 3.7% 수준이라 배경(장면)과의 경계가 사실상
+ * 안 보인다 — 예전 3-스톱(0%→32%에서 최대→평평) 방식은 같은 지점에서 이미 31% 였어서
+ * 32% 지점에 눈에 띄는 선이 생겼었다. 별도 export 해 커브 자체를 테스트로 고정한다.
+ */
+export function gradientAlphaAt(t: number, maxAlpha: number): number {
+  const clampedT = Math.max(0, Math.min(1, t));
+  const p = Math.min(clampedT / 0.86, 1);
+  const ease = p * p * (3 - 2 * p); // smoothstep
+  return maxAlpha * ease;
+}
+
 /**
  * 대사창용 세로 그라데이션 PNG — 위는 완전 투명, 아래로 갈수록 color 가 maxAlpha 까지 진해진다.
  * (상단이 장면으로 자연스럽게 사라지는 시네마틱 대사창. screens 의 window 가 Frame 으로 늘려 쓴다.)
- * 세로 변화만 있어 가로는 좁아도 되므로 16×256 작은 이미지로 만든다(Frame 0,0 으로 가로 stretch).
+ * height 는 실제 창 픽셀 높이(dialogueGradientMetrics().boxHeight) 와 반드시 같아야 한다 —
+ * PNG 를 늘리지 않고 1:1로 그려야 여기서 계산한 곡선 모양이 그대로 화면에 나온다.
+ * createLinearGradient 의 색상 스톱 보간(스톱 사이 선형)으로는 smoothstep 곡선을 정확히
+ * 재현할 수 없어, 행마다 알파를 직접 계산해 1px 높이 사각형으로 채운다.
  */
-export function textboxGradientPng(color: string, maxAlpha: number, w = 16, h = 256): Promise<Blob> {
+export function textboxGradientPng(color: string, maxAlpha: number, height: number): Promise<Blob> {
+  const w = GRADIENT_WIDTH;
+  const h = Math.max(2, Math.round(height));
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -45,13 +68,12 @@ export function textboxGradientPng(color: string, maxAlpha: number, w = 16, h = 
   ctx.clearRect(0, 0, w, h);
   const { r, g, b } = rgbOf(color);
   const a = Math.max(0, Math.min(1, maxAlpha));
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  // 상단 투명 → 32% 지점에서 최대 진하기 도달 → 하단까지 유지(글자 영역 가독성 확보).
-  grad.addColorStop(0, `rgba(${r},${g},${b},0)`);
-  grad.addColorStop(0.32, `rgba(${r},${g},${b},${a})`);
-  grad.addColorStop(1, `rgba(${r},${g},${b},${a})`);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y++) {
+    const t = y / (h - 1); // 0 = 위, 1 = 아래
+    const alpha = gradientAlphaAt(t, a);
+    ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+    ctx.fillRect(0, y, w, 1);
+  }
   return new Promise((resolve) => canvas.toBlob((bl) => resolve(bl!), 'image/png'));
 }
 

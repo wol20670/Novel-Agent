@@ -14,7 +14,7 @@ import {
   mainMenuLayout,
 } from '../types';
 import { SlugMap } from './slug';
-import { generateGuiFiles, resolveTheme, withGuiOverrides, type MainMenuPlan } from './gui';
+import { generateGuiFiles, resolveTheme, withGuiOverrides, DEFAULT_GRADIENT_HEIGHT, type MainMenuPlan } from './gui';
 import { CONFIRM_STRINGS, UI_STRINGS, uiTr } from './gui/uiStrings';
 import { inferEmotion } from '../generators/emotion';
 import { enforceContrast } from '../generators/theme/color';
@@ -1044,7 +1044,10 @@ export function generateRenpyFiles(project: Project): {
         enabled: project.guiOverrides?.outline ?? false,
         color: project.guiOverrides?.outlineColor || '#000000',
       },
-      dialogueGradient: project.guiOverrides?.dialogueGradient ?? false,
+      dialogueGradient: {
+        enabled: project.guiOverrides?.dialogueGradient ?? false,
+        heightRatio: project.guiOverrides?.dialogueGradientHeight ?? DEFAULT_GRADIENT_HEIGHT,
+      },
       locales: { text: textLocales, voice: voiceLocales },
       hasItems: items.length > 0,
       hasCg: cgs.length > 0,

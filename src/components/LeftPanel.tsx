@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { downloadExcelTemplate, downloadTextTemplate } from '../template';
-import { GENRE_OPTIONS, DEFAULT_GENRE, resolveTheme } from '../renpy/gui';
+import { GENRE_OPTIONS, DEFAULT_GENRE, resolveTheme, DEFAULT_GRADIENT_OPACITY, DEFAULT_GRADIENT_HEIGHT } from '../renpy/gui';
 import type { GenreId, GuiTheme } from '../renpy/gui';
 import { translateModeOf } from '../types';
 import { hasEnvCredentials, generateRoomCode } from '../collab';
@@ -881,26 +881,72 @@ function DialogueGuiControls() {
   const outline = ov.outline ?? false;
   const outlineColor = ov.outlineColor ?? '#000000';
   const gradient = ov.dialogueGradient ?? false;
+  const gradientOpacity = ov.dialogueGradientOpacity ?? DEFAULT_GRADIENT_OPACITY;
+  const gradientHeight = ov.dialogueGradientHeight ?? DEFAULT_GRADIENT_HEIGHT;
   const characterScale = ov.characterScale ?? 1.0;
 
   return (
     <div className="flex flex-col gap-2 pt-1 border-t border-edge/50">
       <span className="label">대사창 · 폰트 (인게임)</span>
       <FontControls />
-      <label className="flex items-center gap-2 text-[11px] text-gray-400">
-        <span className="w-20 shrink-0">창 색·불투명</span>
-        <input type="color" value={boxColor} onChange={(e) => setOv({ dialogueBoxColor: e.target.value })} className="w-6 h-6 rounded border border-edge bg-transparent shrink-0" title="대사창·선택지 배경색(기본 검정)" />
+      <label className="flex items-center gap-1.5 text-[11px] text-gray-400">
         <input
-          type="range"
-          min={0}
-          max={0.6}
-          step={0.05}
-          value={opacity}
-          onChange={(e) => setOv({ dialogueOpacity: Number(e.target.value) })}
-          className="flex-1"
+          type="checkbox"
+          checked={gradient}
+          onChange={(e) => setOv({ dialogueGradient: e.target.checked })}
         />
-        <span className="w-9 text-right">{Math.round(opacity * 100)}%</span>
+        대사창 그라데이션 (투명 · 위로 사라짐)
+        <span className="text-[10px] text-gray-500">— 단색 박스 대신 시네마틱, 아래로 갈수록 어두워짐.</span>
       </label>
+      {gradient ? (
+        <>
+          <label className="flex items-center gap-2 text-[11px] text-gray-400">
+            <span className="w-20 shrink-0">창 색</span>
+            <input type="color" value={boxColor} onChange={(e) => setOv({ dialogueBoxColor: e.target.value })} className="w-6 h-6 rounded border border-edge bg-transparent shrink-0" title="대사창·선택지 배경색(기본 검정)" />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-gray-400">
+            <span className="w-20 shrink-0">하단 진하기</span>
+            <input
+              type="range"
+              min={0.3}
+              max={0.85}
+              step={0.05}
+              value={gradientOpacity}
+              onChange={(e) => setOv({ dialogueGradientOpacity: Number(e.target.value) })}
+              className="flex-1"
+            />
+            <span className="w-9 text-right">{Math.round(gradientOpacity * 100)}%</span>
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-gray-400">
+            <span className="w-20 shrink-0">페이드 높이</span>
+            <input
+              type="range"
+              min={0.25}
+              max={0.65}
+              step={0.05}
+              value={gradientHeight}
+              onChange={(e) => setOv({ dialogueGradientHeight: Number(e.target.value) })}
+              className="flex-1"
+            />
+            <span className="w-9 text-right">{Math.round(gradientHeight * 100)}%</span>
+          </label>
+        </>
+      ) : (
+        <label className="flex items-center gap-2 text-[11px] text-gray-400">
+          <span className="w-20 shrink-0">창 색·불투명</span>
+          <input type="color" value={boxColor} onChange={(e) => setOv({ dialogueBoxColor: e.target.value })} className="w-6 h-6 rounded border border-edge bg-transparent shrink-0" title="대사창·선택지 배경색(기본 검정)" />
+          <input
+            type="range"
+            min={0}
+            max={0.6}
+            step={0.05}
+            value={opacity}
+            onChange={(e) => setOv({ dialogueOpacity: Number(e.target.value) })}
+            className="flex-1"
+          />
+          <span className="w-9 text-right">{Math.round(opacity * 100)}%</span>
+        </label>
+      )}
       <label className="flex items-center gap-2 text-[11px] text-gray-400">
         <span className="w-20 shrink-0">캐릭터 크기</span>
         <input
@@ -913,15 +959,6 @@ function DialogueGuiControls() {
           className="flex-1"
         />
         <span className="w-9 text-right">{characterScale.toFixed(2)}배</span>
-      </label>
-      <label className="flex items-center gap-1.5 text-[11px] text-gray-400">
-        <input
-          type="checkbox"
-          checked={gradient}
-          onChange={(e) => setOv({ dialogueGradient: e.target.checked })}
-        />
-        대사창 그라데이션 (투명 · 위로 사라짐)
-        <span className="text-[10px] text-gray-500">— 단색 박스 대신 시네마틱. 위 불투명도가 하단 진하기.</span>
       </label>
       <div className="flex items-center gap-3 text-[11px] text-gray-400">
         <label className="flex items-center gap-1.5">
@@ -952,7 +989,9 @@ function DialogueGuiControls() {
           ov.outlineColor ||
           ov.bodyFontId ||
           ov.nameFontId ||
-          ov.characterScale != null) && (
+          ov.characterScale != null ||
+          ov.dialogueGradientOpacity != null ||
+          ov.dialogueGradientHeight != null) && (
           <button className="text-[10px] text-gray-500 hover:text-rose-600 ml-auto" onClick={() => update({ guiOverrides: undefined })}>
             기본값
           </button>

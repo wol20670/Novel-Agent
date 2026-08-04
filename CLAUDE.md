@@ -26,6 +26,7 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 - 핵심 파일: 상태=`src/store.ts`, Ren'Py 출력=`src/renpy/generate.ts`, AI 설정=`src/config/aiConfig.ts`.
 - 미업로드 에셋은 Canvas 플레이스홀더로 자동 채움 — 단 **BGM은 플레이스홀더 없음**(미업로드 씬은 `play music` 미방출, 파일명 `.mp3` 고정).
 - 메인 메뉴 이미지 GUI(`project.mainMenuUi`): 아무것도 안 올리면 `screens.rpy` 출력이 **바이트 단위로 기존과 동일**해야 한다(회귀 0 — `tests/main-menu-ui.test.ts`가 지킴). 좌표는 1920×1080 기준 px를 `height/1080` 배율로 구움 — **`gui.scale()`(720p 기준)을 쓰지 말 것**.
+- 대사창 그라데이션: 창 높이·글자 보정량은 `dialogueGradientMetrics()`, 색은 `dialogueGradientColor()`(둘 다 `gui/theme.ts`) **단일 소스** — guiRpy(창)와 buildZip(PNG 픽셀 높이)이 어긋나면 Frame이 늘려/줄여 곡선이 뭉개진다. 색 기본값을 검정으로 하드코딩하지 말 것(밝은 테마는 본문 글자가 어두워 안 읽힘 — 실기 확인). 페이드를 늘릴 땐 `name/dialogue_ypos`에 같은 delta를 더해야 글자가 안 밀린다(`style window`는 하단 고정·위로 자람).
 - 협업(src/collab/): Supabase last-write-wins relay(저장마다 600ms 디바운스 push) + 프레즌스, 에코 판정은 세션별 client_id. 방 코드 아는 사람은 누구나 읽기·쓰기(2인 신뢰 전제 — UI 문구에서 빼지 말 것). ⚠️ `projects` 테이블·Storage `assets` 버킷 모두 **RLS on + anon 개방 정책** 필수(정책 없이 RLS만 켜면 400). 전체 SQL=`supabase/setup.sql`(idempotent) — 재구축뿐 아니라 **스키마 바뀌는 버전업 배포 전에도 재실행**(예: client_id 컬럼, 없으면 협업 저장 400).
 - 폰트(src/fonts/): GCS 공개 버킷 온디맨드 fetch→IndexedDB 캐시(기본 나눔고딕만 로컬 번들). `guiOverrides.bodyFontId`/`nameFontId`는 gui.rpy(`theme.ts`)와 zip 폰트파일(`buildZip.ts`) **양쪽 일치 필수**(하나만 바꾸면 없는 파일 참조).
 - gitignore: `.secrets/`, `docs/`, `node_modules/`, `dist/`.

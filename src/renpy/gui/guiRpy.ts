@@ -3,16 +3,39 @@
 // screens.rpy 는 이 변수들만 참조하므로 거의 정적이다(= 테마별 표면적 최소화).
 // 레이아웃 수치는 Ren'Py 8.5.3 기본값을 따른다(검증된 값). gui.scale() 은 guisupport.rpy 제공.
 
-import type { GuiTheme } from './theme';
+import { dialogueGradientMetrics, type GuiTheme } from './theme';
+
+/** guiRpy 그라데이션 인자 — bool 하나로는 페이드 높이 비율까지 못 실어 옵션 객체로 뺐다. */
+export interface DialogueGradientOptions {
+  enabled: boolean;
+  /** 화면 높이 대비 페이드 비율(0.25~0.65) — dialogueGradientMetrics 가 클램프한다. */
+  heightRatio: number;
+}
 
 export function guiRpy(
   theme: GuiTheme,
   width: number,
   height: number,
   outline?: { enabled: boolean; color: string },
-  dialogueGradient?: boolean,
+  dialogueGradient?: DialogueGradientOptions,
   japanese?: boolean,
 ): string {
+  const gradientOn = !!dialogueGradient?.enabled;
+  // 그라데이션 꺼짐 = 기존 고정값(화면 높이의 1/4), delta 0 → 아래 ypos 식이 "+ 0" 없이 예전과 바이트 동일.
+  const metrics = gradientOn ? dialogueGradientMetrics(height, dialogueGradient!.heightRatio) : undefined;
+  const textboxHeight = metrics ? metrics.boxHeight : Math.round(height / 4);
+  const gradientDelta = metrics ? metrics.delta : 0;
+  // window 는 yalign 1.0 + ysize gui.textbox_height 라 "아래 고정, 위로만 자란다".
+  // 대사/이름 ypos 는 그 창의 "위쪽 기준" 좌표라서, 창이 delta 만큼 위로 커진 만큼 ypos 에도 같은
+  // delta 를 더해야 글자의 화면상 절대 위치가 1px 도 안 바뀐 채 배경(그라데이션)만 위로 확장된다.
+  // 즉 delta 보정은 "글자는 그대로 두고 페이드만 길게" 하기 위한 장치 — 없으면 페이드가 길어질수록
+  // 글자가 화면 위쪽으로 밀려 올라가 버린다.
+  const nameYpos = gradientOn ? `gui.scale(0) + ${gradientDelta}` : 'gui.scale(0)';
+  const dialogueYpos = gradientOn ? `gui.scale(50) + ${gradientDelta}` : 'gui.scale(50)';
+  // small(모바일) variant 는 원래 대사창 높이를 고정값(240)으로 덮어쓴다. 그라데이션 모드에서
+  // 이 줄을 그대로 두면 위에서 delta 만큼 보정한 name/dialogue ypos 와 실제 창 높이가 어긋나
+  // 글자가 창 밖으로 밀려난다 — 그라데이션 켜짐이면 이 줄 자체를 내지 않는다(나머지 small 설정은 유지).
+  const smallTextboxLine = gradientOn ? '' : '\n        gui.textbox_height = gui.scale(240)';
   // 글자 외곽선(가독성) — 켜면 본문·이름에 동일 외곽선, 끄면 빈 리스트.
   const outlineList = outline?.enabled
     ? `[ (absolute(2), "${outline.color}", absolute(0), absolute(0)) ]`
@@ -41,7 +64,7 @@ export function guiRpy(
   const fontVal = (f: string) => (japanese ? `_font_jp("${f}")` : `"${f}"`);
   // 대사창 배경: 그라데이션이면 buildZip 이 만든 gui/textbox.png 를 Frame(0,0)으로 늘려 쓰고(위로 투명),
   // 아니면 기존 단색 Solid. screens.rpy 의 window 가 이 변수만 참조한다(테마 표면적 최소화).
-  const dialogueBg = dialogueGradient
+  const dialogueBg = gradientOn
     ? 'Frame("gui/textbox.png", 0, 0, tile=False)'
     : 'Solid(gui.dialogue_box_color)';
   return `# 자동 생성: GUI 변수 (테마: ${theme.label})
@@ -107,11 +130,11 @@ define gui.show_name = True
 
 ## 대사창 ######################################################################
 ## 720p 스케일값 대신 화면 높이의 1/4 로 고정(대사창이 화면 대비 너무 얇아지는 문제 방지).
-define gui.textbox_height = ${Math.round(height / 4)}
+define gui.textbox_height = ${textboxHeight}
 define gui.textbox_yalign = 1.0
 
 define gui.name_xpos = gui.scale(240)
-define gui.name_ypos = gui.scale(0)
+define gui.name_ypos = ${nameYpos}
 define gui.name_xalign = 0.0
 define gui.namebox_width = None
 define gui.namebox_height = None
@@ -119,7 +142,7 @@ define gui.namebox_borders = Borders(gui.scale(12), gui.scale(6), gui.scale(12),
 define gui.namebox_tile = False
 
 define gui.dialogue_xpos = gui.scale(268)
-define gui.dialogue_ypos = gui.scale(50)
+define gui.dialogue_ypos = ${dialogueYpos}
 define gui.dialogue_width = gui.scale(744)
 define gui.dialogue_text_xalign = 0.0
 
@@ -256,8 +279,7 @@ init python:
         gui.interface_text_size = gui.scale(30)
         gui.button_text_size = gui.scale(30)
         gui.label_text_size = gui.scale(34)
-
-        gui.textbox_height = gui.scale(240)
+${smallTextboxLine}
         gui.name_xpos = gui.scale(80)
         gui.dialogue_xpos = gui.scale(90)
         gui.dialogue_width = gui.scale(1100)

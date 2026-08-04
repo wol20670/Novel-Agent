@@ -232,6 +232,40 @@ export function hexWithAlpha(hex: string, alpha: number): string {
   return `#${rgb}${aa}`;
 }
 
+export const DEFAULT_GRADIENT_OPACITY = 0.65;
+export const DEFAULT_GRADIENT_HEIGHT = 0.45;
+
+/**
+ * 그라데이션 대사창의 창 높이와 글자 위치 보정량.
+ * guiRpy(창 크기)와 buildZip(PNG 픽셀 높이)이 반드시 같은 값을 써야 한다 —
+ * 어긋나면 Frame 이 이미지를 늘려/줄여 애써 만든 곡선이 뭉개진다.
+ */
+export function dialogueGradientMetrics(
+  height: number,
+  fadeRatio: number,
+): { boxHeight: number; delta: number } {
+  const clampedRatio = Math.max(0.25, Math.min(0.65, fadeRatio));
+  const boxHeight = Math.round(height * clampedRatio);
+  const baseHeight = Math.round(height / 4); // 기존 단색 박스 높이(화면의 1/4) — 글자 ypos 의 기준선
+  // fadeRatio 하한(0.25)이 baseHeight 비율과 같으므로 이론상도 0 미만이 안 나오지만,
+  // 반올림 오차로 인한 -1 같은 미세한 음수까지 방어적으로 막는다.
+  const delta = Math.max(0, boxHeight - baseHeight);
+  return { boxHeight, delta };
+}
+
+/**
+ * 그라데이션 대사창의 기본색 결정 — 사용자가 dialogueBoxColor 를 지정했으면 그게 우선(override).
+ * 미지정이면 "검정"으로 하드코딩하지 않고 테마의 dialogueBox 색(RGB 만, 알파는 버림 — 진하기는
+ * dialogueGradientOpacity 가 따로 결정)을 쓴다. 단색 박스 경로(withGuiOverrides → theme.dialogueBox)가
+ * 이미 이 색을 쓰고 있어서, 그라데이션도 같은 색을 기본으로 삼아야 테마의 글자색(dialogueText)과
+ * 대비가 맞는다. 하드코딩 검정은 밝은 테마(romance/slice: 흰 배경 + 어두운 글자)에서 본문 글자를
+ * 거의 안 보이게 만든다(실기 확인).
+ */
+export function dialogueGradientColor(theme: GuiTheme, override?: string): string {
+  if (override) return override;
+  return `#${theme.dialogueBox.replace('#', '').slice(0, 6)}`;
+}
+
 export interface GuiOverrides {
   /** 대사창·선택지 배경색(기본 검정). 불투명도와 함께 적용. */
   dialogueBoxColor?: string;
@@ -243,9 +277,13 @@ export interface GuiOverrides {
   /**
    * 대사창을 단색 박스 대신 "세로 그라데이션"(위로 투명하게 사라지는)으로 렌더한다.
    * 켜면 buildZip 이 gui/textbox.png 를 생성하고 screens 의 window 배경이 그 이미지를 쓴다.
-   * 매우 투명한 시네마틱 대사창에 적합. dialogueOpacity 가 그라데이션 하단의 최대 진하기.
+   * 매우 투명한 시네마틱 대사창에 적합.
    */
   dialogueGradient?: boolean;
+  /** 그라데이션 하단 진하기(0.3~0.85, 기본 0.65). 단색 박스용 dialogueOpacity 와 분리한다. */
+  dialogueGradientOpacity?: number;
+  /** 페이드가 화면 아래 몇 비율까지 올라오는지(0.25~0.65, 기본 0.45). */
+  dialogueGradientHeight?: number;
   /**
    * 본문(대사) 폰트 · 이름(화자) 폰트 — src/fonts/fontCatalog.ts 의 FontPreset id.
    * 미지정이면 기본 폰트(나눔고딕). nameFontId 미지정이면 bodyFontId 를 따라간다.

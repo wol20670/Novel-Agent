@@ -267,6 +267,10 @@ export interface Project {
     outline?: boolean;
     outlineColor?: string;
     dialogueGradient?: boolean;
+    /** 그라데이션 하단 진하기(0.3~0.85, 기본 0.65). 단색 박스용 dialogueOpacity 와 분리한다. */
+    dialogueGradientOpacity?: number;
+    /** 페이드가 화면 아래 몇 비율까지 올라오는지(0.25~0.65, 기본 0.45). */
+    dialogueGradientHeight?: number;
     /**
      * 본문(대사) 폰트 · 이름(화자) 폰트 — src/fonts/fontCatalog.ts 의 FontPreset id.
      * 미지정이면 기본 폰트(나눔고딕). nameFontId 미지정이면 bodyFontId 를 따라간다.
@@ -501,5 +505,10 @@ export function emptyProject(): Project {
     characters: [],
     rawInput: '',
     genre: 'romance',
+    // 새 프로젝트는 그라데이션 대사창 기본 켜짐(사용자 확정). 단, 이 초기값은 emptyProject 에만
+    // 적용된다 — resolve 단계에서 `?? true` 로 바꾸면 이미 설정을 건드린 적 없는 기존 저장
+    // 프로젝트(guiOverrides 자체가 없거나 dialogueGradient 미지정)까지 전부 그라데이션으로
+    // 바뀌어버린다(회귀). "새 프로젝트만" 이라는 조건은 emptyProject 호출 시점에만 걸 수 있다.
+    guiOverrides: { dialogueGradient: true },
   };
 }

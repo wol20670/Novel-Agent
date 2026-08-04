@@ -4,7 +4,7 @@
 import type { RenpyFile } from '../generate';
 import type { Locale } from '../../types';
 import type { GuiTheme } from './theme';
-import { guiRpy } from './guiRpy';
+import { guiRpy, type DialogueGradientOptions } from './guiRpy';
 import { screensRpy, type MainMenuPlan } from './screensRpy';
 
 /** 설정 화면에 낼 다국어 선택 목록(자막·음성 각각). 각 2개 이상일 때만 해당 선택 UI 가 생긴다. */
@@ -19,7 +19,8 @@ export interface GuiLocales {
  */
 export interface GuiGenOptions {
   outline?: { enabled: boolean; color: string };
-  dialogueGradient?: boolean;
+  /** bool 하나로는 페이드 높이 비율까지 못 실어 옵션 객체(guiRpy.ts)로 뺐다. */
+  dialogueGradient?: DialogueGradientOptions;
   locales?: GuiLocales;
   hasItems?: boolean;
   hasCg?: boolean;
@@ -52,6 +53,18 @@ export function generateGuiFiles(theme: GuiTheme, width: number, height: number,
   ];
 }
 
-export { resolveTheme, PRESETS, GENRE_OPTIONS, DEFAULT_GENRE, withGuiOverrides, hexWithAlpha } from './theme';
+export {
+  resolveTheme,
+  PRESETS,
+  GENRE_OPTIONS,
+  DEFAULT_GENRE,
+  withGuiOverrides,
+  hexWithAlpha,
+  dialogueGradientMetrics,
+  dialogueGradientColor,
+  DEFAULT_GRADIENT_OPACITY,
+  DEFAULT_GRADIENT_HEIGHT,
+} from './theme';
 export type { GuiTheme, GenreId, GuiOverrides } from './theme';
 export type { MainMenuPlan } from './screensRpy';
+export type { DialogueGradientOptions } from './guiRpy';

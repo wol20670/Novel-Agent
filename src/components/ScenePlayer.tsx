@@ -9,6 +9,15 @@ import { canvasSprite } from '../generators/image/canvasSprite';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { getAsset } from '../storage/assetStore';
 import { spreadPositions } from '../renpy/generate';
+import {
+  resolveTheme,
+  withGuiOverrides,
+  hexWithAlpha,
+  dialogueGradientColor,
+  DEFAULT_GRADIENT_OPACITY,
+  DEFAULT_GRADIENT_HEIGHT,
+} from '../renpy/gui';
+import { gradientAlphaAt } from '../generators/image/canvasMenu';
 import { emojiFor, spriteAssetId, resolveOutfit, type Scene, type Character, type Expression, type Line } from '../types';
 
 const speakersOf = (l: Line): string[] =>
@@ -67,6 +76,35 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
   // 캐릭터 크기 슬라이더 — generate.ts 의 vn_char 와 동일 공식(기본 1.15배, 사용자 배율 곱).
   const characterScale = useStore((s) => s.project.guiOverrides?.characterScale);
   const charK = 1.15 * (characterScale ?? 1);
+  // 대사창 그라데이션 설정 — 실제 출력(guiRpy/buildZip)과 같은 값을 읽어야 미리보기가 거짓말을 안 한다.
+  const genre = useStore((s) => s.project.genre);
+  const customTheme = useStore((s) => s.project.guiTheme);
+  const guiOverrides = useStore((s) => s.project.guiOverrides);
+  // resolveTheme 은 ensureReadableMenu 까지 적용된(메뉴 가독성 보정 끝난) 최종 테마를 준다 —
+  // buildZip 이 그라데이션 기본색을 뽑을 때 쓰는 것과 동일한 테마여야 미리보기가 실제와 맞는다.
+  const theme = useMemo(() => resolveTheme(genre, customTheme), [genre, customTheme]);
+  const gradientOn = guiOverrides?.dialogueGradient ?? false;
+  const gradientOpacity = guiOverrides?.dialogueGradientOpacity ?? DEFAULT_GRADIENT_OPACITY;
+  const gradientHeightRatio = guiOverrides?.dialogueGradientHeight ?? DEFAULT_GRADIENT_HEIGHT;
+  // 그라데이션 ON: 작업 3(textboxGradientPng)의 gradientAlphaAt 을 여러 지점에서 호출해 CSS 스톱을
+  // 만든다 — 하드코딩한 스톱을 쓰면 실제 PNG 출력(곡선)과 미리보기가 어긋날 수 있어서다.
+  // 색 미지정이면 검정이 아니라 테마의 dialogueBox 색(buildZip 과 동일 규칙) — 밝은 테마(로맨스/일상)에서
+  // 검정 그라데이션 위에 어두운 본문 글자가 안 보이던 문제(실기 확인)를 미리보기에서도 재현하지 않는다.
+  // OFF: 단색 박스 경로(withGuiOverrides)가 실제로 만드는 최종 dialogueBox(색+알파)를 그대로 쓴다 —
+  // 사용자가 색·불투명도를 하나도 안 건드렸으면 테마 고유값, 건드렸으면 그 값 기준으로 계산된다.
+  const textboxBg = useMemo(() => {
+    if (gradientOn) {
+      const boxColor = dialogueGradientColor(theme, guiOverrides?.dialogueBoxColor);
+      const stops = Array.from({ length: 11 }, (_, idx) => {
+        const t = idx / 10;
+        const alpha = gradientAlphaAt(t, gradientOpacity);
+        return `${hexWithAlpha(boxColor, alpha)} ${Math.round(t * 100)}%`;
+      });
+      return `linear-gradient(to bottom, ${stops.join(', ')})`;
+    }
+    return withGuiOverrides(theme, guiOverrides).dialogueBox;
+  }, [gradientOn, theme, guiOverrides, gradientOpacity]);
+  const textboxHeightPct = gradientOn ? gradientHeightRatio * 100 : 25;
   const [step, setStep] = useState(0);
   useEffect(() => setStep(0), [scene.id]);
 
@@ -188,8 +226,10 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
           ) : null;
         })}
         {cur && (
-          // 높이 25% = 실제 생성 게임의 textbox_height(화면 높이의 1/4)와 동일 비율.
-          <div className="absolute inset-x-0 bottom-0 h-[25%] bg-black/55 backdrop-blur-[1px] px-3 py-1.5 overflow-hidden">
+          // 높이·배경 = 실제 생성 게임과 동일한 설정값에서 계산(하드코딩 금지 — 설정 바꾸면 미리보기도 바뀜).
+          // 그라데이션 OFF 일 땐 기존처럼 25%(단색 박스 textbox_height, 화면 높이의 1/4과 동일 비율).
+          // backdrop-blur 는 실제 게임 렌더링엔 없는 CSS 전용 효과라 뺐다(미리보기가 실물보다 예뻐 보이는 거짓말 방지).
+          <div className="absolute inset-x-0 bottom-0 px-3 py-1.5 overflow-hidden" style={{ height: `${textboxHeightPct}%`, background: textboxBg }}>
             {name && (
               // 글자 크기는 화면 높이 대비 비율(cqh)로 — 실제 게임의 45/1080(이름)·33/1080(본문)과 동일 비율.
               // 다만 미리보기가 작을 땐 그대로 두면 읽을 수 없어 최소 px 바닥을 둔다(비율 유지 + 가독성).
