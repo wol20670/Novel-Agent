@@ -19,6 +19,12 @@ export function guiRpy(
   outline?: { enabled: boolean; color: string },
   dialogueGradient?: DialogueGradientOptions,
   japanese?: boolean,
+  /**
+   * 메인 메뉴 버튼 텍스트 폰트(주/부) — 이미 fontGamePath 로 해석된 게임 내 경로. 미지정이면
+   * generate.ts 의 폴백 규칙(main=본문 폰트, sub=main)이 적용된 값이 넘어오지만, 여기서도 같은
+   * 규칙으로 한 번 더 방어한다(guiRpy 를 다른 경로에서 직접 호출해도 항상 유효한 값이 나가도록).
+   */
+  menuFonts?: { main: string; sub: string },
 ): string {
   const gradientOn = !!dialogueGradient?.enabled;
   // 그라데이션 꺼짐 = 기존 고정값(화면 높이의 1/4), delta 0 → 아래 ypos 식이 "+ 0" 없이 예전과 바이트 동일.
@@ -62,6 +68,10 @@ export function guiRpy(
     : '';
   // 폰트 값: 일본어가 있으면 FontGroup(_font_jp)로 감싸고, 없으면 테마 폰트를 그대로 쓴다.
   const fontVal = (f: string) => (japanese ? `_font_jp("${f}")` : `"${f}"`);
+  // 메뉴 버튼 폰트(주/부) — 미지정이면 주=본문 폰트, 부=주 폰트를 따라간다(generate.ts 와 동일 규칙,
+  // 여기서 한 번 더 방어). 일본어 FontGroup 처리는 본문/이름/인터페이스 폰트와 동일하게 적용한다.
+  const menuMainFont = menuFonts?.main ?? theme.textFont;
+  const menuSubFont = menuFonts?.sub ?? menuMainFont;
   // 대사창 배경: 그라데이션이면 buildZip 이 만든 gui/textbox.png 를 Frame(0,0)으로 늘려 쓰고(위로 투명),
   // 아니면 기존 단색 Solid. screens.rpy 의 window 가 이 변수만 참조한다(테마 표면적 최소화).
   const dialogueBg = gradientOn
@@ -107,6 +117,9 @@ define gui.choice_idle_bg = "${theme.choiceIdleBg}"
 define gui.text_font = ${fontVal(theme.textFont)}
 define gui.name_text_font = ${fontVal(theme.nameFont)}
 define gui.interface_text_font = ${fontVal(theme.interfaceFont)}
+## 메인 메뉴 버튼 텍스트 전용(주/부) — screensRpy.ts 의 mm_button_text/mm_main_text/mm_sub_text 가 참조.
+define gui.menu_text_font = ${fontVal(menuMainFont)}
+define gui.menu_sub_text_font = ${fontVal(menuSubFont)}
 
 ## 글자 외곽선 (가독성 — 대사창 위 흰 글자 등). screens.rpy 의 say 스타일이 참조.
 define gui.dialogue_outlines = ${outlineList}

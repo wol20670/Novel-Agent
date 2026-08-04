@@ -126,10 +126,13 @@ export async function collectProjectFiles(
   // gui.rpy 를 생성해야 파일 목록과 참조가 항상 일치한다.
   const japanese =
     effectiveTextLocales(project).includes('ja') || effectiveVoiceLocales(project).includes('ja');
-  const fontResult = await selectedFontFiles(project.guiOverrides, japanese);
+  const fontResult = await selectedFontFiles(project.guiOverrides, project.mainMenuUi, japanese);
   const effectiveGuiOverrides = adoptGuiOverrideFonts(project.guiOverrides, fontResult.adoptedIds);
+  const effectiveMainMenuUi = adoptMainMenuUiFonts(project.mainMenuUi, fontResult.adoptedIds);
   const effectiveProject: Project =
-    effectiveGuiOverrides === project.guiOverrides ? project : { ...project, guiOverrides: effectiveGuiOverrides };
+    effectiveGuiOverrides === project.guiOverrides && effectiveMainMenuUi === project.mainMenuUi
+      ? project
+      : { ...project, guiOverrides: effectiveGuiOverrides, mainMenuUi: effectiveMainMenuUi };
 
   const { files: textFiles, refs, sprites } = generateRenpyFiles(effectiveProject);
   const out: ProjectFile[] = textFiles.map((f) => ({ path: f.path, data: f.content }));
@@ -319,21 +322,25 @@ export async function buildRenpyZip(project: Project): Promise<ZipResult> {
 }
 
 /**
- * 선택한 본문/이름 폰트(왼쪽 패널 GUI 설정, 기본은 나눔고딕 번들) + (일본어 프로젝트면)
- * SourceHanSansLite 를 game/fonts/ 에 넣을 파일 목록으로 만든다.
- * - 나눔고딕: 한글·라틴 본문(Ren'Py 기본 폰트는 한글 글리프 없음) — 본문/이름 어느 한쪽이라도 기본
- *   폰트를 쓰면(bodyFontId 미지정이 기본) 나눔고딕과 public/fonts/OFL.txt 를 함께 포함한다.
+ * 선택한 본문/이름/메뉴 폰트(왼쪽 패널 GUI 설정 + 메인 메뉴 프리셋 설정, 기본은 나눔고딕 번들) +
+ * (일본어 프로젝트면) SourceHanSansLite 를 game/fonts/ 에 넣을 파일 목록으로 만든다.
+ * - 나눔고딕: 한글·라틴 본문(Ren'Py 기본 폰트는 한글 글리프 없음) — 본문/이름/메뉴 어느 한쪽이라도
+ *   기본 폰트를 쓰면(미지정이 기본) 나눔고딕과 public/fonts/OFL.txt 를 함께 포함한다.
  * - SourceHanSansLite: 일본어(かな·한자) 자막/UI 용. gui.rpy 의 FontGroup 이 일본어 범위만 이 폰트로
  *   폴백한다(나눔고딕은 일본어 글리프가 없어 자막이 빈칸으로 나오는 문제 대응). 둘 다 SIL OFL 1.1.
  * - 커스텀(GCS) 폰트 다운로드 실패 시 기본 폰트로 자동 폴백(오프라인에도 항상 실행 가능한 zip 보장) —
  *   이 경우 placeholders 카운트를 올려 호출 측 토스트("임시 에셋 N개 포함")에 반영한다.
+ * - 메뉴 폰트(mainMenuUi.menuFontId/menuSubFontId)는 guiOverrides 가 아니라 mainMenuUi 에 저장되므로
+ *   별도 인자로 받는다 — 안 받으면 커스텀 메뉴 폰트를 고른 프로젝트가 gui.rpy 는 그 폰트를 참조하는데
+ *   game/fonts/ 엔 파일이 없어 게임이 안 켜지는 CLAUDE.md 함정 그대로 재현된다.
  *
  * adoptedIds: "요청한 폰트 id → 실제로 파일을 넣은 폰트 id" 매핑. 다운로드 실패로 기본 폰트로
- * 대체된 경우 요청 id와 달라지므로, 호출 측이 gui.rpy 생성 전에 guiOverrides 를 이 매핑으로
- * 보정해야 gui.rpy(참조 파일명) ↔ game/fonts/(실제 번들) 가 항상 일치한다(P0-3).
+ * 대체된 경우 요청 id와 달라지므로, 호출 측이 gui.rpy 생성 전에 guiOverrides/mainMenuUi 를 이
+ * 매핑으로 보정해야 gui.rpy(참조 파일명) ↔ game/fonts/(실제 번들) 가 항상 일치한다(P0-3).
  */
 async function selectedFontFiles(
   guiOverrides: Project['guiOverrides'],
+  mainMenuUi: Project['mainMenuUi'],
   includeJapanese: boolean,
 ): Promise<{ files: ProjectFile[]; placeholders: number; adoptedIds: Map<string, string> }> {
   // 호출 측(collectProjectFiles)이 gui.rpy 생성 전에 이미 로드해두지만, 이 함수만 독립 호출될 가능성도
@@ -344,7 +351,12 @@ async function selectedFontFiles(
   // 항상 기본 폰트를 wanted 에 포함시켜야 gui.rpy 가 참조하는 파일과 번들 내용이 일치한다.
   const bodyId = guiOverrides?.bodyFontId ?? DEFAULT_FONT.id;
   const nameId = guiOverrides?.nameFontId ?? bodyId;
-  const requestedIds = [...new Set([bodyId, nameId])];
+  // 메뉴 폰트도 같은 폴백 규칙(generate.ts/guiRpy.ts 와 동일: 주=본문, 부=주)으로 미리 해석해둬야
+  // 미지정 프로젝트(대부분)는 bodyId 와 겹쳐 Set 으로 중복 제거되고, 실제로 커스텀 지정한 프로젝트만
+  // 추가 다운로드가 발생한다(기존 프로젝트 배포 zip 크기/동작에 회귀 없음).
+  const menuId = mainMenuUi?.menuFontId ?? bodyId;
+  const menuSubId = mainMenuUi?.menuSubFontId ?? menuId;
+  const requestedIds = [...new Set([bodyId, nameId, menuId, menuSubId])];
   const wanted = requestedIds.map((id) => fontById(id));
 
   // 본문/이름 폰트를 병렬로 확보(각각 독립적인 GCS 다운로드일 수 있음).
@@ -408,6 +420,29 @@ function adoptGuiOverrideFonts(
     ...guiOverrides,
     ...(bodyChanged ? { bodyFontId: nextBody } : {}),
     ...(nameChanged ? { nameFontId: nextName } : {}),
+  };
+}
+
+/**
+ * adoptGuiOverrideFonts 와 동일한 목적이지만 mainMenuUi.menuFontId/menuSubFontId 대상 — 이 두 필드는
+ * guiOverrides 가 아니라 mainMenuUi 에 저장되므로 별도 함수로 보정한다(안 하면 다운로드 실패 시
+ * gui.rpy 는 대체 폰트를 참조하는데 mainMenuUi 가 여전히 원래 id를 들고 있어 다음 저장/재생성 때
+ * 불일치가 재발할 수 있음 — adoptGuiOverrideFonts 와 같은 이유).
+ */
+function adoptMainMenuUiFonts(
+  mainMenuUi: Project['mainMenuUi'],
+  adoptedIds: Map<string, string>,
+): Project['mainMenuUi'] {
+  if (!mainMenuUi) return mainMenuUi;
+  const nextMenu = mainMenuUi.menuFontId && adoptedIds.get(mainMenuUi.menuFontId);
+  const nextSub = mainMenuUi.menuSubFontId && adoptedIds.get(mainMenuUi.menuSubFontId);
+  const menuChanged = !!nextMenu && nextMenu !== mainMenuUi.menuFontId;
+  const subChanged = !!nextSub && nextSub !== mainMenuUi.menuSubFontId;
+  if (!menuChanged && !subChanged) return mainMenuUi;
+  return {
+    ...mainMenuUi,
+    ...(menuChanged ? { menuFontId: nextMenu } : {}),
+    ...(subChanged ? { menuSubFontId: nextSub } : {}),
   };
 }
 

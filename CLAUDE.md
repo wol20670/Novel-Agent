@@ -18,7 +18,10 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 - **사용자 텍스트는 반드시 `esc`/`escRpyText`를 거칠 것**(`src/renpy/generate.ts`) — `%`·`[`·`{` 미이스케이프는 typecheck·lint 둘 다 못 잡는 **런타임** 크래시("할인 20%", "[속보]"). 새 .rpy 출력 경로를 추가할 땐 이스케이프부터 확인.
 - **`imagebutton`에 `focus_mask True` 금지** — 히트박스가 "불투명 픽셀"로 좁아지는데 메뉴 버튼 아트는 대개 여백이 투명(글자 획만 불투명)이라 **hover·클릭이 아예 안 먹는다**(실기 재현 확인). lint·typecheck 둘 다 못 잡음.
 - **버튼 "눌린 상태" 이미지는 엔진이 지원 안 함** — `imagebutton` 상태는 idle/hover/selected_*/insensitive 뿐. `ImageButton`에 `activate_image` 슬롯이 남아 있으나 `activate_` 프리픽스를 세팅하는 코드가 엔진에 없다(레거시). 누르는 동안엔 hover 이미지가 보인다.
-- **메뉴 버튼·로고 파일 경로는 `menuButtonFile()`/`TITLE_LOGO_FILE`(`src/types.ts`) 단일 소스**로만 만들 것 — `screensRpy.ts`(참조)와 `buildZip.ts`(배치)가 어긋나면 없는 파일 참조로 런타임 크래시(폰트 `guiOverrides` 함정과 같은 종류).
+- **메뉴 버튼·로고 파일 경로는 `menuButtonFile()`/`TITLE_LOGO_FILE`(`src/types.ts`) 단일 소스**로만 만들 것 — `screensRpy.ts`(참조)와 `buildZip.ts`(배치)가 어긋나면 없는 파일 참조로 런타임 크래시(폰트 `guiOverrides` 함정과 같은 종류). **메뉴 폰트(`menuFontId`/`menuSubFontId`)도 같은 대상** — `buildZip`의 `selectedFontFiles`에 빠뜨리면 커스텀 폰트 선택 순간 게임이 안 켜진다.
+- **메뉴 라벨은 사용자 입력** — `.rpy`로 낼 때 반드시 `escRpyText`(`src/renpy/escape.ts`) 경유. 이스케이프 헬퍼는 순환 import(`generate`↔`screensRpy`)를 피하려 별도 모듈에 있고 `generate.ts`가 재수출한다.
+- **메뉴 글자엔 외곽선이 필요**(`mainMenuUi.textOutline`, 기본 켜짐) — 이미지 버튼 경로에서 좌측 스크림 프레임을 없앴기 때문에 텍스트 메뉴는 업로드 배경 위에 맨몸으로 놓인다. 밝은 아트면 글자가 사라진다(실기 확인).
+- **▶ 등 기호는 이모지 치환 주의** — Ren'Py는 `TwemojiCOLRv0.ttf`를 번들하고 기본 스타일이 `prefer_emoji True`라, U+25B6(이모지 등급 UNQUALIFIED) 같은 문자가 **파란 재생버튼 이모지로 치환**된다. UI 기호엔 스타일에 `emoji_font None`을 줄 것(엔진 자체도 `00director.rpy`에서 같은 관용구 사용). 나눔고딕엔 `▶▷◆★•●`는 있고 `U+25B8·U+2023·U+27A4·✦`는 **없다**(두부).
 - 검증: `scripts/gen-lint.ts`로 출력 생성(esbuild 번들→`node` 실행, OneDrive 밖 cwd 추천) → 실제 `renpy.exe <폴더> lint`(이 PC SDK: **`C:\renpy\renpy-8.5.3-sdk`**). **lint 통과 ≠ 동작** — 화면 변경은 `renpy.exe <폴더>`로 실제 실행해 스크린샷까지 볼 것(테스트용 프로젝트: `C:\renpy\renpy-scene\`).
 
 ## 데이터·구조

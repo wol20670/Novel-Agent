@@ -5,9 +5,8 @@ import { GENRE_OPTIONS, DEFAULT_GENRE, resolveTheme, DEFAULT_GRADIENT_OPACITY, D
 import type { GenreId, GuiTheme } from '../renpy/gui';
 import { translateModeOf } from '../types';
 import { hasEnvCredentials, generateRoomCode } from '../collab';
-import { DEFAULT_FONT, getCachedCatalog, loadFontCatalog } from '../fonts/fontCatalog';
-import type { FontPreset } from '../fonts/fontCatalog';
-import { loadFontFace } from '../fonts/fontCache';
+import { DEFAULT_FONT, useFontCatalog, useFontFamily } from './fontHooks';
+import type { FontPreset } from './fontHooks';
 import { getSubscription, type Subscription } from '../generators/voice/typecastProvider';
 import { parseText, parseWorkbook } from '../parser';
 import type { BuildResult } from '../parser';
@@ -754,22 +753,6 @@ function ThemeStudio() {
   );
 }
 
-/** 폰트 id → 미리보기용 CSS font-family(로드 전/실패 시 undefined = 브라우저 기본 폰트). */
-function useFontFamily(id: string | undefined): string | undefined {
-  const [family, setFamily] = useState<string>();
-  useEffect(() => {
-    let alive = true;
-    setFamily(undefined);
-    loadFontFace(id).then((f) => {
-      if (alive) setFamily(f);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [id]);
-  return family;
-}
-
 const FONT_PREVIEW_TEXT = '다람쥐 헌 쳇바퀴에 타고파 1234';
 const INHERIT_BODY = '__inherit__'; // 이름 폰트 select 의 "본문과 동일" 옵션 값(빈 문자열 대신 명시적 sentinel)
 
@@ -781,26 +764,12 @@ function FontControls() {
   const setOv = (patch: Partial<NonNullable<typeof project.guiOverrides>>) =>
     update({ guiOverrides: { ...(project.guiOverrides ?? {}), ...patch } });
 
-  const [fonts, setFonts] = useState<FontPreset[]>(getCachedCatalog());
-  useEffect(() => {
-    loadFontCatalog().then(setFonts);
-  }, []);
-  const customAvailable = fonts.length > 1; // 기본 폰트 1개뿐이면 매니페스트 로드 실패/미설정
+  const { grouped, customAvailable } = useFontCatalog();
 
   const bodyId = ov.bodyFontId ?? DEFAULT_FONT.id;
   const nameId = ov.nameFontId; // undefined = "본문과 동일"
   const bodyFamily = useFontFamily(bodyId);
   const nameFamily = useFontFamily(nameId ?? bodyId);
-
-  const grouped = useMemo(() => {
-    const byCat = new Map<string, FontPreset[]>();
-    for (const f of fonts) {
-      const list = byCat.get(f.category) ?? [];
-      list.push(f);
-      byCat.set(f.category, list);
-    }
-    return [...byCat.entries()];
-  }, [fonts]);
 
   const optionsFor = (f: FontPreset) => (
     <option key={f.id} value={f.id}>

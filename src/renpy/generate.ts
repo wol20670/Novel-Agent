@@ -12,12 +12,16 @@ import {
   MAIN_MENU_SLOTS,
   MENU_BUTTON_STATES,
   mainMenuLayout,
+  mainMenuPreset,
+  mainMenuLabels,
+  DEFAULT_MAIN_MENU_PRESET,
 } from '../types';
 import { SlugMap } from './slug';
 import { generateGuiFiles, resolveTheme, withGuiOverrides, DEFAULT_GRADIENT_HEIGHT, type MainMenuPlan } from './gui';
 import { CONFIRM_STRINGS, UI_STRINGS, uiTr } from './gui/uiStrings';
 import { inferEmotion } from '../generators/emotion';
 import { enforceContrast } from '../generators/theme/color';
+import { fontGamePath } from '../fonts/fontCatalog';
 
 export interface RenpyFile {
   path: string; // game/ 이하 경로
@@ -299,39 +303,12 @@ export function resolveItems(project: Project): ItemRef[] {
 
 const indent = (n: number) => '    '.repeat(n);
 
-/**
- * Ren'Py 문자열 리터럴 이스케이프 코어. esc/escRpyText/escLit 세 래퍼가 공유한다(과거 esc 에서만
- * `[`/`{` 이스케이프가 빠져 런타임 크래시가 났던 것처럼, 복붙 재구현이 서로 갈라지는 걸 막기 위함).
- * 치환 순서: 역슬래시 → 따옴표 → (tags==='escape' 일 때만) [ / { 텍스트태그 무력화 → % → 개행 → trim.
- */
-function escapeRpy(s: string, opts: { tags: 'escape' | 'keep'; newline: 'space' | 'literal'; trim: boolean }): string {
-  let out = s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  if (opts.tags === 'escape') {
-    // [ ] 는 변수 보간, { } 는 텍스트 태그로 해석되므로(예: 사용자가 "[속보]"·"{웃음}" 을 입력) 무력화
-    // 해야 한다 — 안 하면 NameError/Unknown text tag 로 런타임에 죽는다.
-    out = out.replace(/\[/g, '[[').replace(/\{/g, '{{');
-  }
-  // %(변수)s 같은 보간 문법이 아닌 순수 문자(예: "할인 20%")는 %% 로 이스케이프해야 한다.
-  // 안 하면 Ren'Py 가 그 줄을 표시할 때 "Unknown string format code" 로 런타임에 죽는다(실제 SDK로 확인).
-  out = out.replace(/%/g, '%%');
-  out = opts.newline === 'space' ? out.replace(/\r?\n/g, ' ') : out.replace(/\r?\n/g, '\\n');
-  return opts.trim ? out.trim() : out;
-}
-
-/** 대사·이름 등 script.rpy 본문용: 태그 무력화 + 개행은 공백으로 뭉개고 앞뒤 trim. */
-export function esc(s: string): string {
-  return escapeRpy(s, { tags: 'escape', newline: 'space', trim: true });
-}
-
-/** 아이템/크레딧 등 단일 문자열 리터럴용: 태그 무력화 + 개행은 `\n` 리터럴로 보존, trim. */
-export function escRpyText(s: string): string {
-  return escapeRpy(s, { tags: 'escape', newline: 'literal', trim: true });
-}
-
-/** UI 문자열 이스케이프 — `{b}`·`[config.version!t]` 같은 태그·보간은 보존하고 따옴표·역슬래시·개행만 처리. */
-export function escLit(s: string): string {
-  return escapeRpy(s, { tags: 'keep', newline: 'literal', trim: false });
-}
+// 이스케이프 헬퍼(esc/escRpyText/escLit)는 src/renpy/escape.ts 로 옮겼다 — screensRpy.ts 가
+// escRpyText 를 쓰면서 generate.ts → gui/index.ts → screensRpy.ts → generate.ts 순환 import 가
+// 생겼던 걸 없애기 위함(escape.ts 는 어느 쪽도 import 하지 않는 잎 모듈). 여기서는 기존 호출부
+// (특히 tests/generate-escape.test.ts)가 안 깨지도록 같은 이름으로 re-export 만 한다.
+export { esc, escRpyText, escLit } from './escape';
+import { esc, escRpyText, escLit } from './escape';
 
 /**
  * 승인 장면 + 에셋 이름을 계산. 배경/BGM/CG 태그는 "이름" 기준 SlugMap 으로 발급되어
@@ -964,9 +941,14 @@ function uiTranslationFiles(project: Project): RenpyFile[] {
 }
 
 /**
- * project.mainMenuUi(업로드된 버튼·로고 assetId) → screensRpy 가 바로 쓸 수 있는 렌더 계획.
- * mainMenuUi 자체가 없으면(대부분의 프로젝트, 하위호환) undefined — screensRpy 는 undefined 면
- * 기존 텍스트 메뉴를 그대로 낸다.
+ * project.mainMenuUi(업로드된 버튼·로고 assetId + 프리셋/라벨/폰트) → screensRpy 가 바로 쓸 수 있는
+ * 렌더 계획. mainMenuUi 자체가 없으면(대부분의 프로젝트, 하위호환) undefined — screensRpy 는
+ * undefined 면 기존 텍스트 메뉴를 그대로 낸다.
+ *
+ * "활성화" 조건은 이미지/로고뿐 아니라 **프리셋을 기본값(left-column)이 아닌 걸로 바꿨거나, 라벨을
+ * 편집했거나, 메뉴 폰트를 지정한 경우**도 포함한다 — 안 그러면 사용자가 이미지 없이 프리셋만
+ * 골랐을 때(이 기능의 핵심 사용 시나리오: 아트 없이도 레이아웃/라벨만 바꾸기) 아무 변화도 없이
+ * 조용히 DEFAULT_MAIN_MENU_SCREEN 그대로 나가는 버그가 된다.
  */
 function buildMainMenuPlan(project: Project, hasItems: boolean, hasCg: boolean): MainMenuPlan | undefined {
   const src = project.mainMenuUi;
@@ -981,6 +963,12 @@ function buildMainMenuPlan(project: Project, hasItems: boolean, hasCg: boolean):
     }
     if (Object.keys(present).length) buttons[slot.id] = present;
   }
+  const preset = mainMenuPreset(project);
+  const hasIdleImage = Object.values(buttons).some((st) => st?.idle);
+  const hasLabelOverride = !!src.labels && Object.values(src.labels).some((l) => l?.main || l?.sub);
+  const hasCustomFont = !!src.menuFontId || !!src.menuSubFontId;
+  const hasPresetChange = preset.id !== DEFAULT_MAIN_MENU_PRESET;
+  if (!hasIdleImage && !src.logo && !hasPresetChange && !hasLabelOverride && !hasCustomFont) return undefined;
   // 아이템·CG 둘 다 있으면 갤러리 허브(둘 다 보여주는 중간 화면), 하나면 그걸로 바로, 없으면 비활성화.
   let galleryTarget: MainMenuPlan['galleryTarget'];
   if (hasItems && hasCg) galleryTarget = 'hub';
@@ -995,6 +983,12 @@ function buildMainMenuPlan(project: Project, hasItems: boolean, hasCg: boolean):
     layout: mainMenuLayout(project),
     scale: project.height / 1080,
     galleryTarget,
+    preset,
+    labels: mainMenuLabels(project),
+    screenWidth: project.width,
+    // 미지정 = true(켜짐) — 배경 아트 위에 맨몸으로 놓이는 텍스트 프리셋의 기본 대비책(screensRpy.ts
+    // buildMmStyles 참고). 아트가 이미 어두운 게임만 명시적으로 꺼서 없앤다.
+    textOutline: project.mainMenuUi?.textOutline ?? true,
   };
 }
 
@@ -1026,6 +1020,13 @@ export function generateRenpyFiles(project: Project): {
   // "감상한 CG" 갤러리 — CG 가 하나라도 있으면 cg.rpy·갤러리 화면·메뉴 진입을 낸다.
   const cgs = resolveCgs(refs);
 
+  // 메인 메뉴 버튼 텍스트 폰트(주/부) — mainMenuUi 전용 필드(guiOverrides 가 아님). 미지정이면
+  // 주=이미 계산된 본문 폰트(theme.textFont, guiOverrides.bodyFontId 반영분), 부=주 폰트를 따라간다.
+  const menuTextFont = project.mainMenuUi?.menuFontId ? fontGamePath(project.mainMenuUi.menuFontId) : theme.textFont;
+  const menuSubTextFont = project.mainMenuUi?.menuSubFontId
+    ? fontGamePath(project.mainMenuUi.menuSubFontId)
+    : menuTextFont;
+
   const files: RenpyFile[] = [
     { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules, project.guiOverrides?.characterScale) },
     { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox) },
@@ -1052,6 +1053,7 @@ export function generateRenpyFiles(project: Project): {
       hasItems: items.length > 0,
       hasCg: cgs.length > 0,
       mainMenu: buildMainMenuPlan(project, items.length > 0, cgs.length > 0),
+      menuFonts: { main: menuTextFont, sub: menuSubTextFont },
     }),
     { path: 'README.md', content: readme(theme) },
   ];

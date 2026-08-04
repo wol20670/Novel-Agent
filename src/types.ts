@@ -293,6 +293,22 @@ export interface Project {
     /** 로고 원본 가로/세로 비율(naturalWidth/naturalHeight). importTitleLogo 가 업로드 시점에 잰다. */
     logoAspect?: number;
     layout?: MainMenuLayout;
+    /** 배치 프리셋(미지정 = DEFAULT_MAIN_MENU_PRESET='left-column'). */
+    preset?: MainMenuPresetId;
+    /** 프리셋 기본 라벨(MAIN_MENU_PRESETS[..].labels) 위에 사용자가 덮어쓴 라벨. */
+    labels?: Partial<Record<MenuButtonSlot, { main?: string; sub?: string }>>;
+    /** 메뉴 버튼 텍스트 폰트(main/sub) — src/fonts/fontCatalog.ts 의 FontPreset id. 미지정이면 본문/주 폰트를 따라간다. */
+    menuFontId?: string;
+    menuSubFontId?: string;
+    /**
+     * 텍스트 프리셋(이미지 없는 슬롯)의 글자 외곽선. 미지정 = true(켜짐).
+     * 이미지 버튼 경로에서는 원래 텍스트 메뉴가 깔고 있던 main_menu_frame(좌측 어두운 스크림
+     * gui.menu_overlay_color)을 제거했다(시안에 없는 어두운 띠라서) — 그래서 텍스트 프리셋은
+     * 사용자가 올린 배경 아트 위에 아무 보호막 없이 놓인다. 아트가 밝으면 글자가 거의 안
+     * 보인다(실기 확인) — 배경에 기대지 않는 외곽선으로 대비를 스스로 만든다. 아트가 이미
+     * 어두워 외곽선이 오히려 거슬리는 게임은 꺼도 된다.
+     */
+    textOutline?: boolean;
   };
 }
 
@@ -327,11 +343,6 @@ export const DEFAULT_MAIN_MENU_LAYOUT: Required<MainMenuLayout> = {
   logoWidth: 700,
 };
 
-/** 기본값 위에 프로젝트가 저장한 값을 병합한 유효 레이아웃. */
-export function mainMenuLayout(p: Project): Required<MainMenuLayout> {
-  return { ...DEFAULT_MAIN_MENU_LAYOUT, ...(p.mainMenuUi?.layout ?? {}) };
-}
-
 /** 메뉴 버튼 슬롯 정의(순서 = 메뉴 표시 순서). fileKeywords 는 일괄 업로드 파일명 자동 매칭용. */
 export const MAIN_MENU_SLOTS: { id: MenuButtonSlot; label: string; fileKeywords: string[] }[] = [
   { id: 'start', label: '처음부터', fileKeywords: ['처음부터', '시작'] },
@@ -354,6 +365,156 @@ export const MENU_BUTTON_STATES: { id: MenuButtonState; label: string; fileKeywo
   { id: 'press', label: '클릭', fileKeywords: ['클릭', '눌림', 'press'], renpySupported: false },
   { id: 'disabled', label: '비활성화', fileKeywords: ['비활성화', '비활성', 'disabled'], renpySupported: true },
 ];
+
+/**
+ * 메인 메뉴 배치 프리셋 5종. `align`/`direction` 은 screensRpy 의 컨테이너(vbox/hbox)·정렬 축을
+ * 결정하고, `layout` 은 그 프리셋을 골랐을 때 기본으로 쓰일 좌표(mainMenuLayout 이 병합).
+ * `labels` 는 프리셋별 기본 라벨(main=주 텍스트, sub=부 텍스트) — 비어 있는 슬롯은 mainMenuLabels
+ * 가 MAIN_MENU_SLOTS 의 원래 label 로 폴백한다(1줄 프리셋은 굳이 여기 채우지 않는다).
+ */
+export type MainMenuPresetId = 'left-column' | 'bottom-row' | 'right-dual' | 'right-marker' | 'renpy-classic';
+
+export interface MainMenuPresetDef {
+  id: MainMenuPresetId;
+  label: string; // 한글 표시명(UI 프리셋 선택 카드)
+  hint: string; // UI 한 줄 설명
+  align: 'left' | 'right' | 'center'; // center = 하단 가로
+  direction: 'vertical' | 'horizontal';
+  dualLabel: boolean; // 주+부 2줄 표시 여부
+  marker: 'none' | 'triangle'; // 좌측 마커 글리프(▶) 사용 여부
+  mainSize: number; // 주 텍스트 크기(1920 기준 px)
+  subSize: number; // 부 텍스트 크기(1920 기준 px)
+  layout: Required<MainMenuLayout>;
+  labels: Partial<Record<MenuButtonSlot, { main?: string; sub?: string }>>;
+}
+
+/**
+ * 프리셋 5종 정의. `left-column` 의 layout 은 DEFAULT_MAIN_MENU_LAYOUT 을 그대로 참조한다
+ * (같은 값을 두 곳에 따로 적으면 언젠가 어긋난다 — 회귀 0 의 핵심이라 단일 소스로 강제).
+ */
+export const MAIN_MENU_PRESETS: Record<MainMenuPresetId, MainMenuPresetDef> = {
+  'left-column': {
+    id: 'left-column',
+    label: '좌측 세로 (기본)',
+    hint: '화면 좌측 상단에 버튼이 세로로 나열됩니다(기존 기본 배치).',
+    align: 'left',
+    direction: 'vertical',
+    dualLabel: false,
+    marker: 'none',
+    mainSize: 42,
+    subSize: 22,
+    layout: DEFAULT_MAIN_MENU_LAYOUT,
+    labels: {},
+  },
+  'bottom-row': {
+    id: 'bottom-row',
+    label: '하단 가로 (제목+설명)',
+    hint: '화면 하단에 버튼이 가로로 나열되고, 버튼마다 제목+설명 2줄이 표시됩니다.',
+    align: 'center',
+    direction: 'horizontal',
+    dualLabel: true,
+    marker: 'none',
+    mainSize: 40,
+    // gap 60→30·subSize 20→18(실기 확인: 원래 값은 1920px 폭을 넘겨 첫 항목이 화면 밖으로
+    // 잘렸다). screensRpy.ts 가 항목마다 xsize round(270*scale) 고정폭을 주므로
+    // 6×270 + 5×30(gap) = 1770 < 1920 — 화면 안에 정확히 들어간다(HORIZONTAL_ITEM_WIDTH 참고).
+    subSize: 18,
+    layout: { x: 0, y: 830, gap: 30, hoverShiftX: 0, logoX: 610, logoY: 60, logoWidth: 700 },
+    labels: {
+      // 고정 xsize(270px) 안에서 줄바꿈 없이 들어가도록 기본 문구도 짧게(실기 확인).
+      start: { main: '게임 시작', sub: '새로운 이야기 시작' },
+      continue: { main: '이어하기', sub: '이어서 진행합니다' },
+      load: { main: '불러오기', sub: '저장 기록 불러오기' },
+      prefs: { main: '환경 설정', sub: '세부 설정 조절' },
+      gallery: { main: '엑스트라', sub: 'CG·이벤트 감상' },
+      quit: { main: '게임 종료', sub: '게임을 끝냅니다' },
+    },
+  },
+  'right-dual': {
+    id: 'right-dual',
+    label: '우측 2줄 (영문+한글)',
+    hint: '화면 우측에 버튼이 세로로 나열되고, 버튼마다 영문 주 라벨 + 한글 부 라벨이 표시됩니다.',
+    align: 'right',
+    direction: 'vertical',
+    dualLabel: true,
+    marker: 'none',
+    mainSize: 40,
+    subSize: 22,
+    layout: { x: 120, y: 320, gap: 28, hoverShiftX: 8, logoX: 1180, logoY: 80, logoWidth: 620 },
+    labels: {
+      start: { main: 'New Game', sub: '새로하기' },
+      continue: { main: 'Continue', sub: '이어하기' },
+      load: { main: 'Load Data', sub: '불러오기' },
+      prefs: { main: 'Settings', sub: '시스템' },
+      gallery: { main: 'Extra', sub: '콘텐츠 감상' },
+      quit: { main: 'Exit', sub: '나가기' },
+    },
+  },
+  'right-marker': {
+    id: 'right-marker',
+    label: '우측 마커 (▶)',
+    hint: '화면 우측에 버튼이 세로로 나열되고, 호버 시 왼쪽에 ▶ 마커가 나타납니다.',
+    align: 'right',
+    direction: 'vertical',
+    dualLabel: false,
+    marker: 'triangle',
+    mainSize: 38,
+    subSize: 20,
+    layout: { x: 140, y: 400, gap: 24, hoverShiftX: 0, logoX: 1180, logoY: 80, logoWidth: 620 },
+    labels: {},
+  },
+  'renpy-classic': {
+    id: 'renpy-classic',
+    label: '렌파이 기본 (좌측 단순)',
+    hint: "Ren'Py 기본 템플릿과 비슷한 좌측 단순 배치입니다(로고는 하단).",
+    align: 'left',
+    direction: 'vertical',
+    dualLabel: false,
+    marker: 'none',
+    mainSize: 34,
+    subSize: 20,
+    layout: { x: 120, y: 380, gap: 18, hoverShiftX: 0, logoX: 1100, logoY: 800, logoWidth: 700 },
+    labels: {},
+  },
+};
+
+/** 프리셋 미지정 프로젝트의 기본값 — 기존 좌측 세로 1열(회귀 0). */
+export const DEFAULT_MAIN_MENU_PRESET: MainMenuPresetId = 'left-column';
+
+/** 프로젝트가 고른 프리셋 정의(미지정이면 DEFAULT_MAIN_MENU_PRESET). 잘못된 id 도 기본값으로 방어. */
+export function mainMenuPreset(p: Project): MainMenuPresetDef {
+  const id = p.mainMenuUi?.preset ?? DEFAULT_MAIN_MENU_PRESET;
+  return MAIN_MENU_PRESETS[id] ?? MAIN_MENU_PRESETS[DEFAULT_MAIN_MENU_PRESET];
+}
+
+/**
+ * 기본값 위에 프로젝트가 저장한 값을 병합한 유효 레이아웃. 기본값은 이제 고정된
+ * DEFAULT_MAIN_MENU_LAYOUT 이 아니라 "선택된 프리셋의 layout"이다 — preset 미지정이면
+ * left-column=DEFAULT_MAIN_MENU_LAYOUT 이라 기존 동작과 완전히 동일하다(회귀 0).
+ */
+export function mainMenuLayout(p: Project): Required<MainMenuLayout> {
+  return { ...mainMenuPreset(p).layout, ...(p.mainMenuUi?.layout ?? {}) };
+}
+
+/**
+ * 프리셋 기본 라벨 위에 사용자 편집(mainMenuUi.labels)을 덮은 최종 라벨(6슬롯 전부 채워 반환).
+ * 프리셋이 그 슬롯의 기본 라벨을 안 갖고 있으면(1줄 프리셋 대부분) MAIN_MENU_SLOTS 의 원래
+ * label 로 폴백하고 sub 는 빈 문자열(=1줄 렌더, screensRpy 가 sub 빈 문자열이면 text 줄 자체를 안 낸다).
+ */
+export function mainMenuLabels(p: Project): Record<MenuButtonSlot, { main: string; sub: string }> {
+  const preset = mainMenuPreset(p);
+  const overrides = p.mainMenuUi?.labels ?? {};
+  const out = {} as Record<MenuButtonSlot, { main: string; sub: string }>;
+  for (const slot of MAIN_MENU_SLOTS) {
+    const presetLabel = preset.labels[slot.id];
+    const override = overrides[slot.id];
+    out[slot.id] = {
+      main: override?.main ?? presetLabel?.main ?? slot.label,
+      sub: override?.sub ?? presetLabel?.sub ?? '',
+    };
+  }
+  return out;
+}
 
 /**
  * Ren'Py 프로젝트 안의 메뉴 버튼 이미지 경로(game/ 기준). screensRpy·buildZip 공용 —

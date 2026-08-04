@@ -10,6 +10,7 @@ import type {
   MenuButtonSlot,
   MenuButtonState,
   MainMenuLayout,
+  MainMenuPresetId,
 } from './types';
 import {
   emptyProject,
@@ -262,6 +263,15 @@ interface State {
   clearTitleLogo: () => Promise<void>;
   /** 메인 메뉴 좌표 오버라이드(x/y/gap/hoverShiftX/... 부분 갱신). */
   setMainMenuLayout: (patch: Partial<MainMenuLayout>) => void;
+  /**
+   * 메인 메뉴 배치 프리셋 변경 — layout·labels 오버라이드를 함께 비운다(새 프리셋 기본값이 그대로
+   * 보이게 하기 위함). 이전 값이 사라지는 것에 대한 확인창은 UI 담당이 처리(스토어는 무조건 비움).
+   */
+  setMainMenuPreset: (preset: MainMenuPresetId) => void;
+  /** 메인 메뉴 버튼 라벨 편집(주/부). 빈 문자열이면 그 슬롯의 오버라이드를 지워 프리셋 기본값으로 되돌린다. */
+  setMenuLabel: (slot: MenuButtonSlot, part: 'main' | 'sub', value: string) => void;
+  /** 메인 메뉴 버튼 텍스트 폰트(주/부) 지정. undefined 면 폴백 규칙(주=본문 폰트, 부=주 폰트)으로 복귀. */
+  setMenuFont: (which: 'main' | 'sub', fontId: string | undefined) => void;
 
   // 설정/저장
   /**
@@ -1715,6 +1725,35 @@ export const useStore = create<State>((set, get) => {
       get().updateProjectMeta({
         mainMenuUi: { ...project.mainMenuUi, layout: { ...project.mainMenuUi?.layout, ...patch } },
       });
+    },
+
+    setMainMenuPreset: (preset) => {
+      const { project } = get();
+      // layout·labels 오버라이드를 비운다 — 안 비우면 예전 프리셋에서 손댄 좌표/라벨이 새 프리셋
+      // 위에도 그대로 남아 "프리셋을 골랐는데 기본값이 아니다"가 된다. 유실 경고는 UI 담당(확인창) 몫.
+      get().updateProjectMeta({
+        mainMenuUi: { ...project.mainMenuUi, preset, layout: undefined, labels: undefined },
+      });
+    },
+
+    setMenuLabel: (slot, part, value) => {
+      const { project } = get();
+      const cur = { ...(project.mainMenuUi?.labels ?? {}) };
+      const entry = { ...(cur[slot] ?? {}) };
+      if (value) entry[part] = value;
+      else delete entry[part]; // 빈 문자열 = 오버라이드 해제(프리셋 기본값으로 복귀)
+      if (entry.main || entry.sub) cur[slot] = entry;
+      else delete cur[slot]; // 주·부 둘 다 비었으면 슬롯 자체를 지운다(빈 객체 잔존 방지)
+      get().updateProjectMeta({ mainMenuUi: { ...project.mainMenuUi, labels: cur } });
+    },
+
+    setMenuFont: (which, fontId) => {
+      const { project } = get();
+      const key = which === 'main' ? 'menuFontId' : 'menuSubFontId';
+      const mainMenuUi = { ...project.mainMenuUi };
+      if (fontId) mainMenuUi[key] = fontId;
+      else delete mainMenuUi[key];
+      get().updateProjectMeta({ mainMenuUi });
     },
 
     setCollabConfig: async (patch) => {

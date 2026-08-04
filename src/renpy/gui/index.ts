@@ -26,6 +26,8 @@ export interface GuiGenOptions {
   hasCg?: boolean;
   /** 메인 메뉴 이미지 GUI 렌더 계획(generate.ts 가 project.mainMenuUi 로 만들어 넘김). */
   mainMenu?: MainMenuPlan;
+  /** 메인 메뉴 버튼 텍스트 폰트(주/부, 이미 fontGamePath 로 해석된 경로). generate.ts 가 계산해 넘긴다. */
+  menuFonts?: { main: string; sub: string };
 }
 
 // 스톡 guisupport.rpy 는 런처 gui7 로 PNG 를 자동 생성(SDK 경로 의존)한다.
@@ -42,13 +44,13 @@ init -100 python in gui:
 
 /** GuiTheme + 해상도 → game/gui.rpy · screens.rpy · guisupport.rpy */
 export function generateGuiFiles(theme: GuiTheme, width: number, height: number, opts?: GuiGenOptions): RenpyFile[] {
-  const { outline, dialogueGradient, locales, hasItems, hasCg, mainMenu } = opts ?? {};
+  const { outline, dialogueGradient, locales, hasItems, hasCg, mainMenu, menuFonts } = opts ?? {};
   // 일본어(자막·음성 어느 쪽이든)가 하나라도 있으면 gui.rpy 가 JP 폰트(FontGroup)를 참조·번들한다.
   // 없으면 생략 → buildZip 의 폰트 번들 조건과 일치해야 한다(같은 규칙: ja ∈ text|voice).
   const japanese = !!locales && (locales.text.includes('ja') || locales.voice.includes('ja'));
   return [
     { path: 'game/guisupport.rpy', content: guisupportRpy(height) },
-    { path: 'game/gui.rpy', content: guiRpy(theme, width, height, outline, dialogueGradient, japanese) },
+    { path: 'game/gui.rpy', content: guiRpy(theme, width, height, outline, dialogueGradient, japanese, menuFonts) },
     { path: 'game/screens.rpy', content: screensRpy({ locales, hasItems, hasCg, mainMenu }) },
   ];
 }

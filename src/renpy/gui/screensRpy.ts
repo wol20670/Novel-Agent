@@ -5,9 +5,26 @@
 //   - nvl/bubble 화면과 phone 전용(이미지) 스타일은 제외(우리는 ADV 일반 대사)
 // 테마 의존 값이 없으므로 정적이지만, 다국어 선택 UI 주입을 위해 인자를 받는다.
 
-import type { Locale, MenuButtonSlot, MenuButtonState, MainMenuLayout } from '../../types';
+import type { Locale, MenuButtonSlot, MenuButtonState, MainMenuLayout, MainMenuPresetDef } from '../../types';
 import { RENPY_LANG, LOCALE_LABEL, MAIN_MENU_SLOTS, menuButtonFile, TITLE_LOGO_FILE } from '../../types';
 import type { GuiLocales } from './index';
+// '../generate' 가 아니라 '../escape' 에서 직접 가져온다 — generate.ts → gui/index.ts →
+// screensRpy.ts 로 이미 한 방향 의존이 있어, 여기서 '../generate' 를 다시 참조하면 순환 import가
+// 된다(escape.ts 는 어느 쪽도 참조하지 않는 잎 모듈이라 순환이 생기지 않는다). 사용자가 입력하는
+// 메뉴 라벨은 %/[/{ 를 이스케이프하지 않으면 런타임 크래시라(CLAUDE.md 최상위 함정) 예외 없이
+// 이 함수를 거쳐야 한다.
+import { escRpyText } from '../escape';
+
+/**
+ * ▶ U+25B6 — 나눔고딕(번들 기본 폰트) cmap 에 존재 확인함(fontTools 로 확인). U+25BA·U+25B8·✦(U+2726)
+ * 등은 나눔고딕에 없어 빈 네모(□)로 깨지므로 절대 다른 글리프로 바꾸지 말 것.
+ * 대체 후보 전수 조사 결과(실기 검증): 이모지가 아니면서 나눔고딕에도 있는 채워진 도형은
+ * ▷U+25B7(속 빈 삼각형)·◆U+25C6·★U+2605·•U+2022·●U+25CF 뿐이고, "채워진 오른쪽 삼각형"은
+ * U+25B6 이 유일하다(U+25B8·U+2023·U+27A4 는 나눔고딕에 글리프가 없어 두부가 된다) — 렌더
+ * 문제(파란 이모지 박스)는 글리프 자체가 아니라 Ren'Py 이모지 치환 때문이었다(mm_marker_text 의
+ * emoji_font None 참고).
+ */
+const MARKER_GLYPH = '▶';
 
 /**
  * 메인 메뉴 이미지 GUI 렌더 계획(generate.ts 가 project.mainMenuUi + resolveItems/resolveCgs 결과로
@@ -26,6 +43,17 @@ export interface MainMenuPlan {
   scale: number;
   /** 갤러리 버튼이 열 화면. 아이템·CG 둘 다 있으면 'hub', 하나면 그것, 없으면 버튼 비활성화. */
   galleryTarget?: 'hub' | 'cg' | 'items';
+  /** 배치 프리셋(정렬 축·라벨 2줄 여부·마커·글자 크기) — types.ts 의 mainMenuPreset() 결과. */
+  preset: MainMenuPresetDef;
+  /** 최종 라벨(프리셋 기본값 위에 사용자 편집 덮음) — types.ts 의 mainMenuLabels() 결과. */
+  labels: Record<MenuButtonSlot, { main: string; sub: string }>;
+  /** 실제 화면 폭(px, project.width) — 우측 정렬 xpos 계산에 1920 하드코딩 대신 이 값을 쓴다. */
+  screenWidth: number;
+  /**
+   * 텍스트 프리셋 글자 외곽선(기본 true). 이미지 버튼 경로에서 main_menu_frame(좌측 스크림)을
+   * 없앤 탓에 텍스트 프리셋은 배경 아트 위에 맨몸으로 놓인다 — 외곽선으로 자체 대비를 만든다.
+   */
+  textOutline: boolean;
 }
 
 /**
@@ -95,9 +123,18 @@ function mainMenuAction(
  *   간격만 벌림) — 별도 vbox 로 y 를 따로 계산하면 사용자가 다른 높이의 버튼 PNG 를 올렸을 때
  *   (78px 하드코딩과) 어긋나는데, 같은 vbox 라 항상 자연스럽게 이미지 버튼들 바로 아래에 붙는다.
  */
-function buildImageMainMenuScreen(plan: MainMenuPlan): string {
+/** buildImageMainMenuScreen 의 결과 — usesMmStyles 는 mm_* 스타일 정의를 실제로 낼지(회귀 0용). */
+interface MainMenuScreenResult {
+  text: string;
+  /** case2(1줄 텍스트)/case3(2줄)/마커가 한 번이라도 쓰였는지. false 면 screensRpy 가 mm_* 스타일
+   *  정의 자체를 생략한다 — "6슬롯 전부 이미지 업로드" 같은 조합은 예전 출력과 바이트가 완전히 같다. */
+  usesMmStyles: boolean;
+}
+
+function buildImageMainMenuScreen(plan: MainMenuPlan): MainMenuScreenResult {
   const L = plan.layout;
   const s = plan.scale;
+  const preset = plan.preset;
   const bx = Math.round(L.x * s);
   const by = Math.round(L.y * s);
   const bgap = Math.round(L.gap * s);
@@ -106,7 +143,7 @@ function buildImageMainMenuScreen(plan: MainMenuPlan): string {
   const logoY = Math.round(L.logoY * s);
   const logoW = Math.round(L.logoWidth * s);
   const logoH = Math.round(logoW / plan.logoAspect);
-  const linkGap = Math.round(24 * s); // 이미지 버튼 6개와 정보/크레딧/도움말 사이 스페이서.
+  const linkGap = Math.round(24 * s); // 버튼들과 정보/크레딧/도움말 사이 스페이서.
 
   const I = (n: number) => ' '.repeat(n);
   const lines: string[] = [];
@@ -120,20 +157,59 @@ function buildImageMainMenuScreen(plan: MainMenuPlan): string {
   lines.push('');
   lines.push(`${I(4)}$ continue_slot = renpy.newest_slot(r"\\d+")`);
   lines.push('');
-  lines.push(`${I(4)}vbox:`);
-  lines.push(`${I(8)}xpos ${bx}`);
-  lines.push(`${I(8)}ypos ${by}`);
-  lines.push(`${I(8)}spacing ${bgap}`);
+
+  // 배치 축 3종: left(기존 좌측 세로) / right(우측 세로, 컨테이너+항목 모두 오른쪽 정렬) /
+  // center(하단 가로 hbox, x 는 안 쓴다 — 가운데 정렬이라 무의미). right 는 1920 하드코딩 대신
+  // 실제 화면 폭(plan.screenWidth = project.width)에서 x 를 빼 우측 여백을 재현한다.
+  const isHorizontal = preset.direction === 'horizontal';
+  const isRight = preset.align === 'right';
+  if (isHorizontal) {
+    lines.push(`${I(4)}hbox:`);
+    lines.push(`${I(8)}xalign 0.5`);
+    lines.push(`${I(8)}ypos ${by}`);
+    lines.push(`${I(8)}spacing ${bgap}`);
+  } else if (isRight) {
+    const rx = Math.round(plan.screenWidth - bx);
+    lines.push(`${I(4)}vbox:`);
+    lines.push(`${I(8)}xpos ${rx}`);
+    lines.push(`${I(8)}xanchor 1.0`);
+    lines.push(`${I(8)}ypos ${by}`);
+    lines.push(`${I(8)}spacing ${bgap}`);
+  } else {
+    lines.push(`${I(4)}vbox:`);
+    lines.push(`${I(8)}xpos ${bx}`);
+    lines.push(`${I(8)}ypos ${by}`);
+    lines.push(`${I(8)}spacing ${bgap}`);
+  }
   lines.push('');
+
+  // mm_* 스타일(작업 2 스타일 블록)은 실제로 텍스트/마커 렌더가 한 번이라도 쓰였을 때만 정의한다
+  // (그래야 "6슬롯 전부 이미지 업로드" 조합은 이 플래그가 끝까지 false 로 남아 스타일 블록 자체가
+  // 안 나오고, 예전 출력과 바이트 단위로 완전히 같다 — 회귀 0).
+  let usesMmStyles = false;
+
+  // 가로 배치(hbox, 현재 bottom-row 만 해당) 항목 고정 폭 — 실기 확인: 고정폭이 없으면 긴 설명문
+  // 하나로 전체 폭이 1920px 를 넘어 첫 항목이 화면 밖으로 잘린다. 6×270 + 5×gap(30, bottom-row
+  // 기준) = 1770 < 1920 로 화면 안에 들어간다(사용자가 문구를 길게 넣어도 이 폭 안에서 줄바꿈된다).
+  // 지금은 가로 프리셋이 bottom-row 하나뿐이라 상수로 고정했다 — 다른 슬롯 수의 가로 프리셋이
+  // 추가되면 이 값도 프리셋 정의로 옮겨야 한다.
+  const HORIZONTAL_ITEM_WIDTH = 270;
+  const itemW = Math.round(HORIZONTAL_ITEM_WIDTH * s);
 
   for (const slotDef of MAIN_MENU_SLOTS) {
     const states = plan.buttons[slotDef.id] ?? {};
     const { action, sensitive } = mainMenuAction(slotDef.id, plan.galleryTarget);
+    const label = plan.labels[slotDef.id] ?? { main: slotDef.label, sub: '' };
+    const sensitivePart = sensitive ? ` sensitive ${sensitive}` : '';
+
     if (states.idle) {
+      // 1) 업로드 idle 이미지가 있는 슬롯 — 이미지 우선(사용자 확정). 프리셋이 텍스트형이어도
+      // 이미지가 있으면 이미지를 쓴다.
       lines.push(`${I(8)}imagebutton:`);
       lines.push(`${I(12)}idle "${menuButtonFile(slotDef.id, 'idle')}"`);
       if (states.hover) lines.push(`${I(12)}hover "${menuButtonFile(slotDef.id, 'hover')}"`);
       if (states.disabled) lines.push(`${I(12)}insensitive "${menuButtonFile(slotDef.id, 'disabled')}"`);
+      if (isRight) lines.push(`${I(12)}xalign 1.0`); // 폭이 제각각인 이미지도 오른쪽 끝을 맞춘다.
       // focus_mask 는 쓰지 않는다 — 히트박스가 "불투명 픽셀"로 좁아지는데, 이런 메뉴 버튼 아트는
       // 420×78 중 대부분이 투명(글자 획만 불투명)이라 hover·클릭이 사실상 불가능해진다.
       // (실제 Ren'Py 8.5.3 + 사용자 실물 PNG 로 재현·확인함. 스펙상 버튼 박스는 사각형 420×78.)
@@ -141,23 +217,83 @@ function buildImageMainMenuScreen(plan: MainMenuPlan): string {
       if (sensitive) lines.push(`${I(12)}sensitive ${sensitive}`);
       lines.push(`${I(12)}action ${action}`);
       lines.push('');
+    } else if (preset.marker === 'triangle') {
+      // 2b) 마커(▶) 프리셋 — 라벨 왼쪽에 마커. 항상 자리를 차지하되 평상시엔 완전 투명(숨김이
+      // 아님)이라 hover 때 색이 바뀌어도 글자가 옆으로 밀리지 않는다(mm_marker_text 참고).
+      usesMmStyles = true;
+      lines.push(`${I(8)}button:`);
+      lines.push(`${I(12)}style "mm_button"`);
+      lines.push(`${I(12)}action ${action}`);
+      if (sensitive) lines.push(`${I(12)}sensitive ${sensitive}`);
+      if (isHorizontal) lines.push(`${I(12)}xsize ${itemW}`);
+      if (isRight) lines.push(`${I(12)}xalign 1.0`);
+      lines.push(`${I(12)}hbox:`);
+      lines.push(`${I(16)}spacing ${Math.round(6 * s)}`);
+      lines.push(`${I(16)}text "${MARKER_GLYPH}" style "mm_marker_text"`);
+      lines.push(`${I(16)}text "${escRpyText(label.main)}" style "mm_button_text"`);
+      lines.push('');
+    } else if (!preset.dualLabel) {
+      // 2a) 이미지 없음 + 1줄 라벨 — textbutton 하나로 끝(style_prefix "mm" → mm_button/mm_button_text).
+      usesMmStyles = true;
+      const alignPart = isRight ? ' xalign 1.0' : '';
+      lines.push(
+        `${I(8)}textbutton _("${escRpyText(label.main)}") action ${action}${sensitivePart}${alignPart} style_prefix "mm"`,
+      );
+      lines.push('');
     } else {
-      // idle 이미지가 없는 슬롯 — 기존 navigation 스타일을 재사용한 텍스트 버튼으로 폴백.
-      const sensitivePart = sensitive ? ` sensitive ${sensitive}` : '';
-      lines.push(`${I(8)}textbutton _("${slotDef.label}") action ${action}${sensitivePart} style_prefix "navigation"`);
+      // 3) 이미지 없음 + 2줄(주+부) — textbutton 은 라벨이 하나뿐이라 2줄이 안 된다. button: + 내부
+      // vbox 로 구성. sub 가 빈 문자열이면 그 text 줄을 아예 내지 않는다(1줄 렌더로 자연 축소).
+      usesMmStyles = true;
+      lines.push(`${I(8)}button:`);
+      lines.push(`${I(12)}style "mm_button"`);
+      lines.push(`${I(12)}action ${action}`);
+      if (sensitive) lines.push(`${I(12)}sensitive ${sensitive}`);
+      if (isHorizontal) {
+        lines.push(`${I(12)}xsize ${itemW}`);
+        lines.push(`${I(12)}xalign 0.5`);
+      } else if (isRight) {
+        lines.push(`${I(12)}xalign 1.0`);
+      }
+      lines.push(`${I(12)}vbox:`);
+      lines.push(`${I(16)}text "${escRpyText(label.main)}" style "mm_main_text"`);
+      if (label.sub) lines.push(`${I(16)}text "${escRpyText(label.sub)}" style "mm_sub_text"`);
       lines.push('');
     }
   }
 
-  lines.push(`${I(8)}null height ${linkGap}`);
-  lines.push('');
-  lines.push(`${I(8)}textbutton _("정보") action ShowMenu("about") style_prefix "mm_link"`);
-  lines.push(`${I(8)}textbutton _("크레딧") action ShowMenu("credits") style_prefix "mm_link"`);
-  lines.push('');
-  lines.push(`${I(8)}if renpy.variant("pc") or (renpy.variant("web") and not renpy.variant("mobile")):`);
-  lines.push('');
-  lines.push(`${I(12)}textbutton _("도움말") action ShowMenu("help") style_prefix "mm_link"`);
-  lines.push('');
+  if (isHorizontal) {
+    // 가로 배치(hbox)에서는 정보/크레딧/도움말을 같은 hbox 에 이어붙이면 6번째 항목처럼 메뉴 행
+    // 오른쪽 끝에 붙거나(칸이 남으면) 화면 밖으로 밀려난다(실기 확인 — bottom-row 스크린샷에서
+    // "정보"가 메뉴 행에 끼어들고 크레딧·도움말은 아예 안 보였다). 세로 배치의 "같은 컨테이너에
+    // 이어붙이기"(다른 높이의 버튼과도 자연스럽게 붙는 장점)는 가로에선 성립하지 않으므로,
+    // 메뉴 행 아래 별도 hbox 로 뺀다(메뉴 행 y + 150px, 가운데 정렬).
+    const linkY = Math.round((L.y + 150) * s);
+    lines.push('');
+    lines.push(`${I(4)}hbox:`);
+    lines.push(`${I(8)}xalign 0.5`);
+    lines.push(`${I(8)}ypos ${linkY}`);
+    lines.push(`${I(8)}spacing ${linkGap}`);
+    lines.push('');
+    lines.push(`${I(8)}textbutton _("정보") action ShowMenu("about") style_prefix "mm_link"`);
+    lines.push(`${I(8)}textbutton _("크레딧") action ShowMenu("credits") style_prefix "mm_link"`);
+    lines.push('');
+    lines.push(`${I(8)}if renpy.variant("pc") or (renpy.variant("web") and not renpy.variant("mobile")):`);
+    lines.push('');
+    lines.push(`${I(12)}textbutton _("도움말") action ShowMenu("help") style_prefix "mm_link"`);
+    lines.push('');
+  } else {
+    // 세로 배치(vbox)는 기존 그대로 — 이미지 버튼 6개와 같은 vbox 안에 null 스페이서로 간격만
+    // 벌려 이어붙인다(사용자가 다른 높이의 버튼 PNG 를 올려도 자연스럽게 바로 아래 붙는다).
+    lines.push(`${I(8)}null height ${linkGap}`);
+    lines.push('');
+    lines.push(`${I(8)}textbutton _("정보") action ShowMenu("about") style_prefix "mm_link"`);
+    lines.push(`${I(8)}textbutton _("크레딧") action ShowMenu("credits") style_prefix "mm_link"`);
+    lines.push('');
+    lines.push(`${I(8)}if renpy.variant("pc") or (renpy.variant("web") and not renpy.variant("mobile")):`);
+    lines.push('');
+    lines.push(`${I(12)}textbutton _("도움말") action ShowMenu("help") style_prefix "mm_link"`);
+    lines.push('');
+  }
 
   if (plan.hasLogo) {
     // 정적 속성만(fit/xysize/xpos/ypos) — CLAUDE.md 규칙: add 블록엔 애니메이션 ATL 금지.
@@ -179,7 +315,75 @@ function buildImageMainMenuScreen(plan: MainMenuPlan): string {
     lines.push(`${I(16)}style "main_menu_version"`);
   }
 
-  return lines.join('\n');
+  return { text: lines.join('\n'), usesMmStyles };
+}
+
+/** 대사 글자(gui.dialogue_outlines)와 같은 형태의 고정 외곽선 — 2px 검정, 오프셋 0. */
+const MM_OUTLINE = '[ (absolute(2), "#000000", absolute(0), absolute(0)) ]';
+/** 완전 투명 외곽선 — 마커의 "평상시엔 자리만 차지, 아무것도 안 보임"을 외곽선까지 포함해 유지. */
+const MM_OUTLINE_TRANSPARENT = '[ (absolute(2), "#00000000", absolute(0), absolute(0)) ]';
+
+/**
+ * mm_button(마커/2줄용 button:) / mm_button_text(1줄 textbutton) / mm_main_text·mm_sub_text(2줄) /
+ * mm_marker_text(▶) — 프리셋별 mainSize/subSize 를 scale 곱해 리터럴로 굽는다(런타임 계산 없음).
+ * buildImageMainMenuScreen 이 usesMmStyles=true 일 때만(=실제로 이 스타일을 쓰는 렌더가 있을 때만)
+ * 호출된다.
+ *
+ * 외곽선(plan.textOutline, 기본 true): 이미지 버튼 경로에서는 원래 텍스트 메뉴가 깔고 있던
+ * main_menu_frame(좌측 어두운 스크림)을 제거했다(시안에 없는 어두운 띠라서) — 그래서 텍스트
+ * 프리셋은 사용자가 올린 배경 아트 위에 아무 보호막 없이 놓인다. 아트가 밝으면 글자가 거의 안
+ * 보인다(실기 확인) — 대사 글자와 같은 방식(2px 검정 외곽선)으로 배경에 기대지 않는 대비를 만든다.
+ * 마커(mm_marker_text)는 "평상시 완전 투명"이 핵심 설계라(Task 2) 외곽선도 idle 땐 투명으로 두고
+ * hover 에서만 불투명 검정으로 바꾼다(hover_outlines) — 안 그러면 idle 상태에서도 ▶ 모양 검정
+ * 테두리만 남아 "투명"이 깨진다.
+ *
+ * emoji_font None(mm_marker_text): ▶(U+25B6)는 Ren'Py 이모지 트라이에서 UNQUALIFIED(레벨 1)라,
+ * 기본 스타일의 prefer_emoji True 와 만나면 번들 Twemoji 로 치환돼 "파란 재생버튼 이모지"로
+ * 렌더된다(실기 확인). 이 줄이 이모지 치환 자체를 끈다(renpy/text/text.py 의
+ * default_font/emoji_font None 분기 — Ren'Py 자체도 UI 크롬에 이 관용구를 쓴다,
+ * renpy/common/00director.rpy:1496).
+ */
+function buildMmStyles(plan: MainMenuPlan): string {
+  const s = plan.scale;
+  const mainPx = Math.round(plan.preset.mainSize * s);
+  const subPx = Math.round(plan.preset.subSize * s);
+  const outlineLine = plan.textOutline ? `\n    outlines ${MM_OUTLINE}` : '';
+  const markerOutlineLines = plan.textOutline
+    ? `\n    outlines ${MM_OUTLINE_TRANSPARENT}\n    hover_outlines ${MM_OUTLINE}`
+    : '';
+  return `
+
+style mm_button is button
+style mm_button_text is button_text
+
+style mm_button_text:
+    font gui.menu_text_font
+    size ${mainPx}
+    insensitive_color gui.insensitive_color${outlineLine}
+
+style mm_main_text is gui_text
+style mm_main_text:
+    font gui.menu_text_font
+    size ${mainPx}
+    color gui.idle_color
+    hover_color gui.hover_color${outlineLine}
+
+style mm_sub_text is gui_text
+style mm_sub_text:
+    font gui.menu_sub_text_font
+    size ${subPx}
+    color gui.idle_color
+    hover_color gui.hover_color${outlineLine}
+
+## 항상 자리를 차지하되 평상시엔 완전 투명 — 숨김(has/hide)이 아니라 색만 투명이라 hover 때
+## 나타나도 옆의 라벨이 밀리지 않는다.
+style mm_marker_text:
+    font gui.menu_text_font
+    size ${mainPx}
+    emoji_font None
+    color "#00000000"
+    hover_color gui.accent_color${markerOutlineLines}
+`;
 }
 
 /**
@@ -408,12 +612,16 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
   const galleryScreens =
     (hasItems ? ITEM_SCREENS : '') + (hasCg ? CG_SCREENS : '') + (hasItems || hasCg ? GALLERY_LIGHTBOX : '');
 
-  // 이미지가 하나도 없으면(버튼 idle 이미지 0개 + 로고 없음) mainMenuScreen 은 DEFAULT_MAIN_MENU_SCREEN
-  // 그대로 — 아래 base 템플릿의 `${mainMenuScreen}` 자리에 보간되므로 기존 프로젝트(mainMenu 미지정)는
-  // 물론, 이 화면에 로고·버튼을 하나도 안 올린 프로젝트도 텍스트 메뉴 그대로 나간다(회귀 0).
-  const active = !!mainMenu && (Object.values(mainMenu.buttons).some((st) => st?.idle) || mainMenu.hasLogo);
-  const mainMenuScreen = active && mainMenu ? buildImageMainMenuScreen(mainMenu) : DEFAULT_MAIN_MENU_SCREEN;
+  // 활성화 여부는 generate.ts 의 buildMainMenuPlan 이 이미 판단해서 넘긴다(이미지/로고뿐 아니라
+  // 프리셋 변경·라벨 편집·메뉴 폰트 지정도 활성화 사유 — mainMenuUi 자체가 없거나 전부 기본값이면
+  // undefined 를 넘겨 기존 텍스트 메뉴(DEFAULT_MAIN_MENU_SCREEN) 그대로 나간다(회귀 0).
+  const active = !!mainMenu;
+  const built = mainMenu ? buildImageMainMenuScreen(mainMenu) : undefined;
+  const mainMenuScreen = built ? built.text : DEFAULT_MAIN_MENU_SCREEN;
   const mmLinkStyles = active ? MM_LINK_STYLES : '';
+  // mm_* 스타일은 실제로 텍스트/마커 렌더가 한 번이라도 쓰였을 때만(회귀 0 — 전 슬롯 이미지 조합은
+  // usesMmStyles 가 끝까지 false 라 이 블록 자체가 안 나온다).
+  const mmStyles = built?.usesMmStyles ? buildMmStyles(mainMenu!) : '';
   const galleryHubScreen = active && mainMenu?.galleryTarget === 'hub' ? GALLERY_HUB_SCREEN : '';
 
   const base = String.raw`################################################################################
@@ -1689,7 +1897,7 @@ style slider_vbox:
 style slider_slider:
     variant "small"
     xsize gui.scale(600)
-${galleryScreens}${mmLinkStyles}${galleryHubScreen}`;
+${galleryScreens}${mmLinkStyles}${mmStyles}${galleryHubScreen}`;
 
   return base;
 }
