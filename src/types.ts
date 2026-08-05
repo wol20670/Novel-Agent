@@ -150,9 +150,8 @@ export interface Character {
   /**
    * Typecast 성우 설정(선택) — 멘트별 보이스 테스트에서 마음에 든 값을 저장해두는 참고용
    * 프리필(주인공·나레이션은 성우가 필요 없어 보통 비워둔다). 오디오 자체는 저장하지 않는다.
-   * ⚠️ TTS 벤더 이관(2026-07)으로 스키마가 바뀌었다 — 옛 프로젝트의 이전 벤더 voiceId(접두사
-   * 없음)·style·speed 등은 자동 변환하지 않는다(프로바이더가 달라 거짓 호환만 만든다). voiceId 가
-   * tc_/uc_ 접두사가 아니면 UI 에서 "재설정 필요"로 표시한다.
+   * ⚠️ voiceId 가 tc_/uc_ 접두사가 아니면 지원하지 않는 형식이라 UI 에서 "재설정 필요"로 표시한다
+   * (스키마가 달라 자동 변환하지 않는다 — 거짓 호환만 만든다).
    */
   voice?: {
     /** Typecast voice_id. 정식 보이스는 tc_, 클론한 커스텀 보이스는 uc_ 접두사. */
@@ -181,7 +180,7 @@ export interface Character {
   side?: 'left' | 'right' | 'auto';
 }
 
-/** Typecast voice_id 형식(tc_/uc_ 접두사)인지 — 아니면 옛 벤더 프리셋 등 "재설정 필요". */
+/** Typecast voice_id 형식(tc_/uc_ 접두사)인지 — 아니면 지원하지 않는 형식이라 "재설정 필요". */
 export function isTypecastVoiceId(voiceId: string | undefined): boolean {
   return !!voiceId && (voiceId.startsWith('tc_') || voiceId.startsWith('uc_'));
 }
