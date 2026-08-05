@@ -2,11 +2,11 @@
 // "어떤 표정을 보여줄지" 결정하는 두뇌. 키워드/문장부호 기반 한국어 휴리스틱이라
 // API 키가 없어도 동작한다. 명시 태그 `이름(표정)` 이 있으면 호출부에서 그 값이 우선.
 //   - 입력: 대사 텍스트 + 장면 맥락(연출 노트·배경)
-//   - 출력: 표준 표정 6종 중 하나 (types.EXPRESSIONS)
+//   - 출력: 표준 표정 6종 중 하나 (types.DEFAULT_EXPRESSIONS)
 
 import type { Expression } from '../../types';
 
-export interface EmotionContext {
+interface EmotionContext {
   /** 장면 연출 노트(#연출). 분위기 신호로 가중 반영. */
   direction?: string[];
   /** 장면 배경(#배경). 장례식/축제 등 강한 신호만 반영. */

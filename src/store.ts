@@ -62,6 +62,7 @@ import {
   type PeerPresence,
   type CollabHooks,
 } from './collab';
+import { sanitizeWindowsPath } from './project/safeName';
 
 export type Tab = 'scenes' | 'assets' | 'renpy';
 
@@ -73,15 +74,25 @@ function assetId(): string {
 
 /** 업로드 파일명에 쓸 안전한 파일명(특수문자 제거·공백을 밑줄로, 최대 50자). */
 function safeFileName(s: string): string {
-  return (
-    (s || '')
-      .trim()
-      .replace(/[\\/:*?"<>|]+/g, '')
-      .replace(/\s+/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .slice(0, 50) || 'asset'
-  );
+  return sanitizeWindowsPath(s, 50, 'asset');
+}
+
+// scenes 배열 identity 별로 id→Scene 인덱스를 캐싱한다. zustand는 set() 마다 구독 중인 모든
+// 셀렉터를 다시 돌리므로(렌더가 아니라!), SceneCard/RightPanel 처럼 `scenes.find(id===...)` 를
+// 셀렉터 안에 두면 카드 N개 × 장면 N개 = O(N²) 비교가 키 입력마다 반복된다(150장면 기준
+// 22,500회, 800장면이면 640,000회+배열 640,000회 스캔). setScenes(store.ts)가 변경 안 된 장면의
+// 객체 identity를 보존하므로, 배열 자체가 안 바뀌면 이 캐시는 항상 유효하다 — WeakMap 키가
+// 배열이라 새 scenes 배열이 생기면 자동으로 새 캐시 항목이 되어(스테일 가능성 없음) 재구축은
+// "장면 배열이 실제로 바뀐 시점" 딱 1번, O(N)이다(구독자 수와 무관).
+const sceneIndexCache = new WeakMap<Scene[], Map<string, Scene>>();
+export function sceneById(scenes: Scene[], id: string | null | undefined): Scene | undefined {
+  if (!id) return undefined;
+  let idx = sceneIndexCache.get(scenes);
+  if (!idx) {
+    idx = new Map(scenes.map((sc) => [sc.id, sc]));
+    sceneIndexCache.set(scenes, idx);
+  }
+  return idx.get(id);
 }
 
 /** 보이스 일괄 생성 중 attachVoiceQuiet 가 즉시 커밋하지 않고 모아두는 항목 하나. */
@@ -326,6 +337,9 @@ interface State {
 export const useStore = create<State>((set, get) => {
   // 디바운스 자동저장
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  // applyRemoteProject 전용 디바운스 타이머(아래) — saveTimer 와 절대 공유하면 안 된다. 이유는
+  // applyRemoteProject 정의부 주석 참고.
+  let remoteSaveTimer: ReturnType<typeof setTimeout> | null = null;
   // 같은 저장 실패 메시지를 매 디바운스마다 반복해서 띄우지 않도록 1회만 알린다.
   let warnedSaveQuota = false;
   // 저장 용량이 한도에 근접했다는 경고도 세션당 1회만(매 자동저장마다 뜨면 시끄럽다).
@@ -381,16 +395,36 @@ export const useStore = create<State>((set, get) => {
   const collabHooks = (): CollabHooks => ({
     getProject: () => get().project,
     applyRemoteProject: (project) => {
+      // 상태 반영(set) 자체는 반드시 동기여야 한다 — withApplyingRemoteGuard(index.ts) 가 이 함수
+      // 호출을 감싸는 동안만 applyingRemote 플래그가 true 라, 화면 반영이 비동기로 밀리면 그 사이
+      // 다른 코드 경로가 이미 guard 밖으로 나간 상태를 관찰할 수 있다.
       set((s) => {
         const stillExists = project.scenes.some((sc) => sc.id === s.selectedSceneId);
         return { project, selectedSceneId: stillExists ? s.selectedSceneId : (project.scenes[0]?.id ?? null) };
       });
-      // autoSave()/pushProject 를 다시 타지 않는 별도 경로 — 로컬 캐시만 직접 갱신(에코 방지).
-      try {
-        saveProject(project, get().assets);
-      } catch {
-        /* ignore */
-      }
+      // 로컬 캐시(localStorage) 저장은 autoSave() 를 그대로 재사용하면 안 된다 — 확인해본 두 가지 이유:
+      //  ① autoSave() 는 collabEnabled 면 collabPushProject(project) 도 함께 호출한다. 그 실행이
+      //     600ms 뒤로 밀리면 withApplyingRemoteGuard 의 동기 구간(applyingRemote=true)은 이미
+      //     끝나 있어 pushProject 의 에코 가드(applyingRemote 체크, collab/sync.ts)를 통과 —
+      //     방금 "받은" 원격 데이터를 "내 변경"인 양 다시 밀어넣어 참가자끼리 핑퐁이 반복되는
+      //     무한 루프가 생긴다.
+      //  ② autoSave() 는 saveTimer 를 세우는데, hasPendingLocalSave()(위)가 그 타이머로 "로컬 편집
+      //     저장 대기 중"을 판정해 그 사이 들어온 원격 갱신을 버린다. 원격 반영을 같은 타이머로
+      //     묶으면 방금 반영한 이 원격 갱신 자체 때문에 그다음 진짜 원격 갱신이 부당하게 버려진다.
+      // 그래서 별도의 remoteSaveTimer 로 "로컬 캐시 쓰기"만 디바운스한다(원격 이벤트가 짧은 간격
+      //으로 연달아 오면 그때마다 JSON.stringify 두 번(project+assets)을 반복하던 비용을 묶어낸다).
+      // 콜백 안에서 항상 get().project 를 다시 읽는 이유: 이 타이머가 아직 대기 중일 때 사용자가
+      // 로컬에서 편집하면(그 편집은 자기 autoSave 로 이미 최신 상태가 반영됨) 여기서 클로저의 옛
+      // project 를 그대로 저장해 방금 만든 최신 로컬 편집을 도로 덮어쓰는 사고를 막기 위함이다.
+      if (remoteSaveTimer) clearTimeout(remoteSaveTimer);
+      remoteSaveTimer = setTimeout(() => {
+        remoteSaveTimer = null;
+        try {
+          saveProject(get().project, get().assets);
+        } catch {
+          /* ignore */
+        }
+      }, 600);
     },
     setStatus: (status) => set({ collabStatus: status }),
     setPeers: (peers) => set({ collabPeers: peers }),
@@ -534,7 +568,6 @@ export const useStore = create<State>((set, get) => {
     key: string,
     collector: VoiceAttachUpdate[],
   ): Promise<{ done: number; failed: number; totalSeconds: number; creditsExhausted: boolean }> => {
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     // 연속 호출을 곧바로 이어 붙이면 매 줄이 레이트리밋(429)에 걸림(실사용에서 확인) — 요청 사이에
     // 일정 간격을 두고, 그래도 429 나면 지수 백오프(2s→4s→8s)로 최대 3회 재시도한다.
     const PACE_MS = 900;
@@ -1972,11 +2005,15 @@ export const useStore = create<State>((set, get) => {
       }
       try {
         flash("Ren'Py 폴더에 기록 중…");
-        const { count, parentName, projectFolder } = await syncProjectToFolder(project);
+        const { count, parentName, projectFolder, fontFallbackWarning } = await syncProjectToFolder(project);
         set({ folderName: parentName });
+        // ZIP 경로(onZip, RenpyTab.tsx)와 동일하게 폰트 폴백 경고를 노출 — 폴더 직접쓰기도
+        // collectProjectFiles 를 공유해 똑같이 DejaVuSans 대체(한글 두부) 가능성이 있다.
         flash(
           `"${parentName}\\${projectFolder}" 에 ${count}개 파일 기록 완료. ` +
-            `런처에서 "${projectFolder}" 프로젝트 실행 → Shift+R 새로고침!`,
+            `런처에서 "${projectFolder}" 프로젝트 실행 → Shift+R 새로고침!` +
+            (fontFallbackWarning ? ` ⚠️ ${fontFallbackWarning}` : ''),
+          fontFallbackWarning ? 'error' : undefined,
         );
       } catch (e) {
         const msg = (e as Error).message;

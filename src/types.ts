@@ -1,6 +1,6 @@
 // 도메인 데이터 모델 — 파서 출력, UI 상태, Ren'Py 생성이 모두 공유한다.
 
-import type { GenreId, GuiTheme } from './renpy/gui/theme';
+import type { GenreId, GuiTheme, GuiOverrides } from './renpy/gui/theme';
 
 /**
  * 글로벌 다국어 로케일. 자막(글언어)과 음성(목소리언어)이 각각 독립적으로 이 집합에서 고른다
@@ -29,14 +29,12 @@ export const SCENE_STATUS_LABEL: Record<SceneStatus, string> = {
 };
 
 /** 기본 표정 세트. 프로젝트가 커스텀 목록(project.expressions)을 두지 않으면 이게 쓰인다. */
-export const DEFAULT_EXPRESSIONS = ['기본', '기쁨', '슬픔', '화남', '놀람', '수줍음'] as const;
-/** 호환용 별칭(기존 코드의 "기본 목록" 참조). */
-export const EXPRESSIONS = DEFAULT_EXPRESSIONS;
+const DEFAULT_EXPRESSIONS = ['기본', '기쁨', '슬픔', '화남', '놀람', '수줍음'] as const;
 /** 표정 이름. 사용자가 추가/이름변경할 수 있어 자유 문자열이다('기본'은 항상 존재·고정). */
 export type Expression = string;
 
 /** 알려진 표정의 표시 이모지(UI 공통). 커스텀 표정은 emojiFor 로 기본 이모지를 준다. */
-export const EXPR_EMOJI: Record<string, string> = {
+const EXPR_EMOJI: Record<string, string> = {
   기본: '😐', 기쁨: '😊', 슬픔: '😢', 화남: '😠', 놀람: '😲', 수줍음: '😳',
   // 자주 쓰는 추가 표정 후보(목록에 없어도 무방, 있으면 이모지가 붙는다).
   당황: '😨', 황당: '😑', 무표정: '😶', 미소: '🙂', 울음: '😭', 분노: '😡', 윙크: '😉',
@@ -124,7 +122,7 @@ export interface OutfitRule {
 }
 
 /** 캐릭터 의상(복장) — 의상마다 표정 세트를 따로 가진다. '기본' 의상은 Character.expressions 자체. */
-export interface Outfit {
+interface Outfit {
   /** 의상 이름(예: '수영복', '교복'). '기본'은 예약어. */
   name: string;
   /** 표정 → assetId (이 의상의 스프라이트 세트). */
@@ -178,7 +176,7 @@ export interface Character {
   /**
    * 장면 내 좌우 고정 위치(선택, 기본 'auto'). 등장 순서와 무관하게 항상 왼쪽/오른쪽에 세우고
    * 싶을 때 지정 — 미지정(undefined)은 'auto'와 동일(기존 등장 순서 기반 배치, 하위호환).
-   * 혼자 등장하면 side 와 무관하게 항상 중앙(scenePositions 참고).
+   * 혼자 등장하면 side 와 무관하게 항상 중앙(arrangePositions 참고).
    */
   side?: 'left' | 'right' | 'auto';
 }
@@ -188,7 +186,7 @@ export function isTypecastVoiceId(voiceId: string | undefined): boolean {
   return !!voiceId && (voiceId.startsWith('tc_') || voiceId.startsWith('uc_'));
 }
 
-export type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice' | 'item';
+type AssetKind = 'background' | 'cg' | 'sprite' | 'bgm' | 'voice' | 'item';
 
 export interface AssetMeta {
   id: string;
@@ -248,42 +246,21 @@ export interface Project {
    */
   itemAssetIds?: Record<string, string>;
   /**
-   * GUI 대사창·폰트 사용자 조정(테마 위에 덮어씀). 비면 테마 기본값 사용.
-   * - dialogueOpacity: 대사창 배경 불투명도(0~1, 기본 0.4 · 그라데이션 권장 0.35~0.45)
-   * - textColor: 본문 글자색 / nameColor: 화자 이름색
-   * - outline: 글자 외곽선 사용 / outlineColor: 외곽선색
-   * - dialogueGradient: 대사창을 단색 대신 세로 그라데이션(위로 투명)으로 — 시네마틱·고투명
-   */
-  /**
    * 자동 번역(GPT) 모드. 미지정/off = 사용 안 함(엑셀 직접 번역만). fast=gpt-4o-mini, quality=gpt-4o.
    * off 가 아닐 때만 장면 탭에 "전체 자동 번역" 버튼이 노출된다. 프로젝트별로 저장·내보내기된다.
    */
   translateMode?: TranslateMode;
-  guiOverrides?: {
-    dialogueBoxColor?: string;
-    dialogueOpacity?: number;
-    textColor?: string;
-    nameColor?: string;
-    outline?: boolean;
-    outlineColor?: string;
-    dialogueGradient?: boolean;
-    /** 그라데이션 하단 진하기(0.3~0.85, 기본 0.65). 단색 박스용 dialogueOpacity 와 분리한다. */
-    dialogueGradientOpacity?: number;
-    /** 페이드가 화면 아래 몇 비율까지 올라오는지(0.25~0.65, 기본 0.45). */
-    dialogueGradientHeight?: number;
-    /**
-     * 본문(대사) 폰트 · 이름(화자) 폰트 — src/fonts/fontCatalog.ts 의 FontPreset id.
-     * 미지정이면 기본 폰트(나눔고딕). nameFontId 미지정이면 bodyFontId 를 따라간다.
-     */
-    bodyFontId?: string;
-    nameFontId?: string;
-    /** 캐릭터 스프라이트 크기 배수(기본 1.0). 클수록 화면에서 크게(=가깝게) 보인다. */
-    characterScale?: number;
-  };
+  /**
+   * GUI 대사창·폰트 사용자 조정(테마 위에 덮어씀). 비면 테마 기본값 사용.
+   * 필드 설명은 GuiOverrides(renpy/gui/theme.ts) 쪽 JSDoc 참고 — 이 타입은 거기서 가져온다
+   * (types.ts 가 이미 그쪽에서 GenreId/GuiTheme 를 import 하고 있어, 반대로 theme.ts 가 types.ts 를
+   * import 하면 순환이 생긴다 — 그래서 canonical 정의는 theme.ts 에 남기고 여기서 재사용만 한다).
+   */
+  guiOverrides?: GuiOverrides;
   /**
    * 배경 이름 키워드 → 캐릭터 의상 자동 지정 규칙(프로젝트 단위, 에셋 탭 캐릭터 카드에서 편집).
    * 장면마다 `#복장`을 반복해 적지 않아도, 배경 이름에 키워드가 들어가면 자동으로 그 의상을 입힌다.
-   * 우선순위는 resolveOutfit/outfitForScene 참고(장면 직접 지정 > 규칙 첫 일치 > '기본').
+   * 우선순위는 resolveOutfit 참고(장면 직접 지정 > 규칙 첫 일치 > '기본').
    */
   outfitRules?: OutfitRule[];
   /** 메인 메뉴 이미지 GUI(업로드 전용). 비어 있으면 기존 텍스트 메뉴 그대로 나간다(회귀 0). */
@@ -333,7 +310,7 @@ export interface MainMenuLayout {
 }
 
 /** 사용자 제공 스펙의 권장 좌표(처음부터 X96/Y350, 78px 버튼 + 12px 간격). */
-export const DEFAULT_MAIN_MENU_LAYOUT: Required<MainMenuLayout> = {
+const DEFAULT_MAIN_MENU_LAYOUT: Required<MainMenuLayout> = {
   x: 96,
   y: 350,
   gap: 12,
@@ -561,8 +538,6 @@ export function matchMenuButtonFile(filename: string): { slot: MenuButtonSlot; s
   return { slot, state };
 }
 
-export type GuiOverrides = NonNullable<Project['guiOverrides']>;
-
 /** 프로젝트의 유효 표정 목록('기본'을 항상 맨 앞에 포함). list 미지정/빈 배열이면 기본 세트. */
 export function effectiveExpressions(list?: string[]): string[] {
   const base = list && list.length ? list.slice() : [...DEFAULT_EXPRESSIONS];
@@ -602,18 +577,20 @@ export function resolveOutfit(rules: OutfitRule[] | undefined, scene: Scene, cha
   return best?.outfit ?? '기본';
 }
 
-/** resolveOutfit 의 project 편의 래퍼. */
-export function outfitForScene(project: Project, scene: Scene, charName: string): string {
-  return resolveOutfit(project.outfitRules, scene, charName);
-}
 
-/** 프로젝트의 base 로케일(대본 원문 언어). 미지정이면 'ko'. */
-export function baseLocaleOf(p: Project): Locale {
+/**
+ * 프로젝트의 base 로케일(대본 원문 언어). 미지정이면 'ko'.
+ * 파라미터를 Pick 으로 좁혀둔 이유: 컴포넌트가 project 전체가 아니라 baseLocale 필드만 구독하고
+ * (whole-project 셀렉터는 매 저장마다 새 객체라 무관한 필드 변경에도 리렌더를 유발) 그 값만
+ * `{ baseLocale }` 로 넘겨도 그대로 동작하게 하기 위함 — Project 는 이 Pick 을 항상 만족하므로
+ * 기존 전체 project 를 넘기던 호출부는 그대로 컴파일된다.
+ */
+export function baseLocaleOf(p: Pick<Project, 'baseLocale'>): Locale {
   return p.baseLocale ?? 'ko';
 }
 
-/** 프로젝트의 자동 번역 모드(미지정 = off). */
-export function translateModeOf(p: Project): TranslateMode {
+/** 프로젝트의 자동 번역 모드(미지정 = off). Pick 인 이유는 baseLocaleOf 와 동일. */
+export function translateModeOf(p: Pick<Project, 'translateMode'>): TranslateMode {
   return p.translateMode ?? 'off';
 }
 
@@ -631,8 +608,10 @@ export function translateModelFor(mode: TranslateMode): string | null {
  *   2) 자동감지 — 대사/지문에 번역(i18n)이 하나라도 있는 언어. 엑셀 C열=en·D열=ja 에 번역만
  *      채우면 태그 없이도 그 언어로 인게임 전환이 켜진다(번역=출력 의사로 간주).
  * base 원문에 번역만 있는(다국어 미사용) 프로젝트는 그대로 [base] 하나 → 하위호환.
+ * 파라미터를 Pick 으로 좁혀둔 이유는 baseLocaleOf 와 동일(project 전체 대신 필요한 3개 필드만
+ * 구독하는 컴포넌트가 그대로 넘길 수 있게).
  */
-export function effectiveTextLocales(p: Project): Locale[] {
+export function effectiveTextLocales(p: Pick<Project, 'baseLocale' | 'textLocales' | 'scenes'>): Locale[] {
   const base = baseLocaleOf(p);
   const set = new Set<Locale>();
   for (const l of p.textLocales ?? []) set.add(l); // ① 태그로 명시 지정한 언어

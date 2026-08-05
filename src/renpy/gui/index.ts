@@ -17,7 +17,7 @@ export interface GuiLocales {
  * generateGuiFiles 의 선택 인자 묶음(위치 인자가 많아지는 걸 막는 옵션 객체). 전부 optional —
  * 아무것도 안 주면 기본 테마·단일 언어·아이템/CG/메인메뉴이미지 없음으로 생성된다.
  */
-export interface GuiGenOptions {
+interface GuiGenOptions {
   outline?: { enabled: boolean; color: string };
   /** bool 하나로는 페이드 높이 비율까지 못 실어 옵션 객체(guiRpy.ts)로 뺐다. */
   dialogueGradient?: DialogueGradientOptions;
@@ -57,7 +57,6 @@ export function generateGuiFiles(theme: GuiTheme, width: number, height: number,
 
 export {
   resolveTheme,
-  PRESETS,
   GENRE_OPTIONS,
   DEFAULT_GENRE,
   withGuiOverrides,
@@ -67,6 +66,5 @@ export {
   DEFAULT_GRADIENT_OPACITY,
   DEFAULT_GRADIENT_HEIGHT,
 } from './theme';
-export type { GuiTheme, GenreId, GuiOverrides } from './theme';
+export type { GuiTheme, GenreId } from './theme';
 export type { MainMenuPlan } from './screensRpy';
-export type { DialogueGradientOptions } from './guiRpy';

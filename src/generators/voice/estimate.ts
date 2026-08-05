@@ -12,7 +12,7 @@ const TEXT_LIMIT = 2000;
 /** 한국어 기준 대략적인 발화 속도(자/초) — 화면 표시용 참고치일 뿐 크레딧 계산엔 쓰이지 않는다. */
 const APPROX_CHARS_PER_SEC = 5.5;
 
-export interface CharEstimate {
+interface CharEstimate {
   name: string;
   lines: number;
   chars: number;
@@ -22,7 +22,7 @@ export interface CharEstimate {
   estCredits: number;
 }
 
-export interface OverLimitLine {
+interface OverLimitLine {
   scene: string;
   speaker: string;
   chars: number;

@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateGuiFiles, resolveTheme } from '../src/renpy/gui';
-
-const fileOf = (files: { path: string; content: string }[], path: string) =>
-  files.find((f) => f.path === path)!.content;
+import { contentOf as fileOf } from './fixtures';
 
 describe('generateGuiFiles: 해상도 비례 gui.scale() + 대사창 1/4 고정', () => {
   it('1080p: guisupport.rpy 에 배율 1.5, gui.rpy 에 textbox_height 270 이 박혀 나온다', () => {

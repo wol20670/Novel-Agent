@@ -182,7 +182,14 @@ export const GENRE_OPTIONS: { id: GenreId; label: string }[] = (
   Object.keys(PRESETS) as GenreId[]
 ).map((id) => ({ id, label: PRESETS[id].label }));
 
-/** '#rrggbb(aa)' 의 RGB 상대 휘도(0~1). 알파는 무시 — 베일 "색"이 밝은지만 본다. */
+/**
+ * '#rrggbb(aa)' 의 RGB 상대 휘도(0~1). 알파는 무시 — 베일 "색"이 밝은지만 본다.
+ * ⚠️ generators/theme/color.ts 의 relLuminance()(WCAG sRGB 감마 디코딩, isLight 에서 `> 0.4` 기준)와
+ * 의도적으로 다르다 — 이건 선형(감마 미보정) 근사치이고 임계값도 `< 0.5`라, 같은 hex 에 다른 답을
+ * 낼 수 있다. ensureReadableMenu 는 이 함수 도입 당시부터 이 임계값으로 실기 검증된 상태라, 지금
+ * relLuminance 로 바꾸면 "밝다/어둡다" 판정이 바뀌어 이미 검증된 메뉴 가독성 보정이 흔들린다.
+ * 병합하지 말 것 — 필요하면 새 호출부만 relLuminance/isLight 를 쓰도록.
+ */
 function veilLuminance(hex: string): number {
   const h = hex.replace('#', '').slice(0, 6).padEnd(6, '0');
   const r = parseInt(h.slice(0, 2), 16) / 255;
@@ -223,7 +230,14 @@ export function resolveTheme(genre: GenreId | undefined, custom?: GuiTheme): Gui
   return ensureReadableMenu(base);
 }
 
-/** #rrggbb(또는 #rrggbbaa) + 불투명도(0~1) → #rrggbbaa. */
+/**
+ * #rrggbb(또는 #rrggbbaa) + 불투명도(0~1) → #rrggbbaa.
+ * ⚠️ generators/theme/color.ts 의 withAlpha()와 의도적으로 다르다 — 이쪽은 항상 8자리(`#rrggbbaa`)로
+ * 알파를 명시(a=1 이어도 "ff"를 붙임)하고, 3자리 축약 hex 는 지원하지 않는다(6자리로만 패딩/슬라이스).
+ * withAlpha()는 a>=1 이면 알파를 아예 생략하고(`#rrggbb`) 3자리 hex 도 parseHex 로 정식 지원한다.
+ * 이 함수의 호출부(withGuiOverrides 등)는 항상 8자리 결과를 기대하므로 병합 시 알파 생략 분기가
+ * 섞이면 색상 문자열 포맷이 달라져 회귀가 난다. 필요하면 새 호출부만 withAlpha 를 쓰도록.
+ */
 export function hexWithAlpha(hex: string, alpha: number): string {
   const rgb = hex.replace('#', '').slice(0, 6).padEnd(6, '0');
   const aa = Math.round(Math.max(0, Math.min(1, alpha)) * 255)
@@ -266,6 +280,12 @@ export function dialogueGradientColor(theme: GuiTheme, override?: string): strin
   return `#${theme.dialogueBox.replace('#', '').slice(0, 6)}`;
 }
 
+/**
+ * GUI 대사창·폰트 사용자 조정(테마 위에 덮어씀) — canonical 정의. types.ts 의 Project.guiOverrides 가
+ * 이 타입을 그대로 가져다 쓴다(예전엔 두 곳에 12개 필드를 복붙해 하나만 고치면 어긋나는 버그가 있었음).
+ * types.ts 가 이미 이 파일에서 GenreId/GuiTheme 를 import 하므로, canonical 정의는 여기 두고
+ * types.ts 가 가져가는 방향으로 잡았다(반대로 하면 theme.ts→types.ts→theme.ts 순환 import).
+ */
 export interface GuiOverrides {
   /** 대사창·선택지 배경색(기본 검정). 불투명도와 함께 적용. */
   dialogueBoxColor?: string;

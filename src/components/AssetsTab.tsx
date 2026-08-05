@@ -75,9 +75,12 @@ function cgGroups(scenes: Scene[]): CgGroup[] {
 }
 
 export default function AssetsTab() {
-  const project = useStore((s) => s.project);
-  const characters = project.characters;
-  const scenes = project.scenes;
+  // project 전체가 아니라 실제로 쓰는 필드만 구독 — whole-project 셀렉터는 무관한 필드(대사
+  // 텍스트 등)가 바뀔 때마다 이 탭 전체를 리렌더시킨다(project 는 매 mutate 마다 새 객체).
+  const characters = useStore((s) => s.project.characters);
+  const scenes = useStore((s) => s.project.scenes);
+  const baseLocale = useStore((s) => s.project.baseLocale);
+  const textLocales = useStore((s) => s.project.textLocales);
 
   // scenes 전체를 4회 순회하는 그룹핑 — 렌더마다가 아니라 scenes 가 실제로 바뀔 때만 재계산.
   // (early return 보다 먼저 둬야 함: Hook 은 조건부 return 위에서 항상 같은 순서로 호출돼야 한다.)
@@ -89,11 +92,14 @@ export default function AssetsTab() {
   const bgms = useMemo(() => groupBy(scenes, bgmKey, (s) => s.bgm ?? '', (s) => s.bgmAssetId, hasBgm), [scenes]);
   const items = useMemo(() => itemNames(scenes), [scenes]);
   // effectiveTextLocales 는 전체 장면·라인을 훑는다 — 예전엔 캐릭터 카드마다(카드 수만큼) 반복
-  // 호출했는데, 여기서 한 번만 계산해 CharacterCard 에 내려준다.
+  // 호출했는데, 여기서 한 번만 계산해 CharacterCard 에 내려준다. deps 를 [project] 로 두면
+  // project 가 매 mutate 마다 새 객체라 이 useMemo 는 사실상 매번 다시 도는 것과 같았다 —
+  // 실제로 이 계산에 쓰는 3개 필드로 좁혀야 baseLocale/textLocales/scenes 가 그대로인 한(예:
+  // 배경 업로드) 재계산을 건너뛴다.
   const nameLocales = useMemo(() => {
-    const base = baseLocaleOf(project);
-    return effectiveTextLocales(project).filter((l) => l !== base);
-  }, [project]);
+    const base = baseLocaleOf({ baseLocale });
+    return effectiveTextLocales({ baseLocale, textLocales, scenes }).filter((l) => l !== base);
+  }, [baseLocale, textLocales, scenes]);
 
   if (scenes.length === 0)
     return <p className="text-gray-500 text-sm text-center mt-16">먼저 스토리를 분석하세요.</p>;
@@ -263,21 +269,24 @@ function CleanupSection() {
  *  - 🎧 검수 시작: 생성된 음성을 이어 들으며 검수(VoiceReview).
  */
 function VoiceSection() {
-  const project = useStore((s) => s.project);
+  // project 전체 대신 실제로 쓰는 두 필드만 — VoiceSection 은 busy/voiceEstimate 변화로도 자주
+  // 리렌더되는데(배치 생성 중), whole-project 셀렉터였다면 그 위에 대사 편집 등 무관한 변경까지 더해졌다.
+  const characters = useStore((s) => s.project.characters);
+  const scenes = useStore((s) => s.project.scenes);
+  const baseLocale = useStore((s) => s.project.baseLocale);
   const typecastKey = useStore((s) => s.typecastKey);
   const voiceEstimate = useStore((s) => s.voiceEstimate);
   const batchAllBusy = useStore((s) => !!s.busy['batch:voice:all']);
   const estimateVoiceCost = useStore((s) => s.estimateVoiceCost);
   const batchVoiceAll = useStore((s) => s.batchVoiceAll);
-  const base = baseLocaleOf(project);
+  const base = baseLocaleOf({ baseLocale });
   const [reviewOpen, setReviewOpen] = useState(false);
 
-  // 캐릭터 수·대사 수에 비례하는 스캔 — VoiceSection 은 busy/voiceEstimate 변화로도 리렌더되므로
-  // (배치 생성 중 매우 잦음) project.characters/scenes 가 실제로 안 바뀌면 재계산하지 않는다.
-  const hasAnyPreset = useMemo(() => project.characters.some((c) => c.voice), [project.characters]);
+  // 캐릭터 수·대사 수에 비례하는 스캔 — characters/scenes 가 실제로 안 바뀌면 재계산하지 않는다.
+  const hasAnyPreset = useMemo(() => characters.some((c) => c.voice), [characters]);
   const hasAnyVoiced = useMemo(
-    () => project.scenes.some((sc) => sc.lines.some((l) => l.kind === 'dialogue' && l.voiceAssetIds?.[base])),
-    [project.scenes, base],
+    () => scenes.some((sc) => sc.lines.some((l) => l.kind === 'dialogue' && l.voiceAssetIds?.[base])),
+    [scenes, base],
   );
 
   return (
@@ -495,7 +504,11 @@ function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Local
   // 이름표 번역칸은 자막 언어가(원문 외에) 실제로 켜져 있을 때만 보인다 — 꺼져 있으면 내보내기에
   // 반영될 곳이 없어 입력칸만 있어도 혼란스럽다(자동 번역 켜면 자연히 나타남).
   // nameLocales 는 부모(AssetsTab)가 한 번만 계산해 내려준다(effectiveTextLocales 가 전체 장면을 훑음).
-  const project = useStore((s) => s.project);
+  // project 전체 대신 실제로 쓰는 3개 필드만 — 캐릭터 카드가 많으면(수십 개) whole-project
+  // 셀렉터는 무관한 편집(대사 텍스트 등)에도 모든 카드를 리렌더시킨다.
+  const outfitRules = useStore((s) => s.project.outfitRules);
+  const scenes = useStore((s) => s.project.scenes);
+  const baseLocale = useStore((s) => s.project.baseLocale);
 
   // 현재 편집 중인 의상(기본/추가 의상). 업로드·썸네일이 모두 이 의상을 대상으로 한다.
   const [outfit, setOutfit] = useState('기본');
@@ -508,9 +521,9 @@ function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Local
   // 이름이 바뀐 뒤 사라진 의상을 가리키면 기본으로 복귀.
   if (outfit !== '기본' && !activeOutfit) setOutfit('기본');
 
-  // 이 (캐릭터, 의상)에 걸린 배경 키워드 규칙 — project.outfitRules 는 프로젝트 전체 배열이라
+  // 이 (캐릭터, 의상)에 걸린 배경 키워드 규칙 — outfitRules 는 프로젝트 전체 배열이라
   // 표시는 필터링하되, 삭제/이동은 항상 그 안의 진짜 index 를 써야 한다(필터링된 위치와 다름).
-  const allRules = project.outfitRules ?? [];
+  const allRules = outfitRules ?? [];
   const myRuleIdxs = useMemo(
     () => allRules.reduce<number[]>((acc, r, i) => {
       if (r.charName === name && r.outfit === outfit) acc.push(i);
@@ -523,10 +536,10 @@ function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Local
     const map = new Map<string, number>();
     for (const idx of myRuleIdxs) {
       const kw = allRules[idx].keyword;
-      if (!map.has(kw)) map.set(kw, project.scenes.filter((sc) => (sc.background ?? '').includes(kw)).length);
+      if (!map.has(kw)) map.set(kw, scenes.filter((sc) => (sc.background ?? '').includes(kw)).length);
     }
     return map;
-  }, [myRuleIdxs, allRules, project.scenes]);
+  }, [myRuleIdxs, allRules, scenes]);
 
   return (
     <div className="card border-edge p-3">
@@ -597,7 +610,7 @@ function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Local
           <div className="w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <VoiceLab
               char={c}
-              baseLocale={baseLocaleOf(project)}
+              baseLocale={baseLocaleOf({ baseLocale })}
               mode="character"
               onClose={() => setVoiceSettingsOpen(false)}
             />
@@ -612,7 +625,7 @@ function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Local
         <button
           className="btn-ghost text-xs"
           disabled={!c.voice || voiceBatchBusy}
-          onClick={() => batchVoiceCharacter(name, baseLocaleOf(project))}
+          onClick={() => batchVoiceCharacter(name, baseLocaleOf({ baseLocale }))}
           title={
             c.voice
               ? `${name} 이 말하는 모든 대사 중 아직 음성 없는 줄을 저장된 보이스 프리셋으로 일괄 생성`

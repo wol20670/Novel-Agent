@@ -233,6 +233,11 @@ Chrome/Edge 데스크톱에서 **Ren'Py 탭 → "⚡ 폴더에 쓰기"** 로 **�
   **입력 중 유실을 방지**한다.
 - 방 코드를 아는 사람은 누구나 읽기·쓰기 가능 — **2인 신뢰 관계 전제**(접근 제어 없음, 코드 유출 시
   제3자도 편집 가능).
+- ⚠️ **에셋(이미지·BGM·음성)은 그보다도 넓게 열려 있다.** anon 키는 설계상 JS 번들에 구워져 공개되고,
+  RLS 정책이 전부 개방이며 Storage 키가 `<assetId>` 평면 구조라 방 단위 구분이 없다 — 즉 **배포 URL을
+  아는 사람은 누구나 버킷 전체를 목록 조회·다운로드·업로드·덮어쓰기** 할 수 있다. 실질 방어선은 배포
+  URL의 비공개성뿐이다. 사설 2인 도구라 감수한 선택이며, 민감한 자료는 올리지 말 것. 자세한 내용과
+  뒤집는 방법은 [`supabase/setup.sql`](./supabase/setup.sql) 머리 주석 참고.
 - Supabase 프로젝트 연결은 빌드 시점 설정(앱 배포자가 구성)이며, 사용자가 키를 입력하는 BYO 방식이 아니다.
 - 셀프호스트/재구축 시 테이블·RLS 정책·Storage 버킷은 [`supabase/setup.sql`](./supabase/setup.sql)을 SQL Editor에서 실행해 구성한다(재실행 안전).
 - 이미 운영 중인 Supabase 프로젝트를 새 버전 앱으로 올릴 때도 배포 전에 `setup.sql`을 다시 실행할 것
@@ -342,9 +347,19 @@ A열 = 화자 이름, B열 = 대사 · 지문 · 태그.
 
 ```bash
 npm run typecheck   # 타입 검사
-npm run test         # vitest 단위/통합 테스트
-npm run build        # 타입체크 + 프로덕션 빌드
+npm run test        # vitest 단위/통합 테스트 (239개)
+npm run build       # 타입체크 + 프로덕션 빌드
+
+npm run gen:lint    # 샘플 대본 → .lint-tmp/ 에 실제 .rpy + 참조 이미지 스텁 생성
+                    # 이후: renpy.exe .lint-tmp lint
+npm run test:e2e    # Playwright 풀 파이프라인(분석→업로드→ZIP 내용 검증)
+                    # 먼저 npm run build && npm run preview (4173) 가 떠 있어야 한다
 ```
+
+> `tests/zip-asset-invariant.test.ts` 가 **"생성된 `.rpy` 가 참조하는 에셋 경로 = ZIP 에 실제로 들어가는
+> 파일"** 불변식을 지킨다(메뉴 프리셋·커스텀 폰트·일본어 로케일·그라데이션 매트릭스). 이 불일치는
+> 타입체크도 `lint` 도 못 잡고 게임 실행 순간 크래시하므로, 새 에셋 출력 경로를 추가하면 이 테스트
+> 매트릭스에도 반드시 추가할 것.
 
 > Ren'Py `lint` 는 런타임 화면 오류를 다 잡지 못한다. GUI/화면 변경 시 실제 Ren'Py 에서 메뉴·인게임을 클릭하는 런타임 스모크 테스트를 권장(크레딧 화면 추가 등).
 

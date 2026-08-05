@@ -590,7 +590,7 @@ screen cg_gallery():
 `;
 
 /** screensRpy 옵션(위치 인자가 너무 늘어나 객체로 통합 — generateGuiFiles 의 GuiGenOptions 와 동형). */
-export interface ScreensRpyOptions {
+interface ScreensRpyOptions {
   locales?: GuiLocales;
   hasItems?: boolean;
   hasCg?: boolean;

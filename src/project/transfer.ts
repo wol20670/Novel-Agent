@@ -5,9 +5,10 @@
 import type { Project, AssetMeta } from '../types';
 import { getAsset, putAsset } from '../storage/assetStore';
 import { extFromMime } from '../renpy/generate';
+import { sanitizeAscii } from './safeName';
 
-export const PROJECT_FILE_VERSION = 1;
-export const PROJECT_FILE_EXT = 'npproj.zip';
+const PROJECT_FILE_VERSION = 1;
+const PROJECT_FILE_EXT = 'npproj.zip';
 
 interface ProjectManifest {
   version: number;
@@ -30,10 +31,10 @@ function extFor(mime: string): string {
 }
 
 function safeName(title: string): string {
-  return (title || 'novel-project').replace(/[^\w가-힣-]+/g, '_').slice(0, 40);
+  return sanitizeAscii(title, 40, 'novel-project');
 }
 
-export interface ExportResult {
+interface ExportResult {
   blob: Blob;
   filename: string;
   assetCount: number;
@@ -71,7 +72,7 @@ export async function exportProjectFile(
   };
 }
 
-export interface ImportResult {
+interface ImportResult {
   project: Project;
   assets: Record<string, AssetMeta>;
   assetCount: number;

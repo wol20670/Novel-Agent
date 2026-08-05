@@ -68,7 +68,7 @@ export async function startCollab(hooks: CollabHooks): Promise<void> {
   }
 
   hooks.setStatus('connecting');
-  const supabase = getSupabaseClient();
+  const supabase = await getSupabaseClient();
   if (!supabase) {
     hooks.setStatus('error');
     return;
@@ -94,7 +94,7 @@ export async function startCollab(hooks: CollabHooks): Promise<void> {
     return;
   }
 
-  unsubscribeProject = subscribeProject((payload) => {
+  unsubscribeProject = await subscribeProject((payload) => {
     markApplied(payload.version); // 버전 카운터는 유지 — 내 다음 push가 더 높은 version을 갖게
     if (hooks.hasPendingLocalSave()) {
       // 내 편집이 디바운스 대기 중이라 이번 원격 갱신은 반영하지 않고 버린다(재적용하지 않음).
@@ -103,7 +103,7 @@ export async function startCollab(hooks: CollabHooks): Promise<void> {
     }
     withApplyingRemoteGuard(() => hooks.applyRemoteProject(payload.data));
   });
-  unsubscribePresence = startPresence(hooks.getPresenceSelf(), (peers) => hooks.setPeers(peers));
+  unsubscribePresence = await startPresence(hooks.getPresenceSelf(), (peers) => hooks.setPeers(peers));
 
   hooks.setStatus('online');
 }
@@ -117,7 +117,6 @@ export function stopCollab(): void {
 export {
   loadCollabConfig,
   saveCollabConfig as persistCollabConfig,
-  getCollabConfig,
   hasEnvCredentials,
   type CollabConfig,
 } from './supabaseClient';

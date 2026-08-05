@@ -1,11 +1,27 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { generateRenpyFiles } from '../renpy/generate';
 import { buildRenpyZip, downloadBlob } from '../zip/buildZip';
 import { isNaverWhale } from '../project/folderSync';
 import Spinner from './Spinner';
 
+// 미리보기 <pre> 에 파일 전체를 그대로 박으면 3000줄 대본에선 script.rpy 가 수백 KB 라 DOM 이
+// 무거워진다 — 실제 내보내기(ZIP/폴더쓰기)는 항상 전체 내용을 쓰고, 화면 미리보기만 자른다.
+const PREVIEW_LINE_LIMIT = 2000;
+function previewContent(content: string | undefined): string {
+  if (!content) return '';
+  const lines = content.split('\n');
+  if (lines.length <= PREVIEW_LINE_LIMIT) return content;
+  return (
+    lines.slice(0, PREVIEW_LINE_LIMIT).join('\n') +
+    `\n\n… ${lines.length - PREVIEW_LINE_LIMIT}줄 더(전체 내용은 ZIP 생성/폴더쓰기로 확인하세요)`
+  );
+}
+
 export default function RenpyTab() {
+  // 이 탭은 결국 generateRenpyFiles(project)/buildRenpyZip(project) 로 프로젝트 전체를 코드젠해야
+  // 하므로(개별 필드 몇 개로 좁힐 수 없음 — 전체 스크립트를 만드는 게 이 탭의 본질) project 전체
+  // 구독은 여기선 불가피하다. 대신 아래에서 재계산 자체를 디바운스해 비용을 줄인다.
   const project = useStore((s) => s.project);
   const setToast = useStore((s) => s.setToast);
   const [active, setActive] = useState(0);
@@ -14,9 +30,16 @@ export default function RenpyTab() {
   const approvedCount = project.scenes.filter((s) => s.status === 'approved').length;
 
   // 좌측 패널 타이핑(크레딧 문구 등) 중에도 project 는 계속 바뀌는데, 전체 .rpy 재생성은 무거워
-  // 이 탭이 열려 있으면 매 키 입력마다 다시 돌게 된다. useDeferredValue 로 미리보기만 지연시켜
-  // 입력 반응성을 지키고, ZIP/폴더쓰기(아래 onZip·syncToFolder)는 항상 최신 project 를 그대로 쓴다.
-  const deferredProject = useDeferredValue(project);
+  // 이 탭이 열려 있으면 매 키 입력마다 다시 돌 수 있다. useDeferredValue 는 "우선순위"만 낮출 뿐
+  // React 가 한가할 때마다 여전히 재계산하므로(실행 횟수를 줄이지 않음), 300ms 동안 새 변경이
+  // 없을 때만 실제로 재생성하는 디바운스를 추가한다 — 미리보기일 뿐이라 즉시 반영될 필요가 없다.
+  // ZIP/폴더쓰기(onZip·syncToFolder)는 항상 최신 project 를 그대로 쓰므로 내보내기 결과엔 영향 없다.
+  const [debouncedProject, setDebouncedProject] = useState(project);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedProject(project), 300);
+    return () => clearTimeout(t);
+  }, [project]);
+  const deferredProject = useDeferredValue(debouncedProject);
   const files = useMemo(() => {
     try {
       return generateRenpyFiles(deferredProject).files;
@@ -24,6 +47,7 @@ export default function RenpyTab() {
       return [{ path: 'error', content: String(e) }];
     }
   }, [deferredProject]);
+  const activeContent = useMemo(() => previewContent(files[active]?.content), [files, active]);
 
   const onZip = async () => {
     if (approvedCount === 0) {
@@ -33,9 +57,14 @@ export default function RenpyTab() {
     setBuilding(true);
     setToast('ZIP 생성 중… (에셋 폴백 생성 포함, 잠시 걸릴 수 있어요)');
     try {
-      const { blob, filename, placeholders } = await buildRenpyZip(project);
+      const { blob, filename, placeholders, fontFallbackWarning } = await buildRenpyZip(project);
       downloadBlob(blob, filename);
-      setToast(`ZIP 생성 완료: ${filename} (임시 에셋 ${placeholders}개 포함)`);
+      // fontFallbackWarning: 본문/이름 폰트를 하나도 못 구해 DejaVuSans(엔진 기본)로 대체된 경우 —
+      // 한글이 두부(빈 네모)로 보일 수 있는 심각한 문제라 placeholders 안내에 묻히지 않게 이어붙인다.
+      setToast(
+        `ZIP 생성 완료: ${filename} (임시 에셋 ${placeholders}개 포함)` +
+          (fontFallbackWarning ? ` ⚠️ ${fontFallbackWarning}` : ''),
+      );
     } catch (e) {
       setToast(`ZIP 생성 실패: ${(e as Error).message}`);
     } finally {
@@ -76,7 +105,7 @@ export default function RenpyTab() {
       </div>
 
       <pre className="bg-ink border border-edge rounded-xl p-4 text-xs font-mono text-gray-200 overflow-x-auto max-h-[58vh] whitespace-pre leading-relaxed">
-        {files[active]?.content}
+        {activeContent}
       </pre>
     </div>
   );

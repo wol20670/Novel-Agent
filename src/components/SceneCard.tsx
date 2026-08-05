@@ -1,6 +1,5 @@
 import { memo, useMemo, useState } from 'react';
-import { useShallow } from 'zustand/react/shallow';
-import { useStore } from '../store';
+import { useStore, sceneById } from '../store';
 import {
   SCENE_STATUS_LABEL,
   effectiveExpressions,
@@ -19,6 +18,7 @@ import { inferEmotion } from '../generators/emotion';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
 import VoiceLab from './VoiceLab';
+import type { PeerPresence } from '../collab';
 
 const STATUS_BTN: Record<SceneStatus, { on: string; dot: string }> = {
   review: { on: 'bg-gray-500/15 text-gray-300 border-gray-400', dot: 'bg-gray-400' },
@@ -27,8 +27,33 @@ const STATUS_BTN: Record<SceneStatus, { on: string; dot: string }> = {
 };
 const STATUSES = Object.keys(SCENE_STATUS_LABEL) as SceneStatus[];
 
+// collabPeers 배열 identity 별로 sceneId → PeerPresence[] 인덱스를 캐싱(sceneById 와 같은 이유).
+// 예전엔 카드마다 .filter() 로 새 배열을 만들고 useShallow 로 얕은 비교했는데, 그 filter 자체가
+// 카드 수(N)만큼 매 store 알림마다 반복 실행됐다(협업 인원은 적어도 장면 카드가 많으면 낭비).
+// collabPeers 가 바뀔 때만 한 번 그룹핑해두면 이후엔 카드마다 Map 조회 O(1)이고, 참조가 그대로면
+// zustand 기본 Object.is 비교로 재렌더도 스킵된다(useShallow 불필요).
+const EMPTY_PEERS: PeerPresence[] = [];
+const peersBySceneCache = new WeakMap<PeerPresence[], Map<string, PeerPresence[]>>();
+function peersForScene(peers: PeerPresence[], sceneId: string): PeerPresence[] {
+  let idx = peersBySceneCache.get(peers);
+  if (!idx) {
+    idx = new Map();
+    for (const p of peers) {
+      if (!p.selectedSceneId) continue;
+      const arr = idx.get(p.selectedSceneId);
+      if (arr) arr.push(p);
+      else idx.set(p.selectedSceneId, [p]);
+    }
+    peersBySceneCache.set(peers, idx);
+  }
+  return idx.get(sceneId) ?? EMPTY_PEERS;
+}
+
 function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
-  const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId))!;
+  // scenes.find() 를 셀렉터 안에 직접 두면 zustand가 set() 마다(렌더 여부 무관) 모든 구독 셀렉터를
+  // 다시 돌려 카드 N개 × 장면 N개 선형 탐색이 반복된다 — sceneById 는 scenes 배열 identity 기준
+  // 캐싱된 Map 조회로 이를 O(1) 로 줄인다(src/store.ts).
+  const scene = useStore((s) => sceneById(s.project.scenes, sceneId))!;
   const update = useStore((s) => s.updateScene);
   const setStatus = useStore((s) => s.setSceneStatus);
   const select = useStore((s) => s.selectScene);
@@ -55,10 +80,9 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
       .map((nm) => charMap.get(nm))
       .filter((c): c is Character => !!c && (c.outfits?.length ?? 0) > 0);
   }, [scene.lines, charMap]);
-  // 협업 — 지금 이 장면을 보고 있는 상대방(있으면 편집 충돌을 피하라는 신호).
-  // .filter(...) 는 매 렌더마다 새 배열이라 Object.is 비교가 항상 실패 → useShallow 로 배열
-  // 내용을 비교해야 장면 수백 개에서도 관계없는 상태 변경마다 전체 카드가 리렌더되지 않는다.
-  const peersHere = useStore(useShallow((s) => s.collabPeers.filter((p) => p.selectedSceneId === sceneId)));
+  // 협업 — 지금 이 장면을 보고 있는 상대방(있으면 편집 충돌을 피하라는 신호). peersForScene 은
+  // collabPeers identity 기준 캐싱된 조회라 카드마다 .filter() 를 새로 돌리지 않는다(위 설명).
+  const peersHere = useStore((s) => peersForScene(s.collabPeers, sceneId));
 
   return (
     <div

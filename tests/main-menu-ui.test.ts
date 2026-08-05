@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { generateRenpyFiles } from '../src/renpy/generate';
-import { emptyProject, type Project, type Scene, type Line } from '../src/types';
+import type { Line } from '../src/types';
+import { fileOf, scene, dialogue, projectWith, mainMenuBlock } from './fixtures';
 
 // fontGamePath 를 부분 모킹 — 실제 GCS 카탈로그 없이도(테스트 환경엔 네트워크가 없다) 메뉴 폰트
 // 배선(project.mainMenuUi.menuFontId/menuSubFontId → gui.rpy 의 define)이 정확한 id 를 쓰는지
@@ -13,30 +14,21 @@ vi.mock('../src/fonts/fontCatalog', async (importOriginal) => {
   };
 });
 
-function sceneWith(cg: string[], lines: Line[], id = 's1', title = '장면1'): Scene {
-  return { id, title, direction: [], cg, lines, choices: [], status: 'approved' };
+/**
+ * '프리셋 5종' 컨테이너 검증 전용 — mainMenuBlock() 전체엔 컨테이너 선언(hbox:/vbox: + 좌표) 말고도
+ * 로고 미업로드 시 항상 나오는 'if gui.show_name: vbox:'(타이틀/버전 플레이스홀더)와, 가로 프리셋의
+ * 정보/크레딧/도움말 전용 별도 hbox(xalign 0.5) 가 같은 블록 안에 섞여 있다 — 컨테이너 자체를
+ * 지워도 이 둘 중 하나가 'vbox:'/'hbox:'/'xalign 0.5' 를 여전히 만족시켜 그냥은 안 걸린다(실측
+ * 확인: buildImageMainMenuScreen 의 컨테이너 선언을 깨뜨려도 mainMenuBlock() 통짜 검사는 계속
+ * 통과했다). 컨테이너 선언은 항상 "$ continue_slot = ...\n\n<컨테이너>\n\n<첫 슬롯...>" 순서로
+ * 나오므로(buildImageMainMenuScreen 이 빈 문자열 라인으로 구간을 나눠 push 한다), '\n\n' 기준
+ * 두 번째 조각만 잘라내면 컨테이너 선언 그 자체만 남는다.
+ */
+function mainMenuContainerBlock(sc: string): string {
+  return mainMenuBlock(sc).split('\n\n')[1] ?? '';
 }
 
-function projectWith(scenes: Scene[], extra?: Partial<Project>): Project {
-  return { ...emptyProject(), scenes, ...extra };
-}
-
-const fileOf = (files: { path: string; content: string }[], path: string) =>
-  files.find((f) => f.path === path);
-
-// screens.rpy 전체에는 "xalign 0.5"/"xanchor ..." 가 다른 화면(세이브 슬롯·페이지 라벨 등)에도
-// 무수히 등장한다 — "이 좌표가 안 나온다" 류의 부재 검증은 반드시 main_menu 컨테이너 블록으로
-// 범위를 좁혀야 한다(continue_slot 대입부터 링크 버튼 전 null height 스페이서 직전까지).
-// 'null height' 는 세로 배치 스페이서뿐 아니라 preferences 화면(정적 템플릿)에도 나오므로,
-// 반드시 screen main_menu() 정의가 끝나는 지점('style main_menu_frame is empty' — base 템플릿에서
-// 항상 그 화면 바로 다음에 온다)까지로 잘라야 한다.
-function mainMenuBlock(sc: string): string {
-  const start = sc.indexOf('$ continue_slot = renpy.newest_slot');
-  const end = sc.indexOf('style main_menu_frame is empty', start);
-  return sc.slice(start, end);
-}
-
-const plainScene = () => sceneWith([], [{ kind: 'dialogue', speaker: '민주', text: '안녕' }]);
+const plainScene = () => scene({ lines: [dialogue('민주', '안녕')] });
 
 describe('generateRenpyFiles: mainMenuUi 미지정(회귀 0)', () => {
   it('game/screens.rpy 에 imagebutton 이 없고 use navigation 이 그대로 있다', () => {
@@ -114,7 +106,7 @@ describe('generateRenpyFiles: idle 없는 슬롯은 텍스트 버튼으로 폴�
 
 describe('generateRenpyFiles: 갤러리 버튼 대상(galleryTarget)', () => {
   const withGallery = (extraLines: Line[], cg: string[]) =>
-    projectWith([sceneWith(cg, [{ kind: 'dialogue', speaker: '민주', text: '안녕' }, ...extraLines])], {
+    projectWith([scene({ cg, lines: [dialogue('민주', '안녕'), ...extraLines] })], {
       mainMenuUi: { buttons: { gallery: { idle: 'a5' } } },
     });
 
@@ -143,7 +135,10 @@ describe('generateRenpyFiles: 갤러리 버튼 대상(galleryTarget)', () => {
     const sc = fileOf(files, 'game/screens.rpy')!.content;
     expect(sc).toContain('action ShowMenu("gallery_hub")');
     expect(sc).toContain('screen gallery_hub():');
-    expect(sc).toContain('style_prefix "navigation"');
+    // style_prefix "navigation" 은 base 템플릿(navigation() 화면)에도 항상 1번 나오므로, gallery_hub
+    // 가 실제로 그 스타일을 쓰는지는 gallery_hub 화면 정의 이후 구간으로 좁혀야 검증된다.
+    const hubIdx = sc.indexOf('screen gallery_hub():');
+    expect(sc.slice(hubIdx)).toContain('style_prefix "navigation"');
   });
 
   it('둘 다 없으면 sensitive False 이고 screen gallery_hub 는 없다', () => {
@@ -212,7 +207,11 @@ describe('generateRenpyFiles: 프리셋 5종 — 컨테이너/정렬/좌표(1920
     });
     const { files } = generateRenpyFiles(p);
     const sc = fileOf(files, 'game/screens.rpy')!.content;
-    expect(sc).toContain('vbox:');
+    // 'vbox:' 는 screens.rpy 전체엔 세이브 슬롯 등 다른 화면에도 무수히 나오고, main_menu 블록
+    // 안에서도 로고 미업로드 시 항상 나오는 타이틀/버전 플레이스홀더 vbox 가 섞여 있으므로
+    // 컨테이너 선언부(mainMenuContainerBlock)로 더 좁혀야 이 프리셋이 실제로 vbox 컨테이너를
+    // 냈는지 검증된다.
+    expect(mainMenuContainerBlock(sc)).toContain('vbox:');
     expect(sc).toContain('xpos 96');
     expect(sc).toContain('ypos 350');
     expect(sc).toContain('spacing 12');
@@ -225,8 +224,12 @@ describe('generateRenpyFiles: 프리셋 5종 — 컨테이너/정렬/좌표(1920
     const p = projectWith([plainScene()], { mainMenuUi: { preset: 'bottom-row' } });
     const { files } = generateRenpyFiles(p);
     const sc = fileOf(files, 'game/screens.rpy')!.content;
-    expect(sc).toContain('hbox:');
-    expect(sc).toContain('xalign 0.5');
+    // 'hbox:'/'xalign 0.5' 는 screens.rpy 전체엔 다른 화면(선택지 등)에도 무수히 나오고, main_menu
+    // 블록 안에서도 가로 프리셋 전용 정보/크레딧/도움말 링크용 별도 hbox(xalign 0.5) 가 섞여 있으므로
+    // 컨테이너 선언부(mainMenuContainerBlock)로 더 좁혀야 이 프리셋의 메뉴 컨테이너 자체가 실제로
+    // 가로 배치인지 검증된다.
+    expect(mainMenuContainerBlock(sc)).toContain('hbox:');
+    expect(mainMenuContainerBlock(sc)).toContain('xalign 0.5');
     expect(sc).toContain('ypos 830');
     expect(sc).toContain('spacing 30');
     expect(mainMenuBlock(sc)).not.toContain('xanchor');
@@ -238,7 +241,7 @@ describe('generateRenpyFiles: 프리셋 5종 — 컨테이너/정렬/좌표(1920
     const p = projectWith([plainScene()], { mainMenuUi: { preset: 'right-dual' } });
     const { files } = generateRenpyFiles(p);
     const sc = fileOf(files, 'game/screens.rpy')!.content;
-    expect(sc).toContain('vbox:');
+    expect(mainMenuContainerBlock(sc)).toContain('vbox:');
     expect(sc).toContain('xpos 1800');
     expect(sc).toContain('xanchor 1.0');
     expect(sc).toContain('ypos 320');
@@ -249,7 +252,7 @@ describe('generateRenpyFiles: 프리셋 5종 — 컨테이너/정렬/좌표(1920
     const p = projectWith([plainScene()], { mainMenuUi: { preset: 'right-marker' } });
     const { files } = generateRenpyFiles(p);
     const sc = fileOf(files, 'game/screens.rpy')!.content;
-    expect(sc).toContain('vbox:');
+    expect(mainMenuContainerBlock(sc)).toContain('vbox:');
     expect(sc).toContain('xpos 1780');
     expect(sc).toContain('xanchor 1.0');
     expect(sc).toContain('ypos 400');
@@ -260,7 +263,7 @@ describe('generateRenpyFiles: 프리셋 5종 — 컨테이너/정렬/좌표(1920
     const p = projectWith([plainScene()], { mainMenuUi: { preset: 'renpy-classic' } });
     const { files } = generateRenpyFiles(p);
     const sc = fileOf(files, 'game/screens.rpy')!.content;
-    expect(sc).toContain('vbox:');
+    expect(mainMenuContainerBlock(sc)).toContain('vbox:');
     expect(sc).toContain('xpos 120');
     expect(sc).toContain('ypos 380');
     expect(sc).toContain('spacing 18');
@@ -278,8 +281,12 @@ describe('generateRenpyFiles: bottom-row/right-dual — 2줄(주+부) 렌더', (
     expect(sc).toContain('style "mm_button"');
     expect(sc).toContain('text "게임 시작" style "mm_main_text"');
     expect(sc).toContain('text "새로운 이야기 시작" style "mm_sub_text"');
-    // hbox(가운데 정렬 컨테이너) 안이므로 항목에도 xalign 0.5 가 붙는다.
-    expect(sc).toContain('xalign 0.5');
+    // hbox(가운데 정렬 컨테이너) 안이므로 항목(button:)에도 xalign 0.5 가 붙는다 — 컨테이너 자체의
+    // xalign 0.5(mainMenuContainerBlock)와 정보/크레딧/도움말 링크용 hbox 의 xalign 0.5 도 같은
+    // main_menu 블록 안에 있어 mainMenuBlock() 만으로는 항목 자체가 그 속성을 내는지 구분이 안
+    // 된다 — 항목 렌더가 항상 xsize 뒤에 바로 xalign 0.5 를 잇는(screensRpy.ts 의 case 3 가로
+    // 분기) 그 인접 패턴으로 좁혀 검증한다.
+    expect(sc).toContain('xsize 270\n            xalign 0.5');
   });
 
   it('right-dual: 영문 주 라벨 + 한글 부 라벨 2줄, xalign 1.0(우측 정렬 항목)', () => {
@@ -288,7 +295,8 @@ describe('generateRenpyFiles: bottom-row/right-dual — 2줄(주+부) 렌더', (
     const sc = fileOf(files, 'game/screens.rpy')!.content;
     expect(sc).toContain('text "New Game" style "mm_main_text"');
     expect(sc).toContain('text "새로하기" style "mm_sub_text"');
-    expect(sc).toContain('xalign 1.0');
+    // 'xalign 1.0' 도 다른 화면(파일 페이지 버튼 등)에 흔해 main_menu 블록으로 좁혀야 검증된다.
+    expect(mainMenuBlock(sc)).toContain('xalign 1.0');
   });
 
   it('sub 를 빈 문자열로 덮으면 그 슬롯은 text 1개만(2줄 → 1줄로 자연 축소)', () => {
@@ -316,7 +324,13 @@ describe('generateRenpyFiles: right-marker — ▶ 마커 스타일', () => {
     expect(sc).toContain('hover_color gui.accent_color');
     // ▶(U+25B6) 는 Ren'Py 이모지 트라이에서 UNQUALIFIED 라 기본 prefer_emoji True 와 만나면
     // 번들 Twemoji(파란 재생버튼 이모지)로 치환된다(실기 확인) — emoji_font None 으로 꺼야 한다.
-    expect(sc).toContain('emoji_font None');
+    // buildMmStyles 는 mm_button_text/mm_main_text/mm_sub_text/mm_marker_text 를 한 블록에서
+    // 함께 내므로(모든 텍스트 프리셋에 공통), 'emoji_font None' 이 전체 sc 에 있다는 것만으로는
+    // 그 속성이 실제로 마커 스타일에 붙었는지 증명하지 못한다 — style mm_marker_text: 뒤에 이어지는
+    // 들여쓴 줄들(그 스타일의 속성)만 잘라서 검증한다.
+    const markerStyleMatch = sc.match(/style mm_marker_text:\n(?:[ \t]+.*\n?)*/);
+    expect(markerStyleMatch).not.toBeNull();
+    expect(markerStyleMatch![0]).toContain('emoji_font None');
     // 라벨 자체는 프리셋 labels 가 비어 있으므로 MAIN_MENU_SLOTS 원래 라벨로 폴백.
     expect(sc).toContain('text "처음부터" style "mm_button_text"');
   });

@@ -6,7 +6,7 @@
 
 import type { Scene } from '../types';
 
-export interface GroupApplyResult {
+interface GroupApplyResult {
   scenes: Scene[];
   /** 교체·해제되어 삭제 대상이 된 이전 assetId 목록(중복 제거, 새 id 는 코어에서 제외). */
   prevIds: string[];

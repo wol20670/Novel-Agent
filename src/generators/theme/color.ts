@@ -1,7 +1,7 @@
 // 색 유틸 — hex 파싱/포맷 + WCAG 명암대비 계산 및 가독성 자동 보정.
 // AI가 어떤 색을 내든 대사/메뉴 글자가 읽히도록 보장하는 게 핵심.
 
-export interface RGB {
+interface RGB {
   r: number; // 0..255
   g: number;
   b: number;
@@ -39,7 +39,14 @@ export function toHex({ r, g, b, a }: RGB): string {
   return a >= 1 ? base : base + h2(Math.round(a * 255));
 }
 
-/** alpha 만 교체한 hex 반환. */
+/**
+ * alpha 만 교체한 hex 반환.
+ * ⚠️ renpy/gui/theme.ts 의 hexWithAlpha()와 의도적으로 다르다 — 이쪽은 parseHex 를 거쳐 3자리 축약
+ * hex 도 지원하고, a>=1 이면 알파 자리를 아예 생략한다(`toHex` 참고, `#rrggbb`). hexWithAlpha 는
+ * 항상 6자리로 정규화하고 알파를 항상 붙인다(`#rrggbbaa`). 이 함수의 호출부(isLight 기반 로직 등)는
+ * 알파 생략을 전제로 하므로, 병합해서 항상 8자리로 내보내면 그 값을 그대로 CSS/속성에 쓰는
+ * 다른 코드의 문자열 포맷이 달라질 수 있다. 필요하면 새 호출부만 hexWithAlpha 를 쓰도록.
+ */
 export function withAlpha(hex: string, a: number): string {
   const c = parseHex(hex);
   if (!c) return hex;
@@ -58,6 +65,13 @@ export function mix(aHex: string, bHex: string, t: number): string {
   });
 }
 
+/**
+ * ⚠️ renpy/gui/theme.ts 의 veilLuminance()와 의도적으로 다르다 — 이쪽은 WCAG 정의대로 sRGB 감마
+ * 디코딩을 거친 "정확한" 상대휘도, veilLuminance 는 감마 보정 없는 선형 근사치다. isLight()(아래,
+ * `> 0.4` 기준)는 이 함수를 쓰고, veilLuminance 는 `< 0.5` 기준을 쓴다 — 같은 hex 에 다른 밝기
+ * 판정이 나올 수 있다. veilLuminance 쪽은 ensureReadableMenu 의 실기 검증 임계값과 묶여 있어
+ * 이 함수로 바꾸면 그 검증이 깨진다. 병합하지 말 것 — 새 호출부는 상황에 맞는 쪽을 고르면 된다.
+ */
 function relLuminance({ r, g, b }: RGB): number {
   const f = (c: number) => {
     const x = c / 255;

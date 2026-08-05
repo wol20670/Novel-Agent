@@ -8,7 +8,7 @@ import { inferEmotion } from '../generators/emotion';
 import { canvasSprite } from '../generators/image/canvasSprite';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { getAsset } from '../storage/assetStore';
-import { spreadPositions } from '../renpy/generate';
+import { arrangePositions } from '../renpy/generate';
 import {
   resolveTheme,
   withGuiOverrides,
@@ -22,6 +22,36 @@ import { emojiFor, spriteAssetId, resolveOutfit, type Scene, type Character, typ
 
 const speakersOf = (l: Line): string[] =>
   l.kind === 'dialogue' ? (l.members?.length ? l.members : [l.speaker]) : [];
+
+/**
+ * 무대에 설 캐릭터(주인공 제외)의 가로 위치 — generate.ts 의 scriptBody 와 완전히 같은 함수
+ * (arrangePositions, export 해서 재사용)로 계산한다. scriptBody 는 장면 안에서 새 캐릭터가
+ * 처음 등장할 때마다 "그때까지 등장한 순서"로 다시 배치하므로(side:'left'/'right' 고정 캐릭터는
+ * 양끝, 'auto'는 등장 순서로 가운데를 채움 — 혼자면 항상 중앙), 여기서도 uptoLine 까지 등장한
+ * 화자만으로 order 를 매번 다시 구성해야 같은 결과가 나온다(예전엔 spreadPositions 를 장면 전체
+ * 등장 순서로 1회만 호출해 side 를 완전히 무시했다 — 생성기·미리보기 두 구현이 어긋나는 CLAUDE.md
+ * 함정과 같은 종류의 버그). CG 배경이 뜬 뒤(activeCgIdx>=0)는 스프라이트 자체를 그리지 않으므로
+ * (ScenePlayer 의 렌더 조건) 그 상태에서는 위치가 안 쓰이지만, activeCgIdx<0 이면 아직 CG가
+ * 시작되지 않았다는 뜻이라 scriptBody 의 cgActive 게이팅 없이 단순 누적으로도 정확히 같다.
+ * 컴포넌트 밖의 순수 함수라 React 없이도 테스트할 수 있다(tests/scene-player-positions.test.ts).
+ */
+export function computeStagePositions(
+  scene: Scene,
+  characters: Character[],
+  uptoLine: number,
+  activeCgIdx: number,
+): Map<string, number> {
+  if (activeCgIdx >= 0) return new Map();
+  const isNarrOnly = (name: string) => !!characters.find((c) => c.name === name)?.isProtagonist;
+  const order: string[] = [];
+  for (let k = 0; k <= uptoLine && k < scene.lines.length; k++) {
+    const l = scene.lines[k];
+    if (l.kind !== 'dialogue') continue;
+    for (const sp of speakersOf(l)) if (!isNarrOnly(sp) && !order.includes(sp)) order.push(sp);
+  }
+  const sideByName = new Map(characters.map((c) => [c.name, c.side ?? 'auto']));
+  return arrangePositions(order, sideByName);
+}
 
 /**
  * 한 캐릭터의 (의상·표정) 스프라이트 — 에셋이 있으면 그것, 없으면 Canvas 임시 이미지.
@@ -116,16 +146,6 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
         inferEmotion(l.text, { direction: scene.direction, background: scene.background }))
       : '기본';
 
-  // 무대에 설 캐릭터(주인공 제외) 첫 등장 순서 → 가로 위치(생성기와 동일 규칙).
-  const xpos = useMemo(() => {
-    const order: string[] = [];
-    for (const l of scene.lines)
-      for (const sp of speakersOf(l)) if (!isNarrOnly(sp) && !order.includes(sp)) order.push(sp);
-    const xs = spreadPositions(order.length);
-    return new Map(order.map((n, idx) => [n, xs[idx]]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene, characters]);
-
   const total = scene.lines.length;
   const i = Math.min(step, Math.max(0, total - 1));
   const cur = scene.lines[i] as Line | undefined;
@@ -146,6 +166,13 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
     }
     return idx;
   }, [scene, i, total]);
+
+  // 순수 함수(computeStagePositions, 위에서 export)로 위임 — 생성기(scriptBody)와 같은
+  // arrangePositions 를 같은 방식(현재 줄까지 점진적으로 커지는 order)으로 호출한다.
+  const positions = useMemo(
+    () => computeStagePositions(scene, characters, i, activeCgIdx),
+    [scene, characters, i, activeCgIdx],
+  );
   const cgAssetId = activeCgIdx >= 0 ? scene.cgAssetIds?.[activeCgIdx] : undefined;
   const cgDesc = activeCgIdx >= 0 ? scene.cg[activeCgIdx] : undefined;
   const [cgUrl, setCgUrl] = useState<string>();
@@ -222,7 +249,7 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
         {activeCgIdx < 0 && [...visible].map(([nm, ex]) => {
           const c = charByName.get(nm);
           return c ? (
-            <PreviewSprite key={nm} char={c} expr={ex} outfit={resolveOutfit(outfitRules, scene, nm)} xpct={xpos.get(nm) ?? 50} k={charK} />
+            <PreviewSprite key={nm} char={c} expr={ex} outfit={resolveOutfit(outfitRules, scene, nm)} xpct={positions.get(nm) ?? 50} k={charK} />
           ) : null;
         })}
         {cur && (

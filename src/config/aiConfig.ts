@@ -9,7 +9,7 @@
 //  에만 저장된다(코드/깃에 절대 커밋 금지).
 // ───────────────────────────────────────────────────────────────────────────
 
-export interface AiConfig {
+interface AiConfig {
   chat: {
     /** Chat Completions 엔드포인트(번역/테마 등 텍스트 추론용). */
     endpoint: string;

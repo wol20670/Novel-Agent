@@ -7,6 +7,22 @@ const VERSION = 1;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+// 에셋 삭제/초기화 알림 — useAssetUrl 의 objectURL 캐시(src/components/useAssetUrl.ts)가 여기 구독해
+// 캐시된 URL 을 무효화한다. 이 파일은 React 를 몰라도 되게 순수 콜백만 노출한다(의존 방향:
+// assetStore → 모름, 구독자가 이 파일을 안다). id 목록이면 해당 id 만, 'all' 이면 전체 초기화.
+type AssetChangeListener = (ids: string[] | 'all') => void;
+const changeListeners = new Set<AssetChangeListener>();
+
+/** 삭제/초기화 알림 구독. 반환된 함수를 호출하면 구독 해제. */
+export function subscribeAssetChange(fn: AssetChangeListener): () => void {
+  changeListeners.add(fn);
+  return () => changeListeners.delete(fn);
+}
+
+function notifyAssetChange(ids: string[] | 'all'): void {
+  for (const fn of changeListeners) fn(ids);
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
@@ -25,6 +41,10 @@ function tx(db: IDBDatabase, mode: IDBTransactionMode) {
   return db.transaction(STORE, mode).objectStore(STORE);
 }
 
+// putAsset 은 일부러 notifyAssetChange 를 호출하지 않는다: id 는 store.ts 의 assetId() 가 업로드마다
+// 새로 발급해 "이미 화면에 떠 있는 id의 내용이 바뀌는" 경우가 없고, 그 외 putAsset 호출(협업
+// 지연 다운로드 캐싱, 프로젝트 zip 가져오기 복원)도 전부 "그 id가 원래 가리키던 내용"을 로컬에
+// 채워 넣을 뿐 내용을 바꾸지 않는다 — 즉 id → 내용 매핑은 항상 불변이라 캐시를 건드릴 이유가 없다.
 export async function putAsset(id: string, blob: Blob): Promise<void> {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
@@ -50,6 +70,7 @@ export async function deleteAsset(id: string): Promise<void> {
     r.onsuccess = () => resolve();
     r.onerror = () => reject(r.error);
   });
+  notifyAssetChange([id]);
 }
 
 /**
@@ -81,6 +102,7 @@ export async function deleteAssets(ids: string[]): Promise<void> {
       r.onerror = () => fail(r.error);
     }
   });
+  notifyAssetChange(ids);
 }
 
 /** 저장된 모든 에셋 id 목록(고아 에셋 정리용 — 참조 집합과 대조해 차집합을 구한다). */
@@ -100,6 +122,7 @@ export async function clearAssets(): Promise<void> {
     r.onsuccess = () => resolve();
     r.onerror = () => reject(r.error);
   });
+  notifyAssetChange('all');
 }
 
 /** 미리보기용 object URL. 사용 후 revoke 는 호출 측 책임. */

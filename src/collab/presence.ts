@@ -38,11 +38,11 @@ function ensureClientId(): string {
 }
 
 /** 프레즌스 채널 연결·구독 시작. 반환 함수 호출 시 해제. */
-export function startPresence(
+export async function startPresence(
   self: Omit<PeerPresence, 'clientId'>,
   onPeers: (peers: PeerPresence[]) => void,
-): () => void {
-  const supabase = getSupabaseClient();
+): Promise<() => void> {
+  const supabase = await getSupabaseClient();
   const room = roomKey();
   if (!supabase || !room) return () => {};
   const id = ensureClientId();

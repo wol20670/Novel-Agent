@@ -13,7 +13,7 @@
 import type { Project } from '../types';
 import { getSupabaseClient, getCollabConfig, roomKey } from './supabaseClient';
 
-export interface RemoteProjectPayload {
+interface RemoteProjectPayload {
   data: Project;
   version: number;
   updatedBy: string | null;
@@ -46,7 +46,7 @@ export function setPushStatusHandler(handler: PushStatusHandler | null): void {
 /** 로컬 프로젝트를 원격에 반영(upsert). collab 미준비/원격 적용 중이면 조용히 아무 것도 안 한다. */
 export async function pushProject(project: Project): Promise<void> {
   if (applyingRemote) return;
-  const supabase = getSupabaseClient();
+  const supabase = await getSupabaseClient();
   const room = roomKey();
   if (!supabase || !room) return;
   const nextVersion = localVersion + 1;
@@ -75,7 +75,7 @@ export async function pushProject(project: Project): Promise<void> {
  * 잡아 collabStatus 를 'error' 로 세팅한다).
  */
 export async function pullProjectOnce(): Promise<RemoteProjectPayload | null> {
-  const supabase = getSupabaseClient();
+  const supabase = await getSupabaseClient();
   const room = roomKey();
   if (!supabase || !room) return null;
   const { data, error } = await supabase
@@ -89,8 +89,8 @@ export async function pullProjectOnce(): Promise<RemoteProjectPayload | null> {
 }
 
 /** 원격 변경 구독. 자기 에코·오래된 이벤트는 걸러내고, 진짜 새 변경만 onRemote 로 넘긴다. */
-export function subscribeProject(onRemote: (payload: RemoteProjectPayload) => void): () => void {
-  const supabase = getSupabaseClient();
+export async function subscribeProject(onRemote: (payload: RemoteProjectPayload) => void): Promise<() => void> {
+  const supabase = await getSupabaseClient();
   const room = roomKey();
   if (!supabase || !room) return () => {};
   const channel = supabase

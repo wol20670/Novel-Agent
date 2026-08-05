@@ -22,7 +22,7 @@ export interface ThemeCore {
 const pick = (v: unknown, fallback: string): string => (isHex(v) ? (v as string) : fallback);
 
 /** 프리셋 → 코어(불투명 베이스로 정규화). 오프라인 변형의 출발점. */
-export function presetCore(genre: GenreId): ThemeCore {
+function presetCore(genre: GenreId): ThemeCore {
   const p = PRESETS[genre] ?? PRESETS.romance;
   const opaque = (hex: string) => toHex({ ...(parseHex(hex) ?? { r: 0, g: 0, b: 0, a: 1 }), a: 1 });
   return {

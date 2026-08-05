@@ -4,6 +4,7 @@
 
 import type { Project } from '../types';
 import { collectProjectFiles } from '../zip/buildZip';
+import { sanitizeWindowsPath } from './safeName';
 
 // 표준 TS lib 에 일부 메서드(showDirectoryPicker, queryPermission)가 없어 최소 타입만 정의.
 type DirHandle = FileSystemDirectoryHandle & {
@@ -103,25 +104,22 @@ async function writeFile(root: DirHandle, path: string, data: string | Blob): Pr
   await w.close();
 }
 
-export interface SyncResult {
+interface SyncResult {
   count: number;
   placeholders: number;
   /** 연결한 부모 폴더 이름 (예: renpy_scenario). */
   parentName: string;
   /** 이번에 기록한 프로젝트 하위 폴더 이름 (예: 나의_비주얼노벨). */
   projectFolder: string;
+  /** 폰트를 하나도 못 구해 DejaVuSans.ttf 로 대체된 경우의 사용자 안내 문구(정상이면 undefined) —
+   *  buildZip.ts 의 collectProjectFiles 와 동일 필드, ZIP 경로뿐 아니라 이 폴더 직접쓰기 경로도
+   *  같은 실패 가능성이 있어 호출측(store.ts)이 똑같이 토스트로 노출해야 한다. */
+  fontFallbackWarning?: string;
 }
 
 /** 프로젝트 제목 → 파일시스템 안전 하위 폴더명(한글 유지). Ren'Py 런처가 프로젝트로 인식. */
-export function projectFolderName(project: Project): string {
-  const name = (project.title || '')
-    .trim()
-    .replace(/[\\/:*?"<>|]+/g, '') // 윈도우 금지문자 제거
-    .replace(/\s+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40);
-  return name || 'visual-novel';
+function projectFolderName(project: Project): string {
+  return sanitizeWindowsPath(project.title, 40, 'visual-novel');
 }
 
 /**
@@ -139,7 +137,7 @@ export async function syncProjectToFolder(project: Project): Promise<SyncResult>
   if (!(await ensurePermission(handle))) {
     throw new Error('폴더 쓰기 권한이 거부되었습니다.');
   }
-  const { files, placeholders } = await collectProjectFiles(project);
+  const { files, placeholders, fontFallbackWarning } = await collectProjectFiles(project);
   const projectFolder = projectFolderName(project);
   try {
     // 제목별 하위 폴더에 기록. 매번 game/ 을 비워 낡은 스크립트·에셋 잔존을 막는다.
@@ -158,7 +156,7 @@ export async function syncProjectToFolder(project: Project): Promise<SyncResult>
     }
     throw e;
   }
-  return { count: files.length, placeholders, parentName: handle.name, projectFolder };
+  return { count: files.length, placeholders, parentName: handle.name, projectFolder, fontFallbackWarning };
 }
 
 /** 낡은 핸들/상태 변경 오류인지 판별. */

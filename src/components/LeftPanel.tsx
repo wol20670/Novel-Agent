@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { downloadExcelTemplate, downloadTextTemplate } from '../template';
 import { GENRE_OPTIONS, DEFAULT_GENRE, resolveTheme, DEFAULT_GRADIENT_OPACITY, DEFAULT_GRADIENT_HEIGHT } from '../renpy/gui';
@@ -15,8 +15,12 @@ import Spinner from './Spinner';
 import { useAssetUrl } from './useAssetUrl';
 
 export default function LeftPanel() {
-  const project = useStore((s) => s.project);
-  const setRawInput = useStore((s) => s.setRawInput);
+  // project 전체 대신 실제로 쓰는 두 필드만 — 1023줄짜리 컴포넌트라 whole-project 셀렉터로 두면
+  // 무관한 필드(대사 편집 등) 변경에도 이 패널 전체(+4개 하위 섹션)가 리렌더된다. rawInput 은
+  // 아래 StoryTextarea 로 격리했으므로 여기선 구독하지 않는다(분석 버튼은 클릭 시점에 getState()로
+  // 직접 읽는다 — 렌더 목적이 아니라 "지금 값"만 필요).
+  const scenes = useStore((s) => s.project.scenes);
+  const translateModeRaw = useStore((s) => s.project.translateMode);
   const applyAnalysis = useStore((s) => s.applyAnalysis);
   const loadSample = useStore((s) => s.loadSample);
   const save = useStore((s) => s.save);
@@ -26,7 +30,7 @@ export default function LeftPanel() {
   const setOpenaiKey = useStore((s) => s.setOpenaiKey);
   const typecastKey = useStore((s) => s.typecastKey);
   const setTypecastKey = useStore((s) => s.setTypecastKey);
-  const translateMode = translateModeOf(project);
+  const translateMode = translateModeOf({ translateMode: translateModeRaw });
   const setTranslateMode = useStore((s) => s.setTranslateMode);
   const exportProject = useStore((s) => s.exportProject);
   const importProject = useStore((s) => s.importProject);
@@ -45,8 +49,8 @@ export default function LeftPanel() {
   // previewMerge 는 라인 단위까지 훑어 비교하는 무거운 계산 — 모달이 떠 있을 때만, pending/scenes 가
   // 바뀔 때만 계산한다(API 키 입력 등 LeftPanel 의 매 렌더마다 다시 돌리지 않도록).
   const mergePreview = useMemo(
-    () => (pending ? previewMerge(project.scenes, pending.parsed.scenes) : null),
-    [pending, project.scenes],
+    () => (pending ? previewMerge(scenes, pending.parsed.scenes) : null),
+    [pending, scenes],
   );
 
   /** 파싱 결과를 받아 기존 장면 유무에 따라 곧장 반영하거나(0개) 모달로 방식을 고른다. */
@@ -55,7 +59,7 @@ export default function LeftPanel() {
       applyAnalysis(parsed, 'replace', rawText); // 스토어가 빈 결과 안내 토스트를 띄운다
       return;
     }
-    if (project.scenes.length === 0) {
+    if (scenes.length === 0) {
       applyAnalysis(parsed, 'replace', rawText); // 첫 업로드 — 모달 없이 곧장 반영
       return;
     }
@@ -77,7 +81,10 @@ export default function LeftPanel() {
   };
 
   const onAnalyzeTextClick = () => {
-    startAnalysis(parseText(project.rawInput), project.rawInput);
+    // 렌더용 구독이 아니라 클릭 시점의 "지금 값"만 필요 — rawInput 은 StoryTextarea 가 구독하고
+    // 여기선 getState() 로 한 번만 읽는다(구독하면 매 키 입력마다 이 컴포넌트도 리렌더됨).
+    const rawInput = useStore.getState().project.rawInput;
+    startAnalysis(parseText(rawInput), rawInput);
   };
 
   const resolveMode = (mode: AnalyzeMode) => {
@@ -213,12 +220,7 @@ export default function LeftPanel() {
           <span className="flex-1 h-px bg-edge" />
         </div>
 
-        <textarea
-          className="field font-mono text-xs leading-relaxed h-60 resize-y"
-          placeholder={'장면: 맑은 아침, 운동장\n배경: 학교 운동장\n주인공: 안녕!\n(잠시 침묵이 흘렀다.)\n선택지:\n> 인사한다\n> 지나친다'}
-          value={project.rawInput}
-          onChange={(e) => setRawInput(e.target.value)}
-        />
+        <StoryTextarea />
         <button className="btn-primary" onClick={onAnalyzeTextClick}>
           🔍 분석
         </button>
@@ -345,7 +347,7 @@ export default function LeftPanel() {
       <AnalyzeMergeModal
         preview={mergePreview!}
         newCount={pending.parsed.scenes.length}
-        prevCount={project.scenes.length}
+        prevCount={scenes.length}
         onMerge={() => resolveMode('merge')}
         onAppend={() => resolveMode('append')}
         onReplace={() => resolveMode('replace')}
@@ -355,6 +357,27 @@ export default function LeftPanel() {
     </>
   );
 }
+
+/**
+ * 스토리 입력 textarea — project.rawInput 만 구독하는 별도(memo) 컴포넌트로 격리했다. 3000줄
+ * 대본을 붙여넣으면 컨트롤드 인풋이라 매 키 입력마다 project 가 새 객체가 되는데, 부모(LeftPanel)가
+ * project 를 통째로 구독했다면 좌측 패널 전체(+협업 설정 등)가 함께 리렌더됐다. 이 컴포넌트 자신은
+ * 여전히 매 키 입력마다 리렌더된다(컨트롤드 인풋이라 불가피) — 그 범위를 여기로 한정하는 게 목적.
+ * 로컬 state로 바꾸고 blur 시에만 커밋하는 방식은 쓰지 않는다 — blur 없이 탭을 벗어나면 방금 붙여넣은
+ * 대본이 그대로 유실될 수 있어(자동저장이 못 봄) 매 키 입력 커밋을 유지해야 안전하다.
+ */
+const StoryTextarea = memo(function StoryTextarea() {
+  const rawInput = useStore((s) => s.project.rawInput);
+  const setRawInput = useStore((s) => s.setRawInput);
+  return (
+    <textarea
+      className="field font-mono text-xs leading-relaxed h-60 resize-y"
+      placeholder={'장면: 맑은 아침, 운동장\n배경: 학교 운동장\n주인공: 안녕!\n(잠시 침묵이 흘렀다.)\n선택지:\n> 인사한다\n> 지나친다'}
+      value={rawInput}
+      onChange={(e) => setRawInput(e.target.value)}
+    />
+  );
+});
 
 /**
  * 기존 장면이 있을 때 재분석 결과를 어떻게 반영할지 고르는 모달 — 스마트 병합(추천)/뒤에 추가/전체 교체.
@@ -633,7 +656,14 @@ function Divider() {
 }
 
 function ProjectMeta() {
-  const project = useStore((s) => s.project);
+  // project 전체 대신 실제로 쓰는 6개 필드만 — 대사 편집 등 무관한 저장에도 이 섹션 전체가
+  // 리렌더될 이유가 없다(whole-project 셀렉터는 project 가 매 mutate 마다 새 객체라 항상 걸린다).
+  const title = useStore((s) => s.project.title);
+  const author = useStore((s) => s.project.author);
+  const width = useStore((s) => s.project.width);
+  const height = useStore((s) => s.project.height);
+  const genre = useStore((s) => s.project.genre);
+  const credits = useStore((s) => s.project.credits);
   const update = useStore((s) => s.updateProjectMeta);
   return (
     <section className="flex flex-col gap-2">
@@ -641,18 +671,18 @@ function ProjectMeta() {
       <div className="grid grid-cols-2 gap-2">
         <div>
           <span className="label">제목</span>
-          <input className="field" value={project.title} onChange={(e) => update({ title: e.target.value })} />
+          <input className="field" value={title} onChange={(e) => update({ title: e.target.value })} />
         </div>
         <div>
           <span className="label">저자</span>
-          <input className="field" value={project.author} onChange={(e) => update({ author: e.target.value })} />
+          <input className="field" value={author} onChange={(e) => update({ author: e.target.value })} />
         </div>
         <div>
           <span className="label">가로 (px)</span>
           <input
             type="number"
             className="field"
-            value={project.width}
+            value={width}
             onChange={(e) => update({ width: Number(e.target.value) || 1280 })}
           />
         </div>
@@ -661,7 +691,7 @@ function ProjectMeta() {
           <input
             type="number"
             className="field"
-            value={project.height}
+            value={height}
             onChange={(e) => update({ height: Number(e.target.value) || 720 })}
           />
         </div>
@@ -670,7 +700,7 @@ function ProjectMeta() {
         <span className="label">GUI 테마 (장르)</span>
         <select
           className="field"
-          value={project.genre ?? DEFAULT_GENRE}
+          value={genre ?? DEFAULT_GENRE}
           onChange={(e) => update({ genre: e.target.value as GenreId })}
         >
           {GENRE_OPTIONS.map((o) => (
@@ -689,7 +719,7 @@ function ProjectMeta() {
         <textarea
           className="field text-xs h-20 resize-y"
           placeholder={'사용한 일러스트·BGM·효과음·성우 등의 출처와 라이선스를 적으세요.\n예) 배경 일러스트: ○○○ / BGM: △△△ (CC-BY 4.0)\n상업 배포 전 반드시 정리 — 엔진·나눔고딕 라이선스는 자동 표기됩니다.'}
-          value={project.credits ?? ''}
+          value={credits ?? ''}
           onChange={(e) => update({ credits: e.target.value })}
         />
       </div>
@@ -700,15 +730,18 @@ function ProjectMeta() {
 }
 
 function ThemeStudio() {
-  const project = useStore((s) => s.project);
+  // project 전체 대신 실제로 쓰는 3개 필드만(narrow) — 아래 참고.
+  const genre = useStore((s) => s.project.genre);
+  const guiTheme = useStore((s) => s.project.guiTheme);
+  const mood = useStore((s) => s.project.mood);
   const update = useStore((s) => s.updateProjectMeta);
   const generateAiTheme = useStore((s) => s.generateAiTheme);
   const clearAiTheme = useStore((s) => s.clearAiTheme);
   const busy = useStore((s) => s.aiThemeBusy);
   const openaiKey = useStore((s) => s.openaiKey);
 
-  const theme = resolveTheme(project.genre, project.guiTheme);
-  const custom = !!project.guiTheme;
+  const theme = resolveTheme(genre, guiTheme);
+  const custom = !!guiTheme;
 
   return (
     <div className="rounded-lg border border-accent/30 bg-accent2/5 p-2.5 flex flex-col gap-2">
@@ -722,7 +755,7 @@ function ThemeStudio() {
         <textarea
           className="field text-xs h-14 resize-y"
           placeholder={'예) 비 내리는 네온 도시, 차가운 사이버펑크\n예) 따뜻한 봄날의 풋풋한 첫사랑'}
-          value={project.mood ?? ''}
+          value={mood ?? ''}
           onChange={(e) => update({ mood: e.target.value })}
         />
       </div>
@@ -758,11 +791,12 @@ const INHERIT_BODY = '__inherit__'; // 이름 폰트 select 의 "본문과 동�
 
 /** 본문(대사)/이름(화자) 폰트 선택 — GCS 매니페스트(src/fonts/fontCatalog.ts)에서 목록을 받아온다. */
 function FontControls() {
-  const project = useStore((s) => s.project);
+  // 이 컴포넌트가 실제로 읽는 건 guiOverrides 하나뿐 — project 전체를 구독할 이유가 없다.
+  const guiOverrides = useStore((s) => s.project.guiOverrides);
   const update = useStore((s) => s.updateProjectMeta);
-  const ov = project.guiOverrides ?? {};
-  const setOv = (patch: Partial<NonNullable<typeof project.guiOverrides>>) =>
-    update({ guiOverrides: { ...(project.guiOverrides ?? {}), ...patch } });
+  const ov = guiOverrides ?? {};
+  const setOv = (patch: Partial<NonNullable<typeof guiOverrides>>) =>
+    update({ guiOverrides: { ...(guiOverrides ?? {}), ...patch } });
 
   const { grouped, customAvailable } = useFontCatalog();
 
@@ -836,12 +870,15 @@ function FontControls() {
 
 /** 대사창 불투명도 · 글자색 · 외곽선 · 이름색 조정(테마 위에 덮어씀). */
 function DialogueGuiControls() {
-  const project = useStore((s) => s.project);
+  // project 전체 대신 실제로 쓰는 3개 필드만.
+  const genre = useStore((s) => s.project.genre);
+  const guiTheme = useStore((s) => s.project.guiTheme);
+  const guiOverrides = useStore((s) => s.project.guiOverrides);
   const update = useStore((s) => s.updateProjectMeta);
-  const theme = resolveTheme(project.genre, project.guiTheme);
-  const ov = project.guiOverrides ?? {};
-  const setOv = (patch: Partial<NonNullable<typeof project.guiOverrides>>) =>
-    update({ guiOverrides: { ...(project.guiOverrides ?? {}), ...patch } });
+  const theme = resolveTheme(genre, guiTheme);
+  const ov = guiOverrides ?? {};
+  const setOv = (patch: Partial<NonNullable<typeof guiOverrides>>) =>
+    update({ guiOverrides: { ...(guiOverrides ?? {}), ...patch } });
 
   const boxColor = ov.dialogueBoxColor ?? '#000000';
   const opacity = ov.dialogueOpacity ?? 0.4; // 내보내기(buildZip) 기본값과 일치시킴

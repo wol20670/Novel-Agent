@@ -12,7 +12,7 @@
 
 import type { Locale } from '../../types';
 
-export interface UiTr {
+interface UiTr {
   ko: string;
   en: string;
   ja: string;

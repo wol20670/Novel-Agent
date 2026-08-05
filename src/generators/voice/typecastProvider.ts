@@ -22,7 +22,7 @@ export interface VoiceSettings {
   volume?: number;
 }
 
-export interface TtsParams {
+interface TtsParams {
   voiceId: string;
   text: string;
   language: Locale;
@@ -34,13 +34,13 @@ export interface TtsParams {
   settings?: VoiceSettings;
 }
 
-export interface TtsResult {
+interface TtsResult {
   blob: Blob;
   seconds: number;
 }
 
 /** GET /v2/voices 한 보이스가 지원하는 모델별 감정 목록(모델마다 지원 감정이 다를 수 있음). */
-export interface TtsVoiceModel {
+interface TtsVoiceModel {
   version: string;
   emotions: string[];
 }

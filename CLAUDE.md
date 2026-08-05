@@ -8,6 +8,8 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 
 ## 명령
 - `npm run dev`(5173) · `npm run build` · `npm run typecheck`(**코드 변경 후 항상**) · `npm run test`(vitest)
+- `npm run gen:lint` — 샘플 대본으로 `.lint-tmp/`에 실제 `.rpy` 생성(+참조 이미지 스텁). 이후 `renpy.exe .lint-tmp lint`. ⚠️ OneDrive에선 산출물은 정상인데 **exit 127로 죽는다**(위 함정) — 파일이 생겼으면 성공이다.
+- `npm run test:e2e` — Playwright 풀 파이프라인(분석→업로드→ZIP 내용 검증). `npm run build && npm run preview`(4173)가 먼저 떠 있어야 한다.
 
 ## 환경 함정 (중요)
 - **Windows node 종료는 PowerShell**: `Get-Process node | Stop-Process -Force`. bash `pkill`/`taskkill`은 자주 실패(좀비 `vite preview`가 옛 빌드를 계속 서빙).
@@ -22,7 +24,10 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 - **메뉴 라벨은 사용자 입력** — `.rpy`로 낼 때 반드시 `escRpyText`(`src/renpy/escape.ts`) 경유. 이스케이프 헬퍼는 순환 import(`generate`↔`screensRpy`)를 피하려 별도 모듈에 있고 `generate.ts`가 재수출한다.
 - **메뉴 글자엔 외곽선이 필요**(`mainMenuUi.textOutline`, 기본 켜짐) — 이미지 버튼 경로에서 좌측 스크림 프레임을 없앴기 때문에 텍스트 메뉴는 업로드 배경 위에 맨몸으로 놓인다. 밝은 아트면 글자가 사라진다(실기 확인).
 - **▶ 등 기호는 이모지 치환 주의** — Ren'Py는 `TwemojiCOLRv0.ttf`를 번들하고 기본 스타일이 `prefer_emoji True`라, U+25B6(이모지 등급 UNQUALIFIED) 같은 문자가 **파란 재생버튼 이모지로 치환**된다. UI 기호엔 스타일에 `emoji_font None`을 줄 것(엔진 자체도 `00director.rpy`에서 같은 관용구 사용). 나눔고딕엔 `▶▷◆★•●`는 있고 `U+25B8·U+2023·U+27A4·✦`는 **없다**(두부).
-- 검증: `scripts/gen-lint.ts`로 출력 생성(esbuild 번들→`node` 실행, OneDrive 밖 cwd 추천) → 실제 `renpy.exe <폴더> lint`(이 PC SDK: **`C:\renpy\renpy-8.5.3-sdk`**). **lint 통과 ≠ 동작** — 화면 변경은 `renpy.exe <폴더>`로 실제 실행해 스크린샷까지 볼 것(테스트용 프로젝트: `C:\renpy\renpy-scene\`).
+- **참조하는 파일은 zip에 반드시 들어가야 한다** — `tests/zip-asset-invariant.test.ts`가 지킨다(`collectProjectFiles` 결과의 `.rpy` 텍스트가 참조하는 `images|gui|fonts|audio/…` 경로가 전부 파일 목록에 있는지 교차 검증, 프리셋·폰트·로케일 매트릭스). **새 에셋 출력 경로를 추가하면 이 테스트 매트릭스에도 추가할 것.** 참조 쪽(`screensRpy`/`guiRpy`)과 배치 쪽(`buildZip`)이 따로 판단하면 안 되고, `buildZip`이 **생성 전에** blob 유무를 확인해 `mainMenuUi`를 가지치기한다(`resolveMainMenuArt` — `adopt*Fonts`와 같은 패턴).
+- **폰트를 하나도 못 구하면 `DejaVuSans.ttf`로 폴백**(엔진 `renpy/common/` 내장, 번들 불필요) — 없는 폰트 파일을 참조해 크래시하느니 한글이 두부로 보여도 켜지는 쪽. `collectProjectFiles`가 `fontFallbackWarning`으로 사용자에게 알린다.
+- 검증: `npm run gen:lint`로 출력 생성 → 실제 `renpy.exe .lint-tmp lint`(이 PC SDK: **`C:\renpy\renpy-8.5.3-sdk`**). **lint 통과 ≠ 동작** — 화면 변경은 `renpy.exe <폴더>`로 실제 실행해 스크린샷까지 볼 것(테스트용 프로젝트: `C:\renpy\renpy-scene\`).
+- **출력 회귀 0 증명법**: 작업 전 커밋에서 `generateRenpyFiles`를 여러 구성(프리셋 5종·그라데이션·i18n·메뉴 이미지)으로 돌려 `.rpy`를 덤프해두고, 작업 후 같은 덤프와 `diff -r`. 리팩터·죽은 코드 제거는 여기서 1바이트도 달라지면 안 된다.
 
 ## 데이터·구조
 - 저장: 프로젝트 메타=localStorage, 바이너리 에셋=IndexedDB — 브라우저별(기기 이동은 앱 📤/📥 `.npproj.zip`), 키도 기기별 재입력.
@@ -30,8 +35,13 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 - 미업로드 에셋은 Canvas 플레이스홀더로 자동 채움 — 단 **BGM은 플레이스홀더 없음**(미업로드 씬은 `play music` 미방출, 파일명 `.mp3` 고정).
 - 메인 메뉴 이미지 GUI(`project.mainMenuUi`): 아무것도 안 올리면 `screens.rpy` 출력이 **바이트 단위로 기존과 동일**해야 한다(회귀 0 — `tests/main-menu-ui.test.ts`가 지킴). 좌표는 1920×1080 기준 px를 `height/1080` 배율로 구움 — **`gui.scale()`(720p 기준)을 쓰지 말 것**.
 - 대사창 그라데이션: 창 높이·글자 보정량은 `dialogueGradientMetrics()`, 색은 `dialogueGradientColor()`(둘 다 `gui/theme.ts`) **단일 소스** — guiRpy(창)와 buildZip(PNG 픽셀 높이)이 어긋나면 Frame이 늘려/줄여 곡선이 뭉개진다. 색 기본값을 검정으로 하드코딩하지 말 것(밝은 테마는 본문 글자가 어두워 안 읽힘 — 실기 확인). 페이드를 늘릴 땐 `name/dialogue_ypos`에 같은 delta를 더해야 글자가 안 밀린다(`style window`는 하단 고정·위로 자람).
-- 협업(src/collab/): Supabase last-write-wins relay(저장마다 600ms 디바운스 push) + 프레즌스, 에코 판정은 세션별 client_id. 방 코드 아는 사람은 누구나 읽기·쓰기(2인 신뢰 전제 — UI 문구에서 빼지 말 것). ⚠️ `projects` 테이블·Storage `assets` 버킷 모두 **RLS on + anon 개방 정책** 필수(정책 없이 RLS만 켜면 400). 전체 SQL=`supabase/setup.sql`(idempotent) — 재구축뿐 아니라 **스키마 바뀌는 버전업 배포 전에도 재실행**(예: client_id 컬럼, 없으면 협업 저장 400).
+- 협업(src/collab/): Supabase last-write-wins relay(저장마다 600ms 디바운스 push) + 프레즌스, 에코 판정은 세션별 client_id. ⚠️ `projects` 테이블·Storage `assets` 버킷 모두 **RLS on + anon 개방 정책** 필수(정책 없이 RLS만 켜면 400). 전체 SQL=`supabase/setup.sql`(idempotent) — 재구축뿐 아니라 **스키마 바뀌는 버전업 배포 전에도 재실행**(예: client_id 컬럼, 없으면 협업 저장 400).
+  - **실제 노출 범위(중요 — "방 코드 아는 사람만"보다 넓다)**: anon 키는 설계상 번들에 구워져 공개된다(`supabaseClient.ts`). RLS 정책이 전부 개방(`true`)이고 Storage 오브젝트 키가 `<assetId>` 평면 구조라 **방 단위 구분이 없다** → 배포 사이트를 열 수 있는 사람은 누구나 `assets` 버킷 전체를 목록 조회·다운로드·업로드·덮어쓰기 할 수 있다. 실질 방어선은 "배포 URL을 모른다" 하나. 2인 사설 도구라 감수한 선택(2026-08-05 사용자 확인) — 뒤집으려면 공개 버킷+SELECT 정책 제거(열거 차단) 또는 Edge 함수 signed URL이 필요. **`service_role` 키는 RLS를 통째로 우회하니 절대 repo·번들에 넣지 말 것.**
+  - Supabase 대시보드가 "Clients can list all files in this bucket / Remove policy"를 띄워도 **그 버튼을 누르면 안 된다** — 버킷이 비공개라 `.download()`가 SELECT 정책을 필요로 해서, 지우는 즉시 에셋 동기화가 400으로 깨진다.
+  - `@supabase/supabase-js`는 **지연 로딩**(`getSupabaseClient()` 안의 동적 import) — 초기 번들에서 ~210KB 분리. 협업이 꺼져 있으면 아예 안 받는다. `supabaseClient.ts`에 최상위 `import`를 되살리지 말 것.
 - 폰트(src/fonts/): GCS 공개 버킷 온디맨드 fetch→IndexedDB 캐시(기본 나눔고딕만 로컬 번들). `guiOverrides.bodyFontId`/`nameFontId`는 gui.rpy(`theme.ts`)와 zip 폰트파일(`buildZip.ts`) **양쪽 일치 필수**(하나만 바꾸면 없는 파일 참조).
+- **zustand 구독은 필드 단위로**(`useStore((s) => s.project.title)`) — `s.project` 통째 구독은 프로젝트가 매번 새 객체라 **무관한 키 입력마다** 그 트리 전체가 재렌더된다. 셀렉터는 렌더 여부와 무관하게 **모든 `set()`마다 전부 재실행**되므로 셀렉터 안에서 `scenes.find(...)` 금지 — `sceneById()`(`store.ts`, `WeakMap<Scene[], Map>` 인덱스)를 쓸 것(150장면×150카드 = 키 입력당 2만 회 비교였다).
+- 에셋 object URL은 `useAssetUrl`의 **ref-count 공유 캐시** 경유 — 같은 blob을 두 컴포넌트가 물어도 URL은 하나. `assetStore`의 삭제/초기화가 `subscribeAssetChange`로 무효화를 통지한다.
 - gitignore: `.secrets/`, `docs/`, `node_modules/`, `dist/`.
 
 ## 워크플로우 (YOU MUST)

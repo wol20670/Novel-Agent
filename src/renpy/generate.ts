@@ -47,7 +47,7 @@ export function extFromMime(mime: string | undefined): 'mp3' | 'wav' {
 }
 
 /** 한글 표정 → Ren'Py 이미지 속성(ASCII). 이미지 attribute 는 ASCII 가 안전. */
-export const EXPR_ATTR: Record<Expression, string> = {
+const EXPR_ATTR: Record<Expression, string> = {
   기본: 'neutral',
   기쁨: 'happy',
   슬픔: 'sad',
@@ -67,7 +67,7 @@ function asciiSlug(s: string): string {
 }
 
 /** 표정 → Ren'Py 속성. 알려진 표정은 고정 매핑, 커스텀은 충돌 없는 슬러그. */
-export function attrFor(expr: Expression): string {
+function attrFor(expr: Expression): string {
   return EXPR_ATTR[expr] ?? `x${asciiSlug(expr)}`;
 }
 
@@ -76,7 +76,7 @@ export function outfitAttrFor(outfit: string): string {
   return outfit === '기본' ? 'base' : `o${asciiSlug(outfit)}`;
 }
 
-export interface SpriteRef {
+interface SpriteRef {
   charId: string; // c_1 …
   charName: string;
   expr: Expression;
@@ -94,7 +94,7 @@ export interface SpriteRef {
  * 대사 줄의 "유효 표정" — 명시 태그가 있으면 그대로, 없으면 문맥에서 추론.
  * 이미지 API 연동 후에는 검수 단계에서 line.emotion 을 미리 채워두면 그 값이 우선한다.
  */
-export function effectiveEmotion(line: Line, scene: Scene): Expression {
+function effectiveEmotion(line: Line, scene: Scene): Expression {
   if (line.kind !== 'dialogue') return '기본';
   return (
     (line.emotion as Expression | undefined) ??
@@ -103,7 +103,7 @@ export function effectiveEmotion(line: Line, scene: Scene): Expression {
 }
 
 /** 캐릭터별로 (인페어런스 포함) 대본에서 실제 쓰이는 표정 집합. 이미지 API 생성 대상 목록이기도 하다. */
-export function expressionPlan(project: Project, ids: Map<string, string>): Map<string, Set<Expression>> {
+function expressionPlan(project: Project, ids: Map<string, string>): Map<string, Set<Expression>> {
   const plan = new Map<string, Set<Expression>>();
   for (const scene of project.scenes) {
     if (scene.status !== 'approved') continue;
@@ -128,7 +128,7 @@ export function charIdMap(project: Project): Map<string, string> {
 }
 
 /** 한 대사 줄을 "화면에 세울 화자 id 목록" 으로. 합동 대사면 멤버 전원, 아니면 화자 1명. */
-export function lineSpeakerIds(line: Line, ids: Map<string, string>): string[] {
+function lineSpeakerIds(line: Line, ids: Map<string, string>): string[] {
   if (line.kind !== 'dialogue') return [];
   if (line.members && line.members.length) {
     return line.members.map((m) => ids.get(m)).filter((x): x is string => !!x);
@@ -138,7 +138,7 @@ export function lineSpeakerIds(line: Line, ids: Map<string, string>): string[] {
 }
 
 /** 합동 대사 화자(둘 이상 동시) — 이름표 묶음용 Character. 멤버는 실제 캐릭터를 그대로 공유한다. */
-export interface JointSpeaker {
+interface JointSpeaker {
   id: string; // cj_1 …
   label: string; // "한지수 & 강민주"
   members: string[];
@@ -146,7 +146,7 @@ export interface JointSpeaker {
 }
 
 /** 승인 장면에 등장하는 합동 대사 라벨 → JointSpeaker. 같은 라벨은 한 번만 정의된다. */
-export function resolveJointSpeakers(project: Project): Map<string, JointSpeaker> {
+function resolveJointSpeakers(project: Project): Map<string, JointSpeaker> {
   const slug = new SlugMap('cj');
   const colorByName = new Map(project.characters.map((c) => [c.name, c.color]));
   const out = new Map<string, JointSpeaker>();
@@ -172,7 +172,7 @@ export function resolveJointSpeakers(project: Project): Map<string, JointSpeaker
  * → 대사에 따라 표정이 자동 전환된다(미설정 표정은 빌더가 Canvas/AI 로 채움).
  * 스프라이트를 전혀 설정하지 않은 캐릭터는 화면에 세우지 않는다(대사만).
  */
-export function resolveSprites(
+function resolveSprites(
   project: Project,
   ids: Map<string, string>,
   plan: Map<string, Set<Expression>> = expressionPlan(project, ids),
@@ -230,7 +230,7 @@ export function resolveSprites(
 }
 
 /** "감상한 CG" 갤러리 항목 — 태그(assets.rpy/script.rpy 와 공유) + 갤러리 표시용 캡션. */
-export interface CgRef {
+interface CgRef {
   tag: string;
   caption: string;
 }
@@ -241,7 +241,7 @@ export interface CgRef {
  * 같은 CG(같은 태그)가 여러 장면에 쓰여도 한 번만, 첫 등장 순서로 수집. 캡션은 그 CG 의 설명
  * (#CG 뒤 텍스트), 비어 있으면 장면 제목으로 대체한다.
  */
-export function resolveCgs(refs: SceneAssetRef[]): CgRef[] {
+function resolveCgs(refs: SceneAssetRef[]): CgRef[] {
   const seen = new Map<string, CgRef>();
   for (const ref of refs) {
     ref.cgTags.forEach((tag, i) => {
@@ -254,7 +254,7 @@ export function resolveCgs(refs: SceneAssetRef[]): CgRef[] {
 }
 
 /** 승인 장면의 에셋 참조. 배경/BGM/CG 는 "이름(의미)" 기준으로 공유된다(같은 이름 = 같은 파일). */
-export interface SceneAssetRef {
+interface SceneAssetRef {
   scene: Scene;
   ordinal: number; // 1-based, 승인 장면 순서
   label: string; // scene_1 (장면은 고유)
@@ -277,7 +277,7 @@ export function hasBgm(s: Scene): boolean {
 }
 
 /** 아이템(소품) 팝업 참조 — 이름 기준 공유(같은 이름 = 같은 이미지 1장). */
-export interface ItemRef {
+interface ItemRef {
   name: string;
   tag: string; // item_1 … (Ren'Py image 이름이자 persistent.item_found 키)
   file: string; // item_1.png
@@ -303,6 +303,17 @@ export function resolveItems(project: Project): ItemRef[] {
 
 const indent = (n: number) => '    '.repeat(n);
 
+/**
+ * `# ...` 코멘트에 사용자 텍스트(장면 제목·연출 메모 등)를 실을 때 개행·제어문자를 공백 하나로
+ * 접는다. 코멘트는 esc()(따옴표·%·[/{ 이스케이프) 대상인 문자열 리터럴이 아니라 "그 줄 전체가
+ * 주석"이라는 것만 보장하면 되는데, 안 접으면(예: Excel 에서 복붙한 제목의 줄바꿈) 개행 뒤 텍스트가
+ * '#' 없는 날것 줄로 script.rpy 에 섞여 들어가 문법 오류로 죽는다 — esc() 를 안 거치는 유일한 사용자
+ * 텍스트 삽입 경로라 별도 헬퍼로 막는다.
+ */
+function commentSafe(s: string): string {
+  return s.replace(/[\x00-\x1f\x7f]+/g, ' ').trim();
+}
+
 // 이스케이프 헬퍼(esc/escRpyText/escLit)는 src/renpy/escape.ts 로 옮겼다 — screensRpy.ts 가
 // escRpyText 를 쓰면서 generate.ts → gui/index.ts → screensRpy.ts → generate.ts 순환 import 가
 // 생겼던 걸 없애기 위함(escape.ts 는 어느 쪽도 import 하지 않는 잎 모듈). 여기서는 기존 호출부
@@ -315,7 +326,7 @@ import { esc, escRpyText, escLit } from './escape';
  * 같은 이름을 쓰는 여러 장면이 **같은 파일을 공유**한다(생성 1회 + 시각 일관성).
  * zip 빌더가 동일 함수로 파일명을 안다.
  */
-export function resolveSceneAssets(project: Project): SceneAssetRef[] {
+function resolveSceneAssets(project: Project): SceneAssetRef[] {
   const approved = project.scenes.filter((s) => s.status === 'approved');
   const bgSlugs = new SlugMap('bg');
   const bgmSlugs = new SlugMap('bgm');
@@ -417,7 +428,7 @@ function assetDefs(refs: SceneAssetRef[], sprites: SpriteRef[], items: ItemRef[]
  * N명을 가로 0~100 스케일로 배치한 중심 좌표(%).
  * 1명=가운데(50), 2명=35·70, 3명+=균등 분배.
  */
-export function spreadPositions(n: number): number[] {
+function spreadPositions(n: number): number[] {
   if (n <= 1) return [50];
   if (n === 2) return [30, 70]; // 좌·우 대칭(양끝에서 30)
   return Array.from({ length: n }, (_, i) => Math.round(((i + 0.5) / n) * 100));
@@ -431,7 +442,10 @@ export function spreadPositions(n: number): number[] {
  * 때마다(점진적으로 커지는 order 로) 다시 호출해, 혼자일 땐 중앙 → 2번째 등장 시 고정 위치로
  * 스냅 이동하는 게 자연히 성립한다.
  */
-function arrangePositions(
+// export: ScenePlayer(미리보기)가 같은 배치 규칙을 그대로 재사용한다(CLAUDE.md 함정 —
+// 예전엔 ScenePlayer 가 spreadPositions 만 불러 side 를 완전히 무시했다: side:'right' 고정
+// 캐릭터가 미리보기에선 왼쪽에, 실제 생성 게임에선 오른쪽에 서는 불일치가 있었음).
+export function arrangePositions(
   order: string[],
   sideById: Map<string, 'left' | 'right' | 'auto'>,
 ): Map<string, number> {
@@ -518,7 +532,7 @@ function scriptBody(
     // 중앙, 2번째가 등장하는 순간 arrangePositions 로 다시 배치해 이미 서 있던 캐릭터도 스냅 이동.
     const revealedOrder: string[] = [];
     let currentPos = new Map<string, number>();
-    out.push(`# ── ${s.title} ──`);
+    out.push(`# ── ${commentSafe(s.title)} ──`);
     out.push(`label ${r.label}:`);
     out.push(`${indent(1)}scene ${r.bgTag} at vn_bg with ${transition}`);
     if (r.bgmFile) out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
@@ -530,7 +544,7 @@ function scriptBody(
       out.push(`${indent(1)}scene ${r.cgTags[0]}_scene with dissolve`);
       cgActive = true;
     }
-    if (s.direction.length) out.push(`${indent(1)}# 연출: ${s.direction.join(' / ')}`);
+    if (s.direction.length) out.push(`${indent(1)}# 연출: ${commentSafe(s.direction.join(' / '))}`);
 
     // 아이템 팝업은 화면(screen)으로 띄운다. 장면을 넘어가면 남지 않도록 장면 끝에서 반드시 닫는다.
     let itemOpen = false;
@@ -992,8 +1006,27 @@ function buildMainMenuPlan(project: Project, hasItems: boolean, hasCg: boolean):
   };
 }
 
+/**
+ * buildZip 이 "이 폰트 슬롯은 blob 을 하나도 못 구했다"(커스텀 실패 + 대체용 기본 폰트마저 실패)를
+ * 알려주는 신호 — src/zip/buildZip.ts 의 selectedFontFiles 가 실제 다운로드 결과를 보고 채운다.
+ * true 인 슬롯은 fontGamePath(= "fonts/…", game/fonts/ 번들 필요) 대신 Ren'Py 엔진에 내장된
+ * DejaVuSans.ttf(번들 불필요, 항상 존재)를 쓴다 — 없는 파일을 참조해 메인 메뉴/대사창에서 즉시
+ * 크래시하는 것보다, 한글이 두부(□)로 보여도 게임이 켜지는 쪽이 낫다는 선택.
+ */
+interface FontFallback {
+  /** 본문·이름·인터페이스 폰트(gui.text_font/name_text_font/interface_text_font) 전부 대상. */
+  body?: boolean;
+  /** 메인 메뉴 버튼 텍스트(주). */
+  menu?: boolean;
+  /** 메인 메뉴 버튼 텍스트(부). */
+  menuSub?: boolean;
+}
+
 /** Ren'Py 텍스트 파일 전체를 생성한다. */
-export function generateRenpyFiles(project: Project): {
+export function generateRenpyFiles(
+  project: Project,
+  fontFallback?: FontFallback,
+): {
   files: RenpyFile[];
   refs: SceneAssetRef[];
   sprites: SpriteRef[];
@@ -1010,7 +1043,13 @@ export function generateRenpyFiles(project: Project): {
   const plan = expressionPlan(project, ids);
   const sprites = resolveSprites(project, ids, plan);
   const joints = resolveJointSpeakers(project);
-  const theme = withGuiOverrides(resolveTheme(project.genre, project.guiTheme), project.guiOverrides);
+  let theme = withGuiOverrides(resolveTheme(project.genre, project.guiTheme), project.guiOverrides);
+  if (fontFallback?.body) {
+    // 본문 폰트를 아무것도 못 구한 경우(폰트 프로바이더 전면 실패) — gui.rpy 가 game/fonts/ 에 없는
+    // 파일(NanumGothic.ttf 등)을 참조하면 Ren'Py 가 즉시 크래시한다. DejaVuSans.ttf 는 game/fonts/
+    // 에 없어도 항상 로드된다(엔진 common 내장, buildZip 이 번들할 필요 없음).
+    theme = { ...theme, textFont: 'DejaVuSans.ttf', nameFont: 'DejaVuSans.ttf', interfaceFont: 'DejaVuSans.ttf' };
+  }
 
   // 다국어: 자막 언어 2개 이상이면 tl 파일·선택 UI, 음성 언어가 있으면 voices.rpy·음성 선택 UI 를 낸다.
   const textLocales = effectiveTextLocales(project);
@@ -1022,10 +1061,17 @@ export function generateRenpyFiles(project: Project): {
 
   // 메인 메뉴 버튼 텍스트 폰트(주/부) — mainMenuUi 전용 필드(guiOverrides 가 아님). 미지정이면
   // 주=이미 계산된 본문 폰트(theme.textFont, guiOverrides.bodyFontId 반영분), 부=주 폰트를 따라간다.
-  const menuTextFont = project.mainMenuUi?.menuFontId ? fontGamePath(project.mainMenuUi.menuFontId) : theme.textFont;
-  const menuSubTextFont = project.mainMenuUi?.menuSubFontId
-    ? fontGamePath(project.mainMenuUi.menuSubFontId)
-    : menuTextFont;
+  // fontFallback.menu/menuSub 는 위 body 케이스와 같은 이유로 각각 독립적으로 DejaVuSans.ttf 로 대체한다.
+  const menuTextFont = fontFallback?.menu
+    ? 'DejaVuSans.ttf'
+    : project.mainMenuUi?.menuFontId
+      ? fontGamePath(project.mainMenuUi.menuFontId)
+      : theme.textFont;
+  const menuSubTextFont = fontFallback?.menuSub
+    ? 'DejaVuSans.ttf'
+    : project.mainMenuUi?.menuSubFontId
+      ? fontGamePath(project.mainMenuUi.menuSubFontId)
+      : menuTextFont;
 
   const files: RenpyFile[] = [
     { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules, project.guiOverrides?.characterScale) },

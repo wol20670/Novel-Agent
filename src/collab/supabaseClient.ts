@@ -8,7 +8,7 @@
 //
 // ⚠️ 보안 경계 아님: 방 코드를 아는 사람은 누구나 읽고 쓸 수 있다(2인 신뢰 전제).
 
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export interface CollabConfig {
   room: string;
@@ -24,6 +24,11 @@ const LS = {
 
 let config: CollabConfig = { room: '', displayName: '', enabled: false };
 let client: SupabaseClient | null = null;
+// 클라이언트 생성 중(동적 import + createClient) 을 가리키는 in-flight promise — 동시에 여러
+// 호출자(pushProject/pullProjectOnce/subscribeProject/startPresence 등)가 거의 같은 타이밍에
+// getSupabaseClient() 를 부르면 이 promise 를 공유해 createClient 가 두 번 실행되는 걸 막는다
+// (두 번 실행되면 "Multiple GoTrueClient instances" 경고가 다시 생김 — 아래 싱글턴 설명 참고).
+let clientPromise: Promise<SupabaseClient> | null = null;
 
 /** localStorage 에서 협업 설정을 읽어온다(앱 시작 시 hydrate 에서 호출). */
 export function loadCollabConfig(): CollabConfig {
@@ -57,7 +62,7 @@ export function getCollabConfig(): CollabConfig {
 }
 
 /** 빌드에 내장된 Supabase 접속 정보. */
-export function getEnvCredentials(): { url: string; anonKey: string } {
+function getEnvCredentials(): { url: string; anonKey: string } {
   return {
     url: (import.meta.env.VITE_SUPABASE_URL ?? '').trim(),
     anonKey: (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim(),
@@ -87,17 +92,28 @@ export function roomKey(): string {
  * 새로 등록해 "Multiple GoTrueClient instances" 경고가 재연결할수록 계속 쌓인다(예전엔 재연결마다
  * 클라이언트를 null 로 지우고 다시 만들어서 이 문제가 있었음 — 이제 resetSupabaseChannels 는
  * 채널만 정리, 클라이언트는 그대로 둠). 준비 안 됐으면 null.
+ *
+ * `@supabase/supabase-js`(GoTrueClient+realtime-js 포함 ~130KB)는 협업을 켠 사용자만 필요하고
+ * 기본값은 꺼짐이라, 여기서 동적 import 해 별도 청크로 분리한다(이 함수를 부르지 않으면 그 청크는
+ * 아예 안 받아짐). isCollabReady()/hasEnvCredentials() 는 동기 유지 — 그건 순수 설정값 체크라
+ * supabase-js 를 끌고 올 필요가 없다.
  */
-export function getSupabaseClient(): SupabaseClient | null {
+export async function getSupabaseClient(): Promise<SupabaseClient | null> {
   if (!isCollabReady()) return null;
-  if (!client) {
-    const { url, anonKey } = getEnvCredentials();
-    // 협업은 로그인을 안 하는 anon 전용 사용이라 세션 저장이 불필요.
-    client = createClient(url, anonKey, {
-      auth: { persistSession: false, autoRefreshToken: false, storageKey: 'na-collab-noauth' },
-    });
+  if (client) return client;
+  if (!clientPromise) {
+    clientPromise = (async () => {
+      const { createClient } = await import('@supabase/supabase-js');
+      const { url, anonKey } = getEnvCredentials();
+      // 협업은 로그인을 안 하는 anon 전용 사용이라 세션 저장이 불필요.
+      const created = createClient(url, anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false, storageKey: 'na-collab-noauth' },
+      });
+      client = created;
+      return created;
+    })();
   }
-  return client;
+  return clientPromise;
 }
 
 /** 방/설정을 바꿔 재연결할 때 기존 Realtime 채널만 정리한다(클라이언트 자체는 재사용 — 위 참고). */

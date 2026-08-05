@@ -109,16 +109,18 @@ export default function VoiceLab({
   const [volume, setVolume] = useState(char.voice?.settings?.volume ?? 100);
 
   // character 모드 미리듣기 텍스트 — 이 캐릭터의 첫 단일화자 대사로 프리필, 없으면 예시 문장.
-  const project = useStore((s) => s.project);
-  const firstLine = (() => {
-    for (const sc of project.scenes) {
+  // 이 스캔은 오직 useState 의 "최초 마운트 값"에만 쓰이는데, 예전엔 project 를 구독해두고 매
+  // 렌더마다 IIFE 로 전체 장면·라인을 훑었다(패널이 열려 있는 동안 다른 상태 변경에도 반복 실행).
+  // 지연 초기화 함수(useState(() => ...))로 바꾸면 마운트 시 딱 1번만 돌고, getState() 로 그
+  // 순간의 값만 읽으면 되므로 project 구독 자체가 필요 없어진다(재렌더 유발 요인 하나 제거).
+  const [previewText, setPreviewText] = useState(() => {
+    for (const sc of useStore.getState().project.scenes) {
       for (const l of sc.lines) {
         if (l.kind === 'dialogue' && l.speaker === char.name && !l.members?.length && l.text.trim()) return l.text;
       }
     }
-    return '';
-  })();
-  const [previewText, setPreviewText] = useState(firstLine || '안녕하세요, 만나서 반가워요.');
+    return '안녕하세요, 만나서 반가워요.';
+  });
   const [fromCache, setFromCache] = useState(false);
 
   const [voices, setVoices] = useState<TtsVoice[]>([]);

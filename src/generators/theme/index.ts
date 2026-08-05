@@ -8,13 +8,13 @@ import { PRESETS } from '../../renpy/gui/theme';
 import { buildTheme, seededVariation } from './buildTheme';
 import { openaiTheme } from './openaiTheme';
 
-export interface GenerateThemeArgs {
+interface GenerateThemeArgs {
   project: Project;
   mood?: string;
   apiKey?: string;
 }
 
-export interface GeneratedTheme {
+interface GeneratedTheme {
   theme: GuiTheme;
   source: 'ai' | 'offline';
   /** 표시용 메모(컨셉 설명 또는 폴백 사유). */
@@ -22,7 +22,7 @@ export interface GeneratedTheme {
 }
 
 /** 파싱된 장면에서 짧은 시놉시스(제목+장면제목+앞부분 대사)를 만든다. */
-export function buildSynopsis(project: Project, maxLen = 700): string {
+function buildSynopsis(project: Project, maxLen = 700): string {
   const parts: string[] = [];
   for (const s of project.scenes) {
     parts.push(`# ${s.title}`);

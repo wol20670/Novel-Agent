@@ -21,7 +21,7 @@ export function setAssetPushStatusHandler(handler: PushStatusHandler | null): vo
 
 /** 로컬 업로드 직후 Storage 에도 올린다. collab 미준비면 조용히 no-op(로컬 동작엔 영향 없음). */
 export async function pushAsset(id: string, blob: Blob): Promise<void> {
-  const supabase = getSupabaseClient();
+  const supabase = await getSupabaseClient();
   if (!supabase) return;
   const { error } = await supabase.storage.from(BUCKET).upload(id, blob, {
     upsert: true,
@@ -46,7 +46,7 @@ const inFlight = new Map<string, Promise<Blob | undefined>>();
 export async function ensureAsset(id: string): Promise<Blob | undefined> {
   const local = await getAsset(id);
   if (local) return local;
-  const supabase = getSupabaseClient();
+  const supabase = await getSupabaseClient();
   if (!supabase) return undefined;
   const existing = inFlight.get(id);
   if (existing) return existing;

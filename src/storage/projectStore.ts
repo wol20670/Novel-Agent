@@ -9,6 +9,13 @@ const ASSETS_KEY = 'novel-agent:assets';
 // 있다는 조기 경고 기준선(문자 수 기준, UTF-16 이라 바이트 수와는 다르지만 대략적인 가늠으로 충분).
 const SIZE_WARN_THRESHOLD = 3_000_000;
 
+// assets 메타는 업로드/삭제 때만(에셋 개수만큼, ~100개 규모) 바뀐다 — 반면 자동저장은 대사 한 글자
+// 수정처럼 project 만 바뀌는 경우가 훨씬 잦다. store.ts 는 assets 갱신 시 항상 새 객체({ ...prev, ... })
+// 를 만들므로(불변 업데이트 관례) 참조 동일성으로 "진짜 안 바뀜"을 안전하게 판정할 수 있다 — 참조가
+// 지난 저장과 같으면 캐시된 직렬화 결과를 재사용해 매 저장마다 JSON.stringify(assets) 를 반복하지 않는다.
+let lastAssets: Record<string, AssetMeta> | null = null;
+let lastAssetsRaw: string | null = null;
+
 /**
  * 프로젝트 메타데이터를 저장한다. ASSETS 를 먼저 쓰고 PROJECT 를 나중에 쓴다 — 프로젝트가 자기보다
  * 오래된 에셋 맵을 참조하는 상태(저장 중간에 실패했을 때)를 피하려고 에셋을 먼저 쓴다.
@@ -16,7 +23,14 @@ const SIZE_WARN_THRESHOLD = 3_000_000;
  * 경고하는 데 쓴다. 쿼터 초과 자체는 기존과 동일하게 예외를 던진다(호출측이 처리).
  */
 export function saveProject(project: Project, assets: Record<string, AssetMeta>): boolean {
-  const assetsRaw = JSON.stringify(assets);
+  let assetsRaw: string;
+  if (assets === lastAssets && lastAssetsRaw !== null) {
+    assetsRaw = lastAssetsRaw;
+  } else {
+    assetsRaw = JSON.stringify(assets);
+    lastAssets = assets;
+    lastAssetsRaw = assetsRaw;
+  }
   const projectRaw = JSON.stringify(project);
   try {
     localStorage.setItem(ASSETS_KEY, assetsRaw);

@@ -2,10 +2,11 @@
 // 텍스트 .rpy 는 generate.ts, 바이너리는 IndexedDB 의 생성 에셋을 쓰되
 // 아직 생성되지 않은 배경/CG/BGM 은 즉석 폴백(Canvas/합성)으로 채워 실행 가능한 ZIP 을 보장한다.
 
-import type { Project } from '../types';
+import type { Project, MenuButtonSlot, MenuButtonState } from '../types';
 import { effectiveTextLocales, effectiveVoiceLocales, MAIN_MENU_SLOTS, MENU_BUTTON_STATES, menuButtonFile, TITLE_LOGO_FILE } from '../types';
 import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName, extFromMime } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
+import { sanitizeAscii } from '../project/safeName';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
 import { menuBackdropPng, solidPng, buttonBgAssets, textboxGradientPng, roundedPillPng, quickPillAssets } from '../generators/image/canvasMenu';
@@ -18,20 +19,6 @@ import {
 } from '../renpy/gui';
 import { loadFontCatalog, fontById, DEFAULT_FONT } from '../fonts/fontCatalog';
 import { ensureFontBlob, ensureFontLicense } from '../fonts/fontCache';
-
-async function blobForBackground(
-  assetId: string | undefined,
-  prompt: string,
-  label: string,
-  w: number,
-  h: number,
-): Promise<Blob> {
-  if (assetId) {
-    const existing = await getAsset(assetId);
-    if (existing) return existing;
-  }
-  return canvasImage(prompt, label, w, h);
-}
 
 // BGM 은 이제 업로드본만 있다(생성 폴백 없음) — generate.ts 가 bgmAssetId 없는 장면은
 // bgmFile 자체를 만들지 않으므로, 여기 도달하는 항목은 항상 assetId 를 가진다(방어적으로만 체크).
@@ -93,15 +80,17 @@ async function trimSpriteMargins(blob: Blob): Promise<Blob> {
   }
 }
 
-export interface ZipResult {
+interface ZipResult {
   blob: Blob;
   filename: string;
   /** 폴백으로 즉석 생성된 에셋 수(사용자 안내용). */
   placeholders: number;
+  /** 폰트를 하나도 못 구해 DejaVuSans.ttf 로 대체된 경우의 사용자 안내 문구(정상이면 undefined). */
+  fontFallbackWarning?: string;
 }
 
 /** Ren'Py 프로젝트의 모든 파일(텍스트+바이너리). path 는 프로젝트 루트 기준. */
-export interface ProjectFile {
+interface ProjectFile {
   path: string;
   data: string | Blob;
 }
@@ -112,7 +101,7 @@ export interface ProjectFile {
  */
 export async function collectProjectFiles(
   project: Project,
-): Promise<{ files: ProjectFile[]; placeholders: number }> {
+): Promise<{ files: ProjectFile[]; placeholders: number; fontFallbackWarning?: string }> {
   // generateRenpyFiles 가 gui.rpy 를 만들며 폰트 경로(fontGamePath)를 동기로 조회하므로, 그 전에
   // 매니페스트를 반드시 채워둬야 한다 — 안 그러면 커스텀 폰트를 골랐어도 카탈로그가 비어 있어
   // 조용히 기본 폰트 경로로 생성되고, 뒤의 selectedFontFiles 는 카탈로그가 찬 뒤라 실제 커스텀
@@ -128,13 +117,21 @@ export async function collectProjectFiles(
     effectiveTextLocales(project).includes('ja') || effectiveVoiceLocales(project).includes('ja');
   const fontResult = await selectedFontFiles(project.guiOverrides, project.mainMenuUi, japanese);
   const effectiveGuiOverrides = adoptGuiOverrideFonts(project.guiOverrides, fontResult.adoptedIds);
-  const effectiveMainMenuUi = adoptMainMenuUiFonts(project.mainMenuUi, fontResult.adoptedIds);
+  const mainMenuUiWithFonts = adoptMainMenuUiFonts(project.mainMenuUi, fontResult.adoptedIds);
+  // 폰트와 같은 이유로, 메뉴 버튼/로고도 blob 이 실제로 있는 것만 남도록 gui.rpy 생성 전에
+  // 미리 가지치기한다(resolveMainMenuArt, 위 — adopt*Fonts 와 동일 패턴). blobs 는 아래 파일
+  // 목록 조립부가 재사용해 같은 assetId 로 getAsset 을 두 번 부르지 않는다.
+  const { mainMenuUi: effectiveMainMenuUi, blobs: menuArtBlobs } = await resolveMainMenuArt(mainMenuUiWithFonts);
   const effectiveProject: Project =
     effectiveGuiOverrides === project.guiOverrides && effectiveMainMenuUi === project.mainMenuUi
       ? project
       : { ...project, guiOverrides: effectiveGuiOverrides, mainMenuUi: effectiveMainMenuUi };
 
-  const { files: textFiles, refs, sprites } = generateRenpyFiles(effectiveProject);
+  // fontResult.unresolved: 커스텀 폰트뿐 아니라 대체용 기본 폰트(나눔고딕)까지 못 구한 경우 —
+  // gui.rpy 가 game/fonts/ 에 없는 파일을 참조하지 않도록 generateRenpyFiles 에 신호를 넘긴다
+  // (fontFallback, generate.ts — DejaVuSans.ttf 로 대체). 정상 케이스(전부 성공)는 세 값 모두
+  // false 라 generateRenpyFiles 동작이 기존과 완전히 같다(회귀 0).
+  const { files: textFiles, refs, sprites } = generateRenpyFiles(effectiveProject, fontResult.unresolved);
   const out: ProjectFile[] = textFiles.map((f) => ({ path: f.path, data: f.content }));
 
   let placeholders = fontResult.placeholders;
@@ -192,9 +189,11 @@ export async function collectProjectFiles(
   }
 
   for (const [file, p] of bgByFile) {
-    const had = !!p.assetId && !!(await getAsset(p.assetId));
-    const bg = await blobForBackground(p.assetId, p.prompt, p.label, project.width, project.height);
-    if (!had) placeholders++;
+    // 예전엔 "있는지"(had)와 "가져오기"(blobForBackground 내부)가 각각 getAsset 을 불러 같은
+    // assetId 를 두 번 읽었다 — 한 번만 읽고 결과로 분기(placeholders 카운트 의미는 동일).
+    const existing = p.assetId ? await getAsset(p.assetId) : undefined;
+    const bg = existing ?? (await canvasImage(p.prompt, p.label, project.width, project.height));
+    if (!existing) placeholders++;
     out.push({ path: `game/images/${file}`, data: bg });
   }
   for (const [file, p] of cgByFile) {
@@ -227,11 +226,19 @@ export async function collectProjectFiles(
       }
     });
   }
-  for (const job of voiceJobs) {
-    const blob = await getAsset(job.assetId);
-    if (!blob) continue; // 없으면 건너뜀(vo() 가 무음 폴백)
-    const ext = extFromMime(blob.type);
-    out.push({ path: `game/voices/${job.locale}/${job.base}.${ext}`, data: blob });
+  // getAsset 은 건마다 독립 IndexedDB 트랜잭션이라(assetStore.ts), 성우가 빽빽한 대본은 순차 호출 시
+  // 수천 회 왕복이 압축 시작 전에 직렬로 쌓인다 — 50개씩 묶어 병렬로 읽되, 청크는 순차 처리하고
+  // 청크 내부도 job 순서 그대로 push해 파일 목록 순서(=기존 순차 루프 출력)를 그대로 보존한다.
+  const VOICE_READ_CHUNK = 50;
+  for (let i = 0; i < voiceJobs.length; i += VOICE_READ_CHUNK) {
+    const chunk = voiceJobs.slice(i, i + VOICE_READ_CHUNK);
+    const blobs = await Promise.all(chunk.map((job) => getAsset(job.assetId)));
+    chunk.forEach((job, idx) => {
+      const blob = blobs[idx];
+      if (!blob) return; // 없으면 건너뜀(vo() 가 무음 폴백)
+      const ext = extFromMime(blob.type);
+      out.push({ path: `game/voices/${job.locale}/${job.base}.${ext}`, data: blob });
+    });
   }
 
   // 아이템(소품) 팝업 이미지 — 이름 기준 공유. assetId 있으면 그 blob, 없으면 Canvas placeholder.
@@ -260,19 +267,21 @@ export async function collectProjectFiles(
   // 메인 메뉴 이미지 GUI(업로드 전용) — 업로드된 버튼·로고만 배치한다. 미업로드 버튼은 선택 기능이라
   // placeholder 카운트를 올리지 않는다("임시 에셋 N개 포함" 경고를 이 선택 기능으로 오염시키지 않기 위함).
   // 경로는 반드시 types.ts 의 menuButtonFile/TITLE_LOGO_FILE 로 만든다(screensRpy 도 같은 헬퍼 사용 —
-  // 어긋나면 없는 파일을 참조해 런타임 크래시가 난다).
+  // 어긋나면 없는 파일을 참조해 런타임 크래시가 난다). effectiveMainMenuUi 는 이미 resolveMainMenuArt
+  // 가 blob 없는 상태/로고를 걸러낸 뒤라 여기 남아있는 assetId 는 항상 menuArtBlobs 에 있다(같은
+  // assetId 로 getAsset 을 또 부르지 않고 위에서 이미 읽은 blob 을 재사용).
   for (const slot of MAIN_MENU_SLOTS) {
     for (const state of MENU_BUTTON_STATES) {
       if (!state.renpySupported) continue; // press — 저장돼 있어도(구버전 잔존 등) 출력하지 않는다.
-      const assetId = project.mainMenuUi?.buttons?.[slot.id]?.[state.id];
+      const assetId = effectiveMainMenuUi?.buttons?.[slot.id]?.[state.id];
       if (!assetId) continue;
-      const blob = await getAsset(assetId);
-      if (!blob) continue;
+      const blob = menuArtBlobs.get(assetId);
+      if (!blob) continue; // 방어적(resolveMainMenuArt 를 거쳤으면 항상 있어야 함).
       out.push({ path: `game/${menuButtonFile(slot.id, state.id)}`, data: blob });
     }
   }
-  if (project.mainMenuUi?.logo) {
-    const blob = await getAsset(project.mainMenuUi.logo);
+  if (effectiveMainMenuUi?.logo) {
+    const blob = menuArtBlobs.get(effectiveMainMenuUi.logo);
     if (blob) out.push({ path: `game/${TITLE_LOGO_FILE}`, data: blob });
   }
 
@@ -307,18 +316,26 @@ export async function collectProjectFiles(
   // 한글·일본어 폰트 파일(game/fonts/)은 위에서 gui.rpy 생성 전에 이미 확보해 out 에 담아뒀다
   // (fontResult) — placeholders 도 이미 그 값으로 초기화됨.
 
-  return { files: out, placeholders };
+  // 폰트를 하나도 못 구해 DejaVuSans.ttf(엔진 내장)로 대체된 경우 — placeholders 카운트("임시 에셋
+  // N개 포함")는 이미지 placeholder 용 지표라 이 경고를 섞으면 성격이 다른 문제(한글이 아예 안 보일
+  // 수 있음)가 묻힌다. 조용히 넘어가지 않도록 별도 필드로 명시적으로 알린다(호출 측이 토스트 등으로
+  // 노출하면 됨 — placeholders 와 같은 "결과에 실어 보내는" 컨벤션).
+  const fontFallbackWarning = fontResult.unresolved.body
+    ? '본문/이름 폰트를 하나도 구하지 못해 Ren\'Py 기본 폰트(DejaVuSans)로 대체했습니다 — 한글이 빈 네모(두부)로 보일 수 있습니다. 네트워크 상태를 확인한 뒤 다시 내보내 보세요.'
+    : undefined;
+
+  return { files: out, placeholders, fontFallbackWarning };
 }
 
 export async function buildRenpyZip(project: Project): Promise<ZipResult> {
   const { default: JSZip } = await import('jszip'); // 지연 로딩(초기 번들 경량화)
-  const { files, placeholders } = await collectProjectFiles(project);
+  const { files, placeholders, fontFallbackWarning } = await collectProjectFiles(project);
   const zip = new JSZip();
   for (const f of files) zip.file(f.path, f.data);
 
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-  const safeName = (project.title || 'visual-novel').replace(/[^\w가-힣-]+/g, '_').slice(0, 40);
-  return { blob, filename: `${safeName}_renpy.zip`, placeholders };
+  const safeName = sanitizeAscii(project.title, 40, 'visual-novel');
+  return { blob, filename: `${safeName}_renpy.zip`, placeholders, fontFallbackWarning };
 }
 
 /**
@@ -342,7 +359,18 @@ async function selectedFontFiles(
   guiOverrides: Project['guiOverrides'],
   mainMenuUi: Project['mainMenuUi'],
   includeJapanese: boolean,
-): Promise<{ files: ProjectFile[]; placeholders: number; adoptedIds: Map<string, string> }> {
+): Promise<{
+  files: ProjectFile[];
+  placeholders: number;
+  adoptedIds: Map<string, string>;
+  /**
+   * 슬롯별로 blob 을 "하나도" 못 구했는지(커스텀 실패 → 기본 폰트 대체 시도까지 실패) —
+   * generate.ts 의 FontFallback 으로 그대로 넘겨 gui.rpy 가 DejaVuSans.ttf(번들 불필요)를
+   * 참조하게 한다. adoptedIds 만으로는 이 케이스를 구분할 수 없다(대체 실패해도 actual 은
+   * 여전히 DEFAULT_FONT 로 세팅되어 있어 "정상 대체"와 구별이 안 됨 — 그래서 별도 필드로 뺐다).
+   */
+  unresolved: { body: boolean; menu: boolean; menuSub: boolean };
+}> {
   // 호출 측(collectProjectFiles)이 gui.rpy 생성 전에 이미 로드해두지만, 이 함수만 독립 호출될 가능성도
   // 방어(loadFontCatalog 는 캐시돼 있으면 즉시 반환이라 비용 없음).
   await loadFontCatalog();
@@ -398,7 +426,17 @@ async function selectedFontFiles(
   if (licenseRes?.ok) files.push({ path: 'game/fonts/OFL.txt', data: await licenseRes.text() });
   if (jpRes?.ok) files.push({ path: 'game/fonts/SourceHanSansLite.ttf', data: await jpRes.blob() });
 
-  return { files, placeholders, adoptedIds };
+  // bodyId/nameId 는 항상 함께 실패한다고 가정하지 않고 각각 확인한다(대사 이름 폰트만 따로 지정해
+  // 그것만 실패하는 경우도 이론상 가능) — 하나라도 blob 을 못 구했으면 body 전체(본문+이름+인터페이스,
+  // generate.ts 에서 함께 대체)를 DejaVuSans.ttf 폴백 대상으로 잡는다(둘을 갈라 쓰는 것보다 안전).
+  const gotBlob = (id: string) => resolved.some((r) => r.requestedId === id && r.blob);
+  const unresolved = {
+    body: !gotBlob(bodyId) || !gotBlob(nameId),
+    menu: !gotBlob(menuId),
+    menuSub: !gotBlob(menuSubId),
+  };
+
+  return { files, placeholders, adoptedIds, unresolved };
 }
 
 /**
@@ -444,6 +482,57 @@ function adoptMainMenuUiFonts(
     ...(menuChanged ? { menuFontId: nextMenu } : {}),
     ...(subChanged ? { menuSubFontId: nextSub } : {}),
   };
+}
+
+/**
+ * 메인 메뉴 버튼/로고 blob 을 generateRenpyFiles(gui.rpy·screens.rpy 생성) 전에 미리 확보하고,
+ * 실제로 blob 이 있는 상태/로고만 남도록 mainMenuUi 를 가지치기한다 — selectedFontFiles →
+ * adoptGuiOverrideFonts/adoptMainMenuUiFonts(위)와 정확히 같은 패턴이다. 참조 쪽(screensRpy 의
+ * buildMainMenuPlan, generate.ts:957-966)은 project.mainMenuUi.buttons[slot][state]에 assetId가
+ * "있는지"만 보고, 배치 쪽(아래 파일 목록 조립부)은 blob 이 "있을 때만" 파일을 쓴다 — 이 둘이
+ * 따로 놀면 assetId 는 있는데 blob 이 없는 경우(부분 복원된 .npproj.zip, 브라우저 IndexedDB 축출)
+ * 없는 파일을 참조하는 zip 이 나가 Ren'Py 가 메인 메뉴에서 크래시한다. 여기서 미리 걸러두면
+ * generateRenpyFiles 는 애초에 그 상태/로고를 "없음"으로 보고 텍스트 버튼 폴백으로 낸다(정상
+ * 케이스 — blob 이 전부 있으면 — 는 가지치기가 아무것도 안 하므로 출력이 기존과 완전히 같다).
+ * 반환하는 blobs 는 파일 목록 조립부가 재사용한다(같은 assetId 로 getAsset 을 두 번 안 부르려고).
+ */
+async function resolveMainMenuArt(
+  mainMenuUi: Project['mainMenuUi'],
+): Promise<{ mainMenuUi: Project['mainMenuUi']; blobs: Map<string, Blob> }> {
+  if (!mainMenuUi) return { mainMenuUi, blobs: new Map() };
+  const blobs = new Map<string, Blob>();
+
+  const buttons: Partial<Record<MenuButtonSlot, Partial<Record<MenuButtonState, string>>>> = {};
+  for (const slot of MAIN_MENU_SLOTS) {
+    const states = mainMenuUi.buttons?.[slot.id];
+    if (!states) continue;
+    const kept: Partial<Record<MenuButtonState, string>> = {};
+    for (const state of MENU_BUTTON_STATES) {
+      const assetId = states[state.id];
+      if (!assetId) continue;
+      if (!state.renpySupported) {
+        // press 는 애초에 절대 출력되지 않는다(엔진에 눌림 상태를 세팅하는 코드가 없음 — 아래 파일
+        // 목록 조립부도 이 상태는 건너뜀). blob 존재 여부와 무관하게 레거시 값을 그대로 보존한다
+        // (동작에 영향이 없으니 지울 이유도 없다 — 기존 프로젝트 데이터 보존).
+        kept[state.id] = assetId;
+        continue;
+      }
+      const blob = await getAsset(assetId);
+      if (!blob) continue; // 고아 참조(blob 소실) — 이 상태만 조용히 제외해 댕글링을 막는다.
+      blobs.set(assetId, blob);
+      kept[state.id] = assetId;
+    }
+    if (Object.keys(kept).length) buttons[slot.id] = kept;
+  }
+
+  let logo = mainMenuUi.logo;
+  if (logo) {
+    const blob = await getAsset(logo);
+    if (blob) blobs.set(logo, blob);
+    else logo = undefined; // 로고도 같은 규칙 — blob 없으면 "로고 없음"(버튼 없이 프리셋 폴백)으로 취급.
+  }
+
+  return { mainMenuUi: { ...mainMenuUi, buttons, logo }, blobs };
 }
 
 /** 브라우저 다운로드 트리거. */

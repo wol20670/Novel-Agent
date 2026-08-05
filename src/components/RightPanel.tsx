@@ -1,4 +1,4 @@
-import { useStore } from '../store';
+import { useStore, sceneById } from '../store';
 import { useAssetUrl } from './useAssetUrl';
 import { getAsset } from '../storage/assetStore';
 import { downloadBlob } from '../zip/buildZip';
@@ -8,7 +8,9 @@ import ScenePlayer from './ScenePlayer';
 export default function RightPanel() {
   const sceneId = useStore((s) => s.selectedSceneId);
   const scenes = useStore((s) => s.project.scenes);
-  const scene = useStore((s) => s.project.scenes.find((x) => x.id === sceneId) ?? null);
+  // sceneById: scenes.find() 셀렉터는 zustand의 매 set() 마다(렌더 여부 무관) 재실행돼 O(N) 스캔이
+  // 반복된다 — identity 캐싱된 인덱스로 O(1) 조회(src/store.ts, SceneCard.tsx와 동일 이유).
+  const scene = useStore((s) => sceneById(s.project.scenes, sceneId) ?? null);
   const select = useStore((s) => s.selectScene);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const importBg = useStore((s) => s.importBackground);

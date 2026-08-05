@@ -1,17 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { collectReferencedAssetIds } from '../src/assetRefs';
 import { emptyProject, type Project, type Scene, type Character } from '../src/types';
-
-function scene(id: string, extra: Partial<Scene>, lines: Scene['lines'] = []): Scene {
-  return { id, title: id, direction: [], cg: [], lines, choices: [], status: 'approved', ...extra };
-}
+import { scene } from './fixtures';
 
 describe('collectReferencedAssetIds', () => {
   const scenes: Scene[] = [
-    scene(
-      's1',
-      { backgroundAssetId: 'bg1', bgmAssetId: 'bgm1', cgAssetIds: ['cg1', 'cg2'] },
-      [
+    scene({
+      backgroundAssetId: 'bg1',
+      bgmAssetId: 'bgm1',
+      cgAssetIds: ['cg1', 'cg2'],
+      lines: [
         {
           kind: 'dialogue',
           speaker: '한지수',
@@ -20,7 +18,7 @@ describe('collectReferencedAssetIds', () => {
         },
         { kind: 'narration', text: '지문' },
       ],
-    ),
+    }),
   ];
 
   const characters: Character[] = [

@@ -227,7 +227,7 @@ function i18nCount(line: Line): number {
   return line.kind === 'dialogue' || line.kind === 'narration' ? Object.keys(line.i18n ?? {}).length : 0;
 }
 
-export interface SceneDiff {
+interface SceneDiff {
   /** 텍스트가 그대로(정확·느슨 매칭 포함)라 메타가 승계되는 줄 수. */
   linesCarried: number;
   /** 텍스트가 바뀌었거나 새로 생긴 줄 수. */
@@ -316,13 +316,16 @@ function matchScenesByTitle(prev: Scene[], next: Scene[]): { matches: SceneMatch
   return { matches, unmatchedPrev };
 }
 
-/** 두 장면의 라인 내용 겹침 비율 — |lineKey 교집합| / max(prev 라인 수, next 라인 수). */
-function contentOverlapRatio(a: Scene, b: Scene): number {
-  const setA = new Set(a.lines.map(lineKey));
-  const setB = new Set(b.lines.map(lineKey));
+/**
+ * 두 장면의 라인 내용 겹침 비율 — |lineKey 교집합| / max(prev 라인 수, next 라인 수).
+ * 두 Set 은 호출측이 미리 구해 넘긴다 — 폴백 매칭 루프(matchScenes)가 같은 pool 항목·next 장면을
+ * 여러 상대와 반복 비교하는데, 매 비교마다 Set 을 새로 만들면 O(unmatched² · 평균 라인수)로
+ * 대본이 클수록(재분석·병합 미리보기 모달) 느려진다.
+ */
+function contentOverlapRatio(setA: Set<string>, aLen: number, setB: Set<string>, bLen: number): number {
   let intersection = 0;
   for (const k of setA) if (setB.has(k)) intersection += 1;
-  return intersection / Math.max(a.lines.length, b.lines.length);
+  return intersection / Math.max(aLen, bLen);
 }
 
 /**
@@ -337,13 +340,17 @@ function contentOverlapRatio(a: Scene, b: Scene): number {
 function matchScenes(prev: Scene[], next: Scene[]): { matches: SceneMatch[]; unmatchedPrev: Scene[] } {
   const { matches, unmatchedPrev } = matchScenesByTitle(prev, next);
   const pool = [...unmatchedPrev];
+  // pool 항목의 lineKey Set 은 한 번만 구해 pool 과 같은 인덱스로 병행 유지한다(스플라이스 시 함께
+  // 제거) — 매칭 결과(어떤 next 가 어떤 prev 와 짝지어지는지)는 기존과 동일, 순서만 안 다시 스캔.
+  const poolSets = pool.map((sc) => new Set(sc.lines.map(lineKey)));
   for (const m of matches) {
     if (m.prevMatch || m.next.lines.length === 0) continue;
+    const nextSet = new Set(m.next.lines.map(lineKey)); // 이 next 는 pool 전체와 비교되므로 한 번만 계산
     let bestIdx = -1;
     let bestRatio = 0;
     for (let i = 0; i < pool.length; i++) {
       if (pool[i].lines.length === 0) continue;
-      const ratio = contentOverlapRatio(pool[i], m.next);
+      const ratio = contentOverlapRatio(poolSets[i], pool[i].lines.length, nextSet, m.next.lines.length);
       if (ratio > bestRatio) {
         bestRatio = ratio;
         bestIdx = i;
@@ -352,6 +359,7 @@ function matchScenes(prev: Scene[], next: Scene[]): { matches: SceneMatch[]; unm
     if (bestIdx >= 0 && bestRatio >= 0.5) {
       m.prevMatch = pool[bestIdx];
       pool.splice(bestIdx, 1);
+      poolSets.splice(bestIdx, 1);
     }
   }
   return { matches, unmatchedPrev: pool };

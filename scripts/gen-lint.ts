@@ -99,4 +99,8 @@ if (existsSync(fontSrc)) copyFileSync(fontSrc, fontDst);
 
 console.log(`생성 완료: ${OUT}`);
 console.log(`테마: ${genre} · 이미지 스텁 ${imgRefs.size}개 · 폰트 ${existsSync(fontDst) ? 'OK' : '없음'}`);
+// lint 는 파일 존재만 보고 내용은 안 보므로, 여기서 1x1 PNG 로 "가짜로 채운" 참조를 숨기지 않고
+// 명시적으로 나열한다 — 안 그러면 lint 통과가 "진짜 에셋이 다 있다"는 착각을 준다(CLAUDE.md:
+// "lint 통과 ≠ 동작"). 진짜 파일 존재 검증은 tests/zip-asset-invariant.test.ts 가 담당한다.
+console.log(`\n=== 스텁(1x1 PNG)으로 가짜로 채운 이미지 참조 ${imgRefs.size}개 — 실제 에셋 아님 ===`);
 console.log([...imgRefs].sort().join('\n'));

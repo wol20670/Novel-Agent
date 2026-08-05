@@ -4,7 +4,7 @@
 import type { ThemeCore } from './buildTheme';
 import { aiConfig } from '../../config/aiConfig';
 
-export interface OpenAIThemeOpts {
+interface OpenAIThemeOpts {
   apiKey: string;
   model?: string;
 }

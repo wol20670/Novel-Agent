@@ -22,19 +22,23 @@ const RATES = [1, 1.25, 1.5];
  * "다음으로 넘기기" 호출 없이도 자연히 다음 곡으로 넘어간다.
  */
 export default function VoiceReview({ onClose }: { onClose: () => void }) {
-  const project = useStore((s) => s.project);
+  // project 전체 대신 실제로 쓰는 두 필드만 — 이 모달은 대사 편집 등 무관한 저장에도 project 가
+  // 새 객체가 될 때마다 통째로 리렌더될 이유가 없다(재생 중 오디오 컨트롤까지 흔들릴 수 있음).
+  const characterList = useStore((s) => s.project.characters);
+  const scenes = useStore((s) => s.project.scenes);
+  const baseLocale = useStore((s) => s.project.baseLocale);
   const detachLineVoice = useStore((s) => s.detachLineVoice);
-  const base = baseLocaleOf(project);
+  const base = baseLocaleOf({ baseLocale });
 
   const characters = useMemo(
-    () => project.characters.filter((c) => !c.isProtagonist).map((c) => c.name),
-    [project.characters],
+    () => characterList.filter((c) => !c.isProtagonist).map((c) => c.name),
+    [characterList],
   );
   const [filter, setFilter] = useState<string>('all');
 
   const queue = useMemo<QueueItem[]>(() => {
     const out: QueueItem[] = [];
-    for (const sc of project.scenes) {
+    for (const sc of scenes) {
       sc.lines.forEach((line, lineIndex) => {
         if (line.kind !== 'dialogue') return;
         const assetId = line.voiceAssetIds?.[base];
@@ -44,7 +48,7 @@ export default function VoiceReview({ onClose }: { onClose: () => void }) {
       });
     }
     return out;
-  }, [project.scenes, base, filter]);
+  }, [scenes, base, filter]);
 
   const [cursor, setCursor] = useState(0);
   const [rate, setRate] = useState(1);
@@ -66,7 +70,12 @@ export default function VoiceReview({ onClose }: { onClose: () => void }) {
     setSrc(undefined);
     if (!current) return;
     getAssetUrl(current.assetId).then((u) => {
-      if (revoked) return;
+      // 언마운트/줄 전환이 읽기 도중 먼저 끝나면 url 이 아직 undefined 라 cleanup 이 못 지운다 —
+      // 여기서 직접 revoke 해야 createObjectURL 이 새는 걸 막는다(useAssetUrl.ts 와 동일 순서).
+      if (revoked) {
+        if (u) URL.revokeObjectURL(u);
+        return;
+      }
       url = u;
       setSrc(u);
     });

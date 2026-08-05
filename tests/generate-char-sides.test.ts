@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateRenpyFiles, charIdMap, outfitAttrFor } from '../src/renpy/generate';
-import { emptyProject, type Project, type Scene, type Character, type OutfitRule } from '../src/types';
+import type { Project, Character, OutfitRule } from '../src/types';
+import { contentOf, scene, dialogue, projectWith } from './fixtures';
 
 function charWithSprite(name: string, side?: 'left' | 'right' | 'auto'): Character {
   return {
@@ -11,21 +12,8 @@ function charWithSprite(name: string, side?: 'left' | 'right' | 'auto'): Charact
   };
 }
 
-function sceneWithSpeakers(speakers: string[]): Scene {
-  return {
-    id: 's1',
-    title: '장면1',
-    direction: [],
-    cg: [],
-    lines: speakers.map((sp) => ({ kind: 'dialogue' as const, speaker: sp, text: '대사' })),
-    choices: [],
-    status: 'approved',
-  };
-}
-
-function projectWith(characters: Character[], scenes: Scene[]): Project {
-  return { ...emptyProject(), characters, scenes };
-}
+const sceneWithSpeakers = (speakers: string[]) =>
+  scene({ lines: speakers.map((sp) => dialogue(sp, '대사')) });
 
 function xpctOf(script: string, charId: string): number {
   const m = script.match(new RegExp(`show ${charId} \\S+ \\S+ at vn_char\\((\\d+(?:\\.\\d+)?)\\)`));
@@ -37,10 +25,10 @@ describe('generateRenpyFiles: 캐릭터 좌우 고정 위치', () => {
   it('side 미지정(auto)이면 기존처럼 등장 순서대로 좌→우 배치', () => {
     const A = charWithSprite('A');
     const B = charWithSprite('B');
-    const project = projectWith([A, B], [sceneWithSpeakers(['A', 'B'])]);
+    const project = projectWith([sceneWithSpeakers(['A', 'B'])], { characters: [A, B] });
     const ids = charIdMap(project);
     const { files } = generateRenpyFiles(project);
-    const s = files.find((f) => f.path === 'game/script.rpy')!.content;
+    const s = contentOf(files, 'game/script.rpy');
     expect(xpctOf(s, ids.get('A')!)).toBeLessThan(xpctOf(s, ids.get('B')!));
   });
 
@@ -48,19 +36,19 @@ describe('generateRenpyFiles: 캐릭터 좌우 고정 위치', () => {
     // A(오른쪽 고정)가 먼저 말하고 B(왼쪽 고정)가 나중에 말해도, 순서와 무관하게 B가 왼쪽.
     const A = charWithSprite('A', 'right');
     const B = charWithSprite('B', 'left');
-    const project = projectWith([A, B], [sceneWithSpeakers(['A', 'B'])]);
+    const project = projectWith([sceneWithSpeakers(['A', 'B'])], { characters: [A, B] });
     const ids = charIdMap(project);
     const { files } = generateRenpyFiles(project);
-    const s = files.find((f) => f.path === 'game/script.rpy')!.content;
+    const s = contentOf(files, 'game/script.rpy');
     expect(xpctOf(s, ids.get('B')!)).toBeLessThan(xpctOf(s, ids.get('A')!));
   });
 
   it('혼자 등장하면 side 와 무관하게 항상 중앙(50)', () => {
     const A = charWithSprite('A', 'left');
-    const project = projectWith([A], [sceneWithSpeakers(['A'])]);
+    const project = projectWith([sceneWithSpeakers(['A'])], { characters: [A] });
     const ids = charIdMap(project);
     const { files } = generateRenpyFiles(project);
-    const s = files.find((f) => f.path === 'game/script.rpy')!.content;
+    const s = contentOf(files, 'game/script.rpy');
     expect(xpctOf(s, ids.get('A')!)).toBe(50);
   });
 
@@ -68,25 +56,15 @@ describe('generateRenpyFiles: 캐릭터 좌우 고정 위치', () => {
     // A(왼쪽 고정)가 먼저 두 줄 혼자 말하고(그동안 중앙), B(오른쪽 고정)가 나중에 등장.
     const A = charWithSprite('A', 'left');
     const B = charWithSprite('B', 'right');
-    const scene: Scene = {
-      id: 's1',
-      title: '장면1',
-      direction: [],
-      cg: [],
-      lines: [
-        { kind: 'dialogue', speaker: 'A', text: '혼자 있을 때' },
-        { kind: 'dialogue', speaker: 'A', text: '아직 혼자' },
-        { kind: 'dialogue', speaker: 'B', text: '이제 등장' },
-      ],
-      choices: [],
-      status: 'approved',
-    };
-    const project = projectWith([A, B], [scene]);
+    const sc = scene({
+      lines: [dialogue('A', '혼자 있을 때'), dialogue('A', '아직 혼자'), dialogue('B', '이제 등장')],
+    });
+    const project = projectWith([sc], { characters: [A, B] });
     const ids = charIdMap(project);
     const aId = ids.get('A')!;
     const bId = ids.get('B')!;
     const { files } = generateRenpyFiles(project);
-    const s = files.find((f) => f.path === 'game/script.rpy')!.content;
+    const s = contentOf(files, 'game/script.rpy');
 
     // A의 첫 등장은 중앙(50).
     const firstShowIdx = s.indexOf(`show ${aId} `);
@@ -111,9 +89,9 @@ describe('generateRenpyFiles: 캐릭터 좌우 고정 위치', () => {
 describe('generateRenpyFiles: vn_char 캐릭터 프레이밍(머리~허벅지 구도)', () => {
   it('1080p 기본(characterScale 미지정)이면 ysize 1242, ypos 1.170', () => {
     const A = charWithSprite('A');
-    const project = projectWith([A], [sceneWithSpeakers(['A'])]);
+    const project = projectWith([sceneWithSpeakers(['A'])], { characters: [A] });
     const { files } = generateRenpyFiles(project);
-    const s = files.find((f) => f.path === 'game/script.rpy')!.content;
+    const s = contentOf(files, 'game/script.rpy');
     expect(s).toContain('ysize 1242');
     expect(s).toContain('ypos 1.170');
   });
@@ -121,11 +99,11 @@ describe('generateRenpyFiles: vn_char 캐릭터 프레이밍(머리~허벅지 �
   it('characterScale: 1.4 면 그만큼 커진 값이 나온다', () => {
     const A = charWithSprite('A');
     const project: Project = {
-      ...projectWith([A], [sceneWithSpeakers(['A'])]),
+      ...projectWith([sceneWithSpeakers(['A'])], { characters: [A] }),
       guiOverrides: { characterScale: 1.4 },
     };
     const { files } = generateRenpyFiles(project);
-    const s = files.find((f) => f.path === 'game/script.rpy')!.content;
+    const s = contentOf(files, 'game/script.rpy');
     // k = 1.15 * 1.4 = 1.61 → ysize round(1080*1.61)=1739, ypos (1.61+0.02).toFixed(3)=1.630
     expect(s).toContain('ysize 1739');
     expect(s).toContain('ypos 1.630');
@@ -140,24 +118,18 @@ describe('generateRenpyFiles: 배경 키워드 의상 규칙(outfitRules)', () =
       expressions: { 기본: 'A-base-asset' },
       outfits: [{ name: '카페복', expressions: { 기본: 'A-cafe-asset' } }],
     };
-    const scene: Scene = {
-      id: 's1',
-      title: '장면1',
-      background: '아침 카페',
-      direction: [],
-      cg: [],
-      lines: [{ kind: 'dialogue', speaker: 'A', text: '대사' }],
-      choices: [],
-      status: 'approved',
-    };
+    const sc = scene({ background: '아침 카페', lines: [dialogue('A', '대사')] });
     const outfitRules: OutfitRule[] = [{ keyword: '카페', charName: 'A', outfit: '카페복' }];
-    const project: Project = { ...emptyProject(), characters: [A], scenes: [scene], outfitRules };
+    const project = projectWith([sc], { characters: [A], outfitRules });
     const ids = charIdMap(project);
     const aId = ids.get('A')!;
     const { files } = generateRenpyFiles(project);
-    const s = files.find((f) => f.path === 'game/script.rpy')!.content;
+    const s = contentOf(files, 'game/script.rpy');
 
-    const expectedAttr = outfitAttrFor('카페복');
+    // outfitAttrFor 는 검증 대상 함수 자체라 기대값 계산에 다시 쓰면 안 된다(둘 다 틀려도 같이
+    // 틀려서 통과) — 실제 실행 결과를 한 번 확인해 리터럴로 고정한다(asciiSlug('카페복') 기반).
+    const expectedAttr = 'o1a16458';
+    expect(outfitAttrFor('카페복')).toBe(expectedAttr); // 헬퍼 자체도 이 값을 내는지 별도로 확인
     expect(expectedAttr).not.toBe('base');
     const m = s.match(new RegExp(`show ${aId} (\\S+) \\S+ at vn_char`));
     expect(m).not.toBeNull();
@@ -171,22 +143,13 @@ describe('generateRenpyFiles: 배경 키워드 의상 규칙(outfitRules)', () =
       expressions: { 기본: 'A-base-asset' },
       outfits: [{ name: '카페복', expressions: { 기본: 'A-cafe-asset' } }],
     };
-    const scene: Scene = {
-      id: 's1',
-      title: '장면1',
-      background: '교실',
-      direction: [],
-      cg: [],
-      lines: [{ kind: 'dialogue', speaker: 'A', text: '대사' }],
-      choices: [],
-      status: 'approved',
-    };
+    const sc = scene({ background: '교실', lines: [dialogue('A', '대사')] });
     const outfitRules: OutfitRule[] = [{ keyword: '카페', charName: 'A', outfit: '카페복' }];
-    const project: Project = { ...emptyProject(), characters: [A], scenes: [scene], outfitRules };
+    const project = projectWith([sc], { characters: [A], outfitRules });
     const ids = charIdMap(project);
     const aId = ids.get('A')!;
     const { files } = generateRenpyFiles(project);
-    const s = files.find((f) => f.path === 'game/script.rpy')!.content;
+    const s = contentOf(files, 'game/script.rpy');
 
     const m = s.match(new RegExp(`show ${aId} (\\S+) \\S+ at vn_char`));
     expect(m).not.toBeNull();

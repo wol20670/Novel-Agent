@@ -1,9 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateGuiFiles, resolveTheme, dialogueGradientMetrics, dialogueGradientColor } from '../src/renpy/gui';
 import { gradientAlphaAt } from '../src/generators/image/canvasMenu';
-
-const fileOf = (files: { path: string; content: string }[], path: string) =>
-  files.find((f) => f.path === path)!.content;
+import { contentOf as fileOf } from './fixtures';
 
 // small() variant 블록만 잘라서 검사(gui.rpy 다른 곳의 우연한 문자열 매치를 피하기 위함).
 const smallBlockOf = (gui: string) => gui.slice(gui.indexOf('def small():'));

@@ -4,4 +4,3 @@
 // 표정 "선택"은 여기서, 표정 "그림"(일관성 있는 스프라이트)은 외부 도구에서 만들어 업로드한다.
 
 export { inferEmotion } from './infer';
-export type { EmotionContext } from './infer';

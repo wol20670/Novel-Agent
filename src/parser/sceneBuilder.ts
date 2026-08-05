@@ -4,7 +4,7 @@
 import type { Scene, Choice, Character, Expression, Locale, I18nText } from '../types';
 
 /** "ko|en|ja" / "ko, en, ja" / "한국어 영어" → 유효 Locale 배열(중복·오탈자 제거). */
-export function parseLocaleSpec(raw: string): Locale[] {
+function parseLocaleSpec(raw: string): Locale[] {
   const alias: Record<string, Locale> = {
     ko: 'ko', kor: 'ko', korean: 'ko', 한국어: 'ko', 한글: 'ko',
     en: 'en', eng: 'en', english: 'en', 영어: 'en',
