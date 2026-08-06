@@ -1,7 +1,52 @@
 // 프로젝트가 실제로 참조하는 에셋 id 수집 — 고아 에셋 정리(findOrphanAssets/deleteOrphanAssets)와
 // clearGeneratedAssets, 프로젝트 내보내기(project/transfer.ts)가 함께 쓰는 단일 소스(중복 로직 방지).
+// diffRemoteOrphans(원격 Storage 스윕)도 여기 있다 — supabase 의존 없는 순수 함수로 둬야 node 환경
+// 단위 테스트가 가능해서(collab/assetsGc.ts 는 동적 import 로 supabase-js 를 끌어오므로 제외).
 
 import type { Project, AssetMeta } from './types';
+
+/** collab/assetsGc.ts 의 RemoteAsset 과 동일 shape. 순환 import 방지를 위해 여기서 선언하고
+ * assetsGc.ts 가 이 타입을 재사용한다(반대 방향으로 하면 이 파일이 collab/* 를 참조하게 됨 — 금지). */
+export interface RemoteAsset {
+  id: string;
+  size: number;
+  createdAt?: number;
+}
+
+/** 방금 올라온 에셋이 아직 어떤 프로젝트 JSON 에도 반영되지 않았을 수 있는 유예 기간(7일).
+ * autoSave 는 저장마다 600ms 디바운스로 push 하고, 상대방은 아예 안 켜져 있을 수도 있어
+ * "지금 스캔했을 때 참조가 안 보인다"가 "고아다"를 뜻하지 않는다 — 업로드 직후 몇 초~몇 분은
+ * 흔한 정상 상태다. 7일은 충분히 넉넉하게 잡은 안전 마진(며칠 접속 안 해도 안 지워지게). */
+export const DEFAULT_REMOTE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** id(a_<base36 ms>_<n>) 에서 생성 시각(ms)을 복원한다. 형식이 아니면 undefined. */
+function parseCreatedAtFromId(id: string): number | undefined {
+  const m = /^a_([0-9a-z]+)_/.exec(id);
+  if (!m) return undefined;
+  const ms = parseInt(m[1], 36);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+/**
+ * 원격 Storage 오브젝트 중 "지워도 안전한" 것만 추린다. 두 안전장치 모두 빠뜨리면 안 된다:
+ *  1) referenced 에 있으면 무조건 제외 — 어느 방이든 지금 쓰고 있는 에셋.
+ *  2) 생성된 지 graceMs 보다 짧으면 제외 — 방금 올라와 아직 어느 프로젝트 JSON 에도 반영 안 됐을
+ *     수 있는 것(위 DEFAULT_REMOTE_GRACE_MS 설명 참고). createdAt 이 없으면 id 에서 복원을 시도하고,
+ *     그것도 실패하면 나이를 알 수 없는 것이므로 **삭제하지 않고 보존**한다(fail safe — 애매하면
+ *     지우지 않는 쪽으로 기운다. 반대로 하면 "판별 불가"가 조용히 "지워도 됨"이 되는 게 더 위험하다).
+ */
+export function diffRemoteOrphans(
+  remote: RemoteAsset[],
+  referenced: Set<string>,
+  opts: { now: number; graceMs: number },
+): RemoteAsset[] {
+  return remote.filter((asset) => {
+    if (referenced.has(asset.id)) return false;
+    const createdAt = asset.createdAt ?? parseCreatedAtFromId(asset.id);
+    if (createdAt === undefined) return false; // 나이 불명 — 보존
+    return opts.now - createdAt >= opts.graceMs;
+  });
+}
 
 /**
  * 프로젝트 전체에서 참조되는 에셋 id 집합을 모은다(배경·BGM·CG·표정·의상·아이템·메뉴아트).

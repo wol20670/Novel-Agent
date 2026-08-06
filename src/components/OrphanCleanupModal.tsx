@@ -37,7 +37,7 @@ interface Group {
   items: OrphanAsset[];
 }
 
-function groupOrphans(orphans: OrphanAsset[]): Group[] {
+function groupOrphans(orphans: OrphanAsset[], unknownLabel: string, unknownNote: string): Group[] {
   const byKind = new Map<string, OrphanAsset[]>();
   for (const o of orphans) {
     const key = o.kind ?? '__unknown__';
@@ -57,9 +57,9 @@ function groupOrphans(orphans: OrphanAsset[]): Group[] {
   if (unknown && unknown.length > 0) {
     groups.push({
       key: '__unknown__',
-      label: UNKNOWN_LABEL,
+      label: unknownLabel,
       icon: '❓',
-      note: '협업으로 내려받은 캐시라 메타 정보가 없어 종류를 알 수 없습니다.',
+      note: unknownNote,
       items: unknown,
     });
   }
@@ -173,16 +173,39 @@ export default function OrphanCleanupModal({
   orphans,
   onClose,
   onDelete,
+  title,
+  description,
+  unknownLabel = UNKNOWN_LABEL,
+  unknownNote = '협업으로 내려받은 캐시라 메타 정보가 없어 종류를 알 수 없습니다.',
+  defaultSelected = true,
+  confirmLabel,
+  danger = '되돌릴 수 없습니다.',
 }: {
   orphans: OrphanAsset[];
   onClose: () => void;
   onDelete: (ids: string[]) => void | Promise<void>;
+  /** 헤더 문구 앞부분 — 뒤에 붙는 "· 총 N개 · 합계 X"는 항상 그대로 계산돼 붙는다. 기본 '참조되지 않는 에셋'. */
+  title?: string;
+  /** 헤더 아래 설명 문단. 기본은 로컬(IndexedDB) 고아 정리 설명. */
+  description?: string;
+  /** kind 가 없는 항목이 모이는 그룹의 라벨. 기본 '알 수 없음'. */
+  unknownLabel?: string;
+  /** 위 그룹의 부연 설명. 기본은 "협업 캐시라 메타가 없다"는 문구. */
+  unknownNote?: string;
+  /** 모달을 열 때 전체 선택 여부. 기본 true(전체 선택) — 원격 정리처럼 신중해야 하면 false. */
+  defaultSelected?: boolean;
+  /** 확인 버튼의 동사 자리 — 기본 '삭제'("선택한 N개 {confirmLabel} (X)"). 원격은 '영구 삭제' 등으로 강조. */
+  confirmLabel?: string;
+  /** 버튼 아래 경고 문구. 기본 '되돌릴 수 없습니다.' — 원격은 더 강한 경고로 교체. */
+  danger?: string;
 }) {
   // 기본 선택 = 전체 선택(삭제 자체가 목적인 화면이라 대부분 그대로 진행할 것이므로).
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(orphans.map((o) => o.id)));
+  // defaultSelected=false 인 변형(원격 정리)은 아무것도 선택하지 않은 채로 연다 — 공유 서버 파일이라
+  // 사용자가 하나하나 확인하고 고르게 하기 위함.
+  const [selected, setSelected] = useState<Set<string>>(() => (defaultSelected ? new Set(orphans.map((o) => o.id)) : new Set()));
   const [deleting, setDeleting] = useState(false);
 
-  const groups = useMemo(() => groupOrphans(orphans), [orphans]);
+  const groups = useMemo(() => groupOrphans(orphans, unknownLabel, unknownNote), [orphans, unknownLabel, unknownNote]);
   const totalSize = useMemo(() => orphans.reduce((sum, o) => sum + o.size, 0), [orphans]);
   const selectedList = useMemo(() => orphans.filter((o) => selected.has(o.id)), [orphans, selected]);
   const selectedSize = useMemo(() => selectedList.reduce((sum, o) => sum + o.size, 0), [selectedList]);
@@ -223,11 +246,11 @@ export default function OrphanCleanupModal({
     <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="card w-full max-w-lg p-4 flex flex-col gap-2.5 max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold text-gray-100">
-          참조되지 않는 에셋 · 총 {orphans.length}개 · 합계 {formatBytes(totalSize)}
+          {title ?? '참조되지 않는 에셋'} · 총 {orphans.length}개 · 합계 {formatBytes(totalSize)}
         </h3>
         <p className="text-[11px] text-gray-500 leading-snug">
-          어떤 장면·캐릭터·메뉴에서도 더는 가리키지 않는 파일입니다. 이미지를 다른 파일로 교체했거나, 대본 재분석으로
-          이름 연결이 끊겼거나, 협업으로 내려받은 캐시일 때 남습니다. 지울 항목을 고르세요 — 기본은 전체 선택입니다.
+          {description ??
+            '어떤 장면·캐릭터·메뉴에서도 더는 가리키지 않는 파일입니다. 이미지를 다른 파일로 교체했거나, 대본 재분석으로 이름 연결이 끊겼거나, 협업으로 내려받은 캐시일 때 남습니다. 지울 항목을 고르세요 — 기본은 전체 선택입니다.'}
         </p>
 
         <div className="overflow-y-auto flex-1 min-h-0 border border-edge rounded-lg p-1.5">
@@ -236,14 +259,14 @@ export default function OrphanCleanupModal({
           ))}
         </div>
 
-        <p className="text-[10px] text-amber-600">되돌릴 수 없습니다.</p>
+        <p className="text-[10px] text-amber-600">{danger}</p>
 
         <div className="flex items-center justify-end gap-2 pt-1">
           <button className="btn-ghost text-xs" onClick={onClose} disabled={deleting}>
             취소
           </button>
           <button className="btn-primary text-xs" onClick={handleDelete} disabled={selected.size === 0 || deleting}>
-            {deleting ? '삭제 중…' : `선택한 ${selected.size}개 삭제 (${formatBytes(selectedSize)})`}
+            {deleting ? '삭제 중…' : `선택한 ${selected.size}개 ${confirmLabel ?? '삭제'} (${formatBytes(selectedSize)})`}
           </button>
         </div>
       </div>

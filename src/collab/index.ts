@@ -118,6 +118,7 @@ export {
   loadCollabConfig,
   saveCollabConfig as persistCollabConfig,
   hasEnvCredentials,
+  isCollabReady,
   type CollabConfig,
 } from './supabaseClient';
 export { pushProject } from './sync';
@@ -125,3 +126,4 @@ export { pushAsset, ensureAsset } from './assetsSync';
 export { updatePresence } from './presence';
 export type { PeerPresence } from './presence';
 export { generateRoomCode } from './roomCode';
+export { listRemoteAssets, collectRemoteReferencedIds, removeRemoteAssets, type RemoteAsset } from './assetsGc';

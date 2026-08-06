@@ -36,7 +36,7 @@ import type { ScriptMeta, BuildResult } from './parser';
 import { mergeScenes, type AnalyzeMode } from './project/mergeScenes';
 import { applyAssetToGroup, clearAssetFromGroup } from './project/sceneAssets';
 import { putAsset, getAsset, deleteAsset, deleteAssets, clearAssets, getAllAssetKeys, getAssetInfos } from './storage/assetStore';
-import { collectReferencedAssetIds, diffOrphanIds } from './assetRefs';
+import { collectReferencedAssetIds, diffOrphanIds, diffRemoteOrphans, DEFAULT_REMOTE_GRACE_MS } from './assetRefs';
 import { saveProject, loadProject, clearProject } from './storage/projectStore';
 import { SAMPLE_STORY } from './sample';
 import { exportProjectFile, importProjectFile } from './project/transfer';
@@ -59,6 +59,10 @@ import {
   pushAsset as collabPushAsset,
   takeDroppedRemoteCount,
   updatePresence,
+  isCollabReady,
+  listRemoteAssets,
+  collectRemoteReferencedIds,
+  removeRemoteAssets,
   type CollabStatus,
   type PeerPresence,
   type CollabHooks,
@@ -324,6 +328,14 @@ interface State {
   findOrphanAssets: () => Promise<OrphanAsset[]>;
   /** findOrphanAssets 가 돌려준 항목 중 사용자가 고른 id 만 되돌릴 수 없이 삭제한다. */
   deleteOrphanAssets: (ids: string[]) => Promise<void>;
+  /**
+   * Supabase Storage `assets` 버킷 전체에서, 어느 방의 프로젝트 JSON 도 참조하지 않고 유예 기간
+   * (7일)도 지난 오브젝트만 골라 돌려준다(조회만, 삭제는 별도). collab 미준비면 빈 배열.
+   * 로컬 findOrphanAssets 와는 대상이 다르다 — 이쪽은 "다른 방을 포함한 원격 전체"가 기준.
+   */
+  findRemoteOrphanAssets: () => Promise<OrphanAsset[]>;
+  /** findRemoteOrphanAssets 가 돌려준 항목 중 사용자가 고른 id 만 원격에서 되돌릴 수 없이 삭제한다. */
+  deleteRemoteOrphanAssets: (ids: string[]) => Promise<void>;
   setToast: (msg: string | null) => void;
 
   // 프로젝트 파일 (기기 간 이동)
@@ -1976,6 +1988,48 @@ export const useStore = create<State>((set, get) => {
       }));
       autoSave();
       flash(`고아 에셋 ${ids.length}개를 삭제했습니다.`, 'success');
+    },
+
+    findRemoteOrphanAssets: async () => {
+      if (!isCollabReady()) return [];
+      const [remote, remoteReferenced] = await Promise.all([listRemoteAssets(), collectRemoteReferencedIds()]);
+      // fail-closed — 목록이든 참조든 조회가 하나라도 실패하면 스윕을 아예 접는다. 특히 참조 조회가
+      // 실패했는데 그냥 진행하면 참조 집합이 비어 **원격 파일 전부가 고아로 보이고**, 사용자가 상대방
+      // 에셋까지 한 번에 지우게 된다. 목록 조회 실패를 빈 결과로 넘기면 정책 미적용(403)이 "정리할
+      // 게 없습니다"라는 거짓 성공으로 보이는 문제도 있다.
+      if (remote.failed || remoteReferenced.failed) {
+        flash('서버 조회에 실패해 정리를 중단했습니다. 네트워크·Supabase 정책(setup.sql)을 확인하세요.', 'error');
+        return [];
+      }
+      if (remote.assets.length === 0) return [];
+      // 원격 스캔은 "지금까지 push 된 프로젝트 JSON"만 보는데, 로컬 편집은 autoSave 디바운스(600ms)를
+      // 타고 나가고 아예 한 번도 push 안 된 방(막 시작한 세션 등)은 원격 스캔에 안 잡힌다. 그래서
+      // 로컬 프로젝트의 참조 집합과 로컬 AssetMeta 맵 키까지 합쳐야 지금 쓰고 있는 걸 고아로
+      // 오판하지 않는다(원격 findOrphanAssets 판정 로직과 동일한 이유로 로컬 쪽도 방어).
+      const localReferenced = collectReferencedAssetIds(get().project, { includeVoice: true });
+      const referenced = new Set<string>([...remoteReferenced.ids, ...localReferenced, ...Object.keys(get().assets)]);
+      const orphans = diffRemoteOrphans(remote.assets, referenced, {
+        now: Date.now(),
+        graceMs: DEFAULT_REMOTE_GRACE_MS,
+      });
+      const items: OrphanAsset[] = orphans.map((a) => ({
+        id: a.id,
+        createdAt: a.createdAt,
+        size: a.size,
+        mime: '',
+      }));
+      items.sort((a, b) => (b.createdAt ?? -Infinity) - (a.createdAt ?? -Infinity));
+      return items;
+    },
+
+    deleteRemoteOrphanAssets: async (ids) => {
+      if (ids.length === 0) return;
+      const { removed, failed } = await removeRemoteAssets(ids);
+      if (failed.length > 0) {
+        flash(`원격 고아 에셋 ${removed}개 삭제, ${failed.length}개 실패했습니다.`, 'error');
+        return;
+      }
+      flash(`원격 고아 에셋 ${removed}개를 삭제했습니다.`, 'success');
     },
 
     setToast: (msg) => {

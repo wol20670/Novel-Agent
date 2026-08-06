@@ -21,6 +21,7 @@ import VoiceLab from './VoiceLab';
 import VoiceReview from './VoiceReview';
 import MainMenuGui from './MainMenuGui';
 import OrphanCleanupModal from './OrphanCleanupModal';
+import { isCollabReady } from '../collab';
 
 // ── 이름(의미) 기준 그룹화 — 같은 이름 = 하나의 에셋(업로드 1회, 모든 장면 공유) ──
 
@@ -212,6 +213,7 @@ export default function AssetsTab() {
       </section>
 
       <CleanupSection />
+      <RemoteCleanupSection />
     </div>
   );
 }
@@ -292,6 +294,75 @@ function CleanupSection() {
           orphans={orphans}
           onClose={() => setOrphans(null)}
           onDelete={(ids) => deleteOrphanAssets(ids)}
+        />
+      )}
+    </section>
+  );
+}
+
+/**
+ * ☁️ 협업 Storage(Supabase) 정리 — 위 CleanupSection 과는 지우는 대상이 다르다. CleanupSection 은
+ * 이 브라우저의 IndexedDB(로컬)만 지우지만, 앱은 업로드하는 모든 에셋을 공유 Supabase Storage
+ * 버킷에도 올리고 거기선 절대 지우지 않는다 — 그래서 버킷이 계속 자란다. 이 섹션이 그 원격 사본을
+ * 쓸어내는 두 번째, 더 위험한 스윕이다: 여기 뜨는 파일은 협업 상대와 "공유"하는 서버 파일이고,
+ * 지우면 상대에게도 되돌릴 수 없다. 그래서 로컬 정리와 달리 기본 선택을 비워 두고(defaultSelected
+ * false) 사용자가 직접 고르게 한다. 협업이 꺼져 있으면(isCollabReady() false) 버킷 자체가 없는
+ * 얘기라 섹션을 아예 렌더하지 않는다.
+ */
+function RemoteCleanupSection() {
+  const findRemoteOrphanAssets = useStore((s) => s.findRemoteOrphanAssets);
+  const deleteRemoteOrphanAssets = useStore((s) => s.deleteRemoteOrphanAssets);
+  const setToast = useStore((s) => s.setToast);
+  // isCollabReady() 는 모듈 전역 collabConfig 를 읽는 동기 함수라 그것만 보면 협업을 켠 뒤에도
+  // 이 컴포넌트가 다시 그려질 이유가 없어 섹션이 안 나타난다(탭을 나갔다 와야 보인다). 스토어의
+  // collabEnabled 를 같이 구독해 리렌더 트리거를 만든다 — 판정 자체는 방 코드·환경변수까지 보는
+  // isCollabReady() 가 맡는다(collabEnabled 만으론 방 코드가 비어도 true 라 부족).
+  const collabEnabled = useStore((s) => s.collabEnabled);
+  const [orphans, setOrphans] = useState<OrphanAsset[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  if (!collabEnabled || !isCollabReady()) return null;
+
+  const openModal = async () => {
+    setLoading(true);
+    try {
+      const found = await findRemoteOrphanAssets();
+      if (found.length === 0) setToast('정리할 서버 파일이 없습니다.');
+      else setOrphans(found);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section>
+      <h3 className="section-title mb-1">☁️ 협업 Storage 정리</h3>
+      <p className="text-xs text-gray-500 mb-3">
+        위 저장소 정리는 이 브라우저 안에서만 지웁니다. 하지만 업로드한 에셋은 전부{' '}
+        <b className="text-amber-600">상대방과 공유하는 서버(Supabase Storage)</b>에도 함께 올라가고, 그쪽은
+        지금까지 전혀 지워지지 않아 계속 쌓입니다. 여기서 찾는 건 어떤 방의 어떤 프로젝트도 더는 참조하지 않는
+        서버 파일입니다 — 지우면 <b className="text-amber-600">상대방 쪽에서도 되돌릴 수 없습니다.</b> 신중하게
+        고르세요(기본은 아무것도 선택되지 않은 상태입니다).
+      </p>
+      <button
+        className="btn-ghost text-[11px] text-gray-400 hover:text-rose-500"
+        disabled={loading}
+        onClick={() => void openModal()}
+      >
+        {loading ? <Spinner /> : '서버 파일 정리'}
+      </button>
+      {orphans && (
+        <OrphanCleanupModal
+          orphans={orphans}
+          onClose={() => setOrphans(null)}
+          onDelete={(ids) => deleteRemoteOrphanAssets(ids)}
+          title="협업 서버의 참조되지 않는 파일"
+          description="어떤 방의 어떤 프로젝트에서도 더는 가리키지 않는 Supabase Storage 파일입니다. 협업 상대와 공유하는 서버에 있는 파일이라 지우면 상대방 쪽에서도 사라집니다. 지울 항목을 직접 고르세요 — 기본은 아무것도 선택되지 않은 상태입니다."
+          unknownLabel="서버 파일"
+          unknownNote="이 앱 인스턴스가 아는 어떤 프로젝트도 더는 참조하지 않는, Supabase Storage 버킷 안의 객체입니다(업로더나 어느 방에서 올렸는지는 남아있지 않습니다)."
+          defaultSelected={false}
+          confirmLabel="영구 삭제"
+          danger="상대방과 공유하는 서버 파일입니다 — 삭제하면 상대방 쪽에서도 즉시 사라지며 되돌릴 수 없습니다."
         />
       )}
     </section>
