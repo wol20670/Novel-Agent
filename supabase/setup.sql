@@ -87,8 +87,8 @@ create policy "assets open update" on storage.objects
 -- 했다(업로드 경로는 있는데 삭제 경로가 아예 없던 비대칭). "☁️ 협업 Storage 정리" 스윕
 -- (store.deleteRemoteOrphanAssets → collab/assetsGc.ts)이 그걸 회수하는 유일한 경로이고,
 -- 이 정책이 없으면 그 스윕이 RLS 403 으로 실패한다.
--- ⚠️ 스윕은 "어느 방의 프로젝트도 참조하지 않고 + 업로드 후 유예 기간(기본 7일)이 지난" 오브젝트만
--- 고른다. Storage 키가 평면 구조라 방 구분이 없어서, 참조 집합을 projects 전 행에서 모으지 않으면
+-- ⚠️ 스윕은 "어느 방의 프로젝트도 참조하지 않고 + 업로드 후 유예 기간이 지난" 오브젝트만
+-- 고른다(유예는 기본 7일이고 UI 에서 1일·전체로 바꿀 수 있다 — REMOTE_GRACE_OPTIONS). Storage 키가 평면 구조라 방 구분이 없어서, 참조 집합을 projects 전 행에서 모으지 않으면
 -- 남의 방이 쓰는 파일을 지운다 — 판정 로직을 손볼 땐 assetRefs.diffRemoteOrphans 의 주석을 먼저 볼 것.
 drop policy if exists "assets open delete" on storage.objects;
 create policy "assets open delete" on storage.objects

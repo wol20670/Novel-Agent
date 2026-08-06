@@ -22,6 +22,7 @@ import VoiceReview from './VoiceReview';
 import MainMenuGui from './MainMenuGui';
 import OrphanCleanupModal from './OrphanCleanupModal';
 import { isCollabReady } from '../collab';
+import { REMOTE_GRACE_OPTIONS } from '../assetRefs';
 
 // ── 이름(의미) 기준 그룹화 — 같은 이름 = 하나의 에셋(업로드 1회, 모든 장면 공유) ──
 
@@ -320,15 +321,28 @@ function RemoteCleanupSection() {
   const collabEnabled = useStore((s) => s.collabEnabled);
   const [orphans, setOrphans] = useState<OrphanAsset[] | null>(null);
   const [loading, setLoading] = useState(false);
+  // 유예 기간 선택 — 버튼을 누르기 "전에" 보이는 자리에 둔다. 기본 7일 고정이던 시절엔 방금 교체한
+  // 이미지가 전부 유예에 걸려 목록이 빈 채로 떠서, 기능이 고장난 것처럼 보였다(실제 보고).
+  const [graceId, setGraceId] = useState<(typeof REMOTE_GRACE_OPTIONS)[number]['id']>('7d');
+  const grace = REMOTE_GRACE_OPTIONS.find((o) => o.id === graceId) ?? REMOTE_GRACE_OPTIONS[0];
 
   if (!collabEnabled || !isCollabReady()) return null;
 
   const openModal = async () => {
     setLoading(true);
     try {
-      const found = await findRemoteOrphanAssets();
-      if (found.length === 0) setToast('정리할 서버 파일이 없습니다.');
-      else setOrphans(found);
+      const found = await findRemoteOrphanAssets(grace.ms);
+      // null = 조회 실패(판정 불가). 액션이 이미 에러 토스트를 띄웠으니 여기서 아무것도 덮어쓰지
+      // 않고 조용히 빠진다 — 예전엔 실패도 빈 배열이라 "정리할 파일이 없습니다"가 에러를 가렸다.
+      if (found === null) return;
+      if (found.length === 0) {
+        // 유예가 걸려 있으면 "없음"이 곧 "정말 없음"이 아니다 — 왜 비었는지를 토스트가 직접 알려준다.
+        setToast(
+          grace.ms > 0
+            ? '정리할 서버 파일이 없습니다. 최근에 올린 파일은 유예 기간에 걸려 빠집니다 — 기간을 바꿔 보세요.'
+            : '정리할 서버 파일이 없습니다.',
+        );
+      } else setOrphans(found);
     } finally {
       setLoading(false);
     }
@@ -344,6 +358,26 @@ function RemoteCleanupSection() {
         서버 파일입니다 — 지우면 <b className="text-amber-600">상대방 쪽에서도 되돌릴 수 없습니다.</b> 신중하게
         고르세요(기본은 아무것도 선택되지 않은 상태입니다).
       </p>
+      <div className="flex items-center gap-2 mb-2">
+        <label className="text-[11px] text-gray-400 shrink-0">업로드 후 경과</label>
+        <select
+          className="field text-xs py-1 w-auto"
+          value={graceId}
+          onChange={(e) => setGraceId(e.target.value as typeof graceId)}
+        >
+          {REMOTE_GRACE_OPTIONS.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {grace.ms === 0 && (
+        <p className="text-[11px] text-amber-600 mb-2 leading-snug">
+          ⚠️ 유예 없음 — 상대방이 지금 이미지를 올리는 중이라면 아직 저장(동기화)되지 않은 파일까지 후보로
+          잡힙니다. 둘 다 작업을 저장한 상태에서 쓰세요.
+        </p>
+      )}
       <button
         className="btn-ghost text-[11px] text-gray-400 hover:text-rose-500"
         disabled={loading}
@@ -357,7 +391,7 @@ function RemoteCleanupSection() {
           onClose={() => setOrphans(null)}
           onDelete={(ids) => deleteRemoteOrphanAssets(ids)}
           title="협업 서버의 참조되지 않는 파일"
-          description="어떤 방의 어떤 프로젝트에서도 더는 가리키지 않는 Supabase Storage 파일입니다. 협업 상대와 공유하는 서버에 있는 파일이라 지우면 상대방 쪽에서도 사라집니다. 지울 항목을 직접 고르세요 — 기본은 아무것도 선택되지 않은 상태입니다."
+          description={`어떤 방의 어떤 프로젝트에서도 더는 가리키지 않는 Supabase Storage 파일입니다(기준: ${grace.label}). 협업 상대와 공유하는 서버에 있는 파일이라 지우면 상대방 쪽에서도 사라집니다. 지울 항목을 직접 고르세요 — 기본은 아무것도 선택되지 않은 상태입니다.`}
           unknownLabel="서버 파일"
           unknownNote="이 앱 인스턴스가 아는 어떤 프로젝트도 더는 참조하지 않는, Supabase Storage 버킷 안의 객체입니다(업로더나 어느 방에서 올렸는지는 남아있지 않습니다)."
           defaultSelected={false}

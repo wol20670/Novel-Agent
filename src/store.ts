@@ -329,11 +329,16 @@ interface State {
   /** findOrphanAssets 가 돌려준 항목 중 사용자가 고른 id 만 되돌릴 수 없이 삭제한다. */
   deleteOrphanAssets: (ids: string[]) => Promise<void>;
   /**
-   * Supabase Storage `assets` 버킷 전체에서, 어느 방의 프로젝트 JSON 도 참조하지 않고 유예 기간
-   * (7일)도 지난 오브젝트만 골라 돌려준다(조회만, 삭제는 별도). collab 미준비면 빈 배열.
+   * Supabase Storage `assets` 버킷 전체에서, 어느 방의 프로젝트 JSON 도 참조하지 않고 유예 기간도
+   * 지난 오브젝트만 골라 돌려준다(조회만, 삭제는 별도). collab 미준비면 빈 배열.
    * 로컬 findOrphanAssets 와는 대상이 다르다 — 이쪽은 "다른 방을 포함한 원격 전체"가 기준.
+   * graceMs 미지정 = DEFAULT_REMOTE_GRACE_MS(7일). UI 가 REMOTE_GRACE_OPTIONS 로 골라 넘긴다.
+   *
+   * 반환값 구분에 주의: `[]` 는 "정말 지울 게 없음", **`null` 은 "조회 실패라 판정 불가"**(에러
+   * 토스트는 이 액션이 이미 띄운다). 둘 다 `[]` 로 뭉갰더니 호출부가 빈 배열을 보고 "정리할 서버
+   * 파일이 없습니다"를 덮어씌워, 네트워크·정책 실패가 성공처럼 보이는 버그가 있었다(실브라우저 확인).
    */
-  findRemoteOrphanAssets: () => Promise<OrphanAsset[]>;
+  findRemoteOrphanAssets: (graceMs?: number) => Promise<OrphanAsset[] | null>;
   /** findRemoteOrphanAssets 가 돌려준 항목 중 사용자가 고른 id 만 원격에서 되돌릴 수 없이 삭제한다. */
   deleteRemoteOrphanAssets: (ids: string[]) => Promise<void>;
   setToast: (msg: string | null) => void;
@@ -1990,7 +1995,7 @@ export const useStore = create<State>((set, get) => {
       flash(`고아 에셋 ${ids.length}개를 삭제했습니다.`, 'success');
     },
 
-    findRemoteOrphanAssets: async () => {
+    findRemoteOrphanAssets: async (graceMs) => {
       if (!isCollabReady()) return [];
       const [remote, remoteReferenced] = await Promise.all([listRemoteAssets(), collectRemoteReferencedIds()]);
       // fail-closed — 목록이든 참조든 조회가 하나라도 실패하면 스윕을 아예 접는다. 특히 참조 조회가
@@ -1999,7 +2004,7 @@ export const useStore = create<State>((set, get) => {
       // 게 없습니다"라는 거짓 성공으로 보이는 문제도 있다.
       if (remote.failed || remoteReferenced.failed) {
         flash('서버 조회에 실패해 정리를 중단했습니다. 네트워크·Supabase 정책(setup.sql)을 확인하세요.', 'error');
-        return [];
+        return null; // [] 로 돌려주면 호출부가 "지울 게 없음"으로 오해해 이 에러 토스트를 덮어쓴다.
       }
       if (remote.assets.length === 0) return [];
       // 원격 스캔은 "지금까지 push 된 프로젝트 JSON"만 보는데, 로컬 편집은 autoSave 디바운스(600ms)를
@@ -2010,7 +2015,7 @@ export const useStore = create<State>((set, get) => {
       const referenced = new Set<string>([...remoteReferenced.ids, ...localReferenced, ...Object.keys(get().assets)]);
       const orphans = diffRemoteOrphans(remote.assets, referenced, {
         now: Date.now(),
-        graceMs: DEFAULT_REMOTE_GRACE_MS,
+        graceMs: graceMs ?? DEFAULT_REMOTE_GRACE_MS,
       });
       const items: OrphanAsset[] = orphans.map((a) => ({
         id: a.id,

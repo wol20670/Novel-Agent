@@ -19,6 +19,18 @@ export interface RemoteAsset {
  * 흔한 정상 상태다. 7일은 충분히 넉넉하게 잡은 안전 마진(며칠 접속 안 해도 안 지워지게). */
 export const DEFAULT_REMOTE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * 스윕 UI 가 고르게 하는 유예 기간 프리셋. 기본 7일을 그대로 두면 "방금 교체한 옛 이미지를 지우고
+ * 싶다"는 정작 그 순간에 목록이 비어 나온다(교체분은 대부분 최근 업로드라 전부 유예에 걸린다) —
+ * 실제로 그 혼란이 보고돼서 고정값 대신 선택지로 바꿨다. 밀린 걸 치울 땐 짧게, 평소엔 기본값.
+ * 'all'(0)은 나이 조건을 사실상 끄지만, 나이를 못 구한 항목은 diffRemoteOrphans 가 여전히 보존한다.
+ */
+export const REMOTE_GRACE_OPTIONS = [
+  { id: '7d', label: '7일 지난 것만 (기본)', ms: DEFAULT_REMOTE_GRACE_MS },
+  { id: '1d', label: '1일 지난 것만', ms: 24 * 60 * 60 * 1000 },
+  { id: 'all', label: '전체 (유예 없음)', ms: 0 },
+] as const;
+
 /** id(a_<base36 ms>_<n>) 에서 생성 시각(ms)을 복원한다. 형식이 아니면 undefined. */
 function parseCreatedAtFromId(id: string): number | undefined {
   const m = /^a_([0-9a-z]+)_/.exec(id);
