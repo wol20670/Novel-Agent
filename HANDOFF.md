@@ -13,4 +13,5 @@
 - 미착수(이번에 의도적으로 뺌): `store.ts`(2073줄) 슬라이스 분리, 탭 컴포넌트 코드 스플리팅.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
+- 고아 에셋 정리에 목록 미리보기 모달 — 개수만 띄우던 `window.confirm` 을 종류별 그룹·썸네일·용량·선택 삭제로 교체(`findOrphanAssets`/`deleteOrphanAssets` 로 조회·삭제 분리). 판정 로직 자체는 원래 정확했고(참조 필드 누락 0), 고아가 UI 에 안 보이는 게 진짜 문제였다. 동반 버그 수정 2건: `clearGeneratedAssets` 가 `mainMenuUi` blob 만 지우고 참조를 남기던 것, 내보내기가 메타 없는 협업 캐시 blob 을 `.npproj.zip` 에서 누락하던 것(기기 이동 시 데이터 손실). test 239→253·실브라우저 시딩으로 6개 그룹·삭제 왕복·0건 경로 검증
 - Supertone 잔재 정리 — 코드는 이미 Typecast 전면 이관 완료(61b014f)라 남은 건 문서뿐이었음: 로컬 `docs/`(Supertone API 참고자료, untracked) 삭제 + HANDOFF·types.ts 주석 벤더 중립화. `isTypecastVoiceId` 하위호환 가드는 의도적으로 유지(옛 voiceId 경고). 코드 로직 무변경 → 생성 `.rpy` 회귀 없음

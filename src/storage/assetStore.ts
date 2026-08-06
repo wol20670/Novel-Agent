@@ -105,6 +105,43 @@ export async function deleteAssets(ids: string[]): Promise<void> {
   notifyAssetChange(ids);
 }
 
+/**
+ * 여러 에셋의 크기·mime 만 단일 readonly 트랜잭션으로 조회(고아 목록 표시용 — 미리보기 없이
+ * "이 파일 몇 MB 짜리인지"만 알면 되므로 getAsset 으로 blob 을 하나씩 받아 쓰기보다 이 편이
+ * 트랜잭션 오버헤드가 없다). deleteAssets 와 동일한 관용구(단일 트랜잭션 + pending 카운터 +
+ * settled 가드). 메타는 있지만 바이너리가 유실된 id(transfer.ts:62 참고 — 실제로 발생하는 케이스)는
+ * 결과 Map 에서 조용히 빠진다 — 호출측이 Map.get() 미스로 자연히 걸러낸다.
+ */
+export async function getAssetInfos(ids: string[]): Promise<Map<string, { size: number; mime: string }>> {
+  const out = new Map<string, { size: number; mime: string }>();
+  if (!ids.length) return out;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const store = tx(db, 'readonly');
+    let pending = ids.length;
+    let settled = false;
+    const fail = (e: unknown) => {
+      if (settled) return;
+      settled = true;
+      reject(e);
+    };
+    for (const id of ids) {
+      const r = store.get(id);
+      r.onsuccess = () => {
+        const blob = r.result as Blob | undefined;
+        if (blob) out.set(id, { size: blob.size, mime: blob.type });
+        pending--;
+        if (pending === 0 && !settled) {
+          settled = true;
+          resolve();
+        }
+      };
+      r.onerror = () => fail(r.error);
+    }
+  });
+  return out;
+}
+
 /** 저장된 모든 에셋 id 목록(고아 에셋 정리용 — 참조 집합과 대조해 차집합을 구한다). */
 export async function getAllAssetKeys(): Promise<string[]> {
   const db = await openDb();

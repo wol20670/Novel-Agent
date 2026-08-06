@@ -11,6 +11,7 @@ import type {
   MenuButtonState,
   MainMenuLayout,
   MainMenuPresetId,
+  OrphanAsset,
 } from './types';
 import {
   emptyProject,
@@ -34,8 +35,8 @@ import { aiConfig } from './config/aiConfig';
 import type { ScriptMeta, BuildResult } from './parser';
 import { mergeScenes, type AnalyzeMode } from './project/mergeScenes';
 import { applyAssetToGroup, clearAssetFromGroup } from './project/sceneAssets';
-import { putAsset, getAsset, deleteAsset, deleteAssets, clearAssets, getAllAssetKeys } from './storage/assetStore';
-import { collectReferencedAssetIds } from './assetRefs';
+import { putAsset, getAsset, deleteAsset, deleteAssets, clearAssets, getAllAssetKeys, getAssetInfos } from './storage/assetStore';
+import { collectReferencedAssetIds, diffOrphanIds } from './assetRefs';
 import { saveProject, loadProject, clearProject } from './storage/projectStore';
 import { SAMPLE_STORY } from './sample';
 import { exportProjectFile, importProjectFile } from './project/transfer';
@@ -316,10 +317,13 @@ interface State {
   /** 업로드한 에셋(배경·입화·CG·메뉴·BGM·아이템)을 모두 비운다. 대본·캐릭터 설정은 유지. */
   clearGeneratedAssets: () => Promise<void>;
   /**
-   * 어디서도 참조되지 않는 IndexedDB 에셋 blob 을 정리한다(옛 업로드 교체·삭제된 캐릭터/장면 등으로
-   * 남은 고아 데이터). 확인 후 되돌릴 수 없이 삭제 — 성우 음성도 참조 집합에 포함해 실수로 지우지 않는다.
+   * 어디서도 참조되지 않는 IndexedDB 에셋 blob 목록을 조회한다(옛 업로드 교체·삭제된 캐릭터/장면
+   * 등으로 남은 고아 데이터). 성우 음성도 참조 집합에 포함해 실수로 고아 판정하지 않는다. 삭제는
+   * 하지 않는다 — 무엇이 지워질지 사용자가 미리 보고 골라야 해서 목록 조회와 삭제를 분리했다.
    */
-  cleanupOrphanAssets: () => Promise<void>;
+  findOrphanAssets: () => Promise<OrphanAsset[]>;
+  /** findOrphanAssets 가 돌려준 항목 중 사용자가 고른 id 만 되돌릴 수 없이 삭제한다. */
+  deleteOrphanAssets: (ids: string[]) => Promise<void>;
   setToast: (msg: string | null) => void;
 
   // 프로젝트 파일 (기기 간 이동)
@@ -1912,6 +1916,21 @@ export const useStore = create<State>((set, get) => {
             })),
             menuArt: undefined,
             itemAssetIds: undefined,
+            // mainMenuUi.logo/buttons 의 blob 도 위 ids 에 포함돼 아래에서 IndexedDB 에서 실제로
+            // 지워진다 — 여기서 같이 비우지 않으면 프로젝트가 방금 삭제한 파일을 계속 참조해
+            // (buildZip 이 없는 파일을 배치하거나 screensRpy 가 없는 파일을 참조) 런타임에 깨진다.
+            // preset/layout/labels/menuFontId/menuSubFontId/textOutline 은 "배치 설정"이라 이미지가
+            // 아니므로 보존 — 이 액션의 안내 문구("대본·캐릭터 설정은 유지됩니다")와 일치시킨다.
+            mainMenuUi: s.project.mainMenuUi
+              ? {
+                  preset: s.project.mainMenuUi.preset,
+                  layout: s.project.mainMenuUi.layout,
+                  labels: s.project.mainMenuUi.labels,
+                  menuFontId: s.project.mainMenuUi.menuFontId,
+                  menuSubFontId: s.project.mainMenuUi.menuSubFontId,
+                  textOutline: s.project.mainMenuUi.textOutline,
+                }
+              : undefined,
           },
         }),
         [...ids],
@@ -1919,19 +1938,44 @@ export const useStore = create<State>((set, get) => {
       flash(`업로드한 에셋 ${ids.size}개를 비웠습니다. 대본·캐릭터 설정은 유지됩니다.`);
     },
 
-    cleanupOrphanAssets: async () => {
-      // ⚠️ 성우 음성도 반드시 포함해야 한다 — 빠뜨리면 실제로 재생 중인 TTS 오디오까지 고아로 오판해 삭제됨.
+    findOrphanAssets: async () => {
+      // ⚠️ 성우 음성도 반드시 포함해야 한다 — 빠뜨리면 실제로 재생 중인 TTS 오디오까지 고아로 오판됨.
       const referenced = collectReferencedAssetIds(get().project, { includeVoice: true });
       const idbKeys = await getAllAssetKeys();
-      const orphans = [...new Set([...idbKeys, ...Object.keys(get().assets)])].filter((id) => !referenced.has(id));
-      if (orphans.length === 0) return flash('고아 에셋이 없습니다.');
-      if (!window.confirm(`어디서도 참조되지 않는 에셋 ${orphans.length}개를 삭제할까요? 되돌릴 수 없습니다.`)) return;
-      await deleteAssets(orphans);
+      const metaMap = get().assets;
+      const orphanIds = diffOrphanIds(referenced, idbKeys, Object.keys(metaMap));
+      if (orphanIds.length === 0) return [];
+      const infos = await getAssetInfos(orphanIds);
+      const items: OrphanAsset[] = orphanIds.map((id) => {
+        const meta = metaMap[id];
+        const info = infos.get(id);
+        return {
+          id,
+          kind: meta?.kind,
+          filename: meta?.filename,
+          createdAt: meta?.createdAt,
+          size: info?.size ?? 0,
+          mime: meta?.mime ?? info?.mime ?? '',
+          // getAssetInfos 는 IDB 에 blob 이 없는 id 를 결과에서 빼므로, 미스 = 메타만 남은 항목.
+          missing: !info,
+        };
+      });
+      // 최신순(생성일 없는 항목 — 메타 없는 협업 캐시 — 은 맨 뒤로).
+      items.sort((a, b) => (b.createdAt ?? -Infinity) - (a.createdAt ?? -Infinity));
+      return items;
+    },
+
+    deleteOrphanAssets: async (ids) => {
+      if (ids.length === 0) return;
+      await deleteAssets(ids);
+      // orphans 가 커질 수 있어 Object.entries().filter(id => orphans.includes(id)) 같은 O(n²) 대신
+      // Set 조회로 가지친다(옛 cleanupOrphanAssets 는 .includes 를 썼다).
+      const idSet = new Set(ids);
       set((s) => ({
-        assets: Object.fromEntries(Object.entries(s.assets).filter(([id]) => !orphans.includes(id))),
+        assets: Object.fromEntries(Object.entries(s.assets).filter(([id]) => !idSet.has(id))),
       }));
       autoSave();
-      flash(`고아 에셋 ${orphans.length}개를 삭제했습니다.`, 'success');
+      flash(`고아 에셋 ${ids.length}개를 삭제했습니다.`, 'success');
     },
 
     setToast: (msg) => {

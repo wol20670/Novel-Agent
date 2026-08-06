@@ -199,6 +199,29 @@ export interface AssetMeta {
   createdAt: number;
 }
 
+/**
+ * 고아 에셋 정리 UI(findOrphanAssets 반환)에 보여줄 항목 하나. kind/filename/createdAt 이 optional
+ * 인 이유: ensureAsset(src/collab/assetsSync.ts)이 협업으로 받은 blob 을 AssetMeta 없이 IndexedDB
+ * 에만 캐싱해두는 정상 케이스가 있어, 그런 id 는 메타 자체가 없다(고아이긴 해도 "무슨 종류인지"를
+ * 알 길이 없다) — AssetKind 는 export 되어 있지 않으므로 AssetMeta['kind'] 로 참조한다.
+ */
+export interface OrphanAsset {
+  id: string;
+  kind?: AssetMeta['kind'];
+  filename?: string;
+  createdAt?: number;
+  /** bytes. */
+  size: number;
+  /** 메타의 mime 우선, 없으면 blob.type(그것도 없으면 ''). */
+  mime: string;
+  /**
+   * IndexedDB 에 바이너리가 없고 메타만 남은 항목(transfer.ts 도 같은 케이스를 건너뛴다).
+   * size 를 알 수 없어 0 이 들어오므로, UI 가 "0 B + 영원히 로딩 중인 썸네일"이라는 고장난
+   * 모습으로 보여주지 않도록 구분해 표시하라는 표시. 지울 게 메타뿐이라 삭제 자체는 유효하다.
+   */
+  missing?: boolean;
+}
+
 export interface Project {
   title: string;
   author: string;

@@ -11,6 +11,7 @@ import {
   type Expression,
   type Locale,
   type Scene,
+  type OrphanAsset,
 } from '../types';
 import { backgroundKey, bgmKey, hasBgm } from '../renpy/generate';
 import { useAssetUrl } from './useAssetUrl';
@@ -19,6 +20,7 @@ import Spinner from './Spinner';
 import VoiceLab from './VoiceLab';
 import VoiceReview from './VoiceReview';
 import MainMenuGui from './MainMenuGui';
+import OrphanCleanupModal from './OrphanCleanupModal';
 
 // ── 이름(의미) 기준 그룹화 — 같은 이름 = 하나의 에셋(업로드 1회, 모든 장면 공유) ──
 
@@ -244,19 +246,54 @@ function MenuArtRow({ which, label }: { which: 'main' | 'game'; label: string })
   );
 }
 
-/** 어디서도 참조되지 않는 IndexedDB 에셋 blob 을 정리 — 확인·토스트는 액션 안에서 처리. */
+/**
+ * 어디서도 참조되지 않는 IndexedDB 에셋 blob 을 찾아 보여주고, 사용자가 고른 것만 지운다.
+ * 예전엔 개수만 보여주는 window.confirm 으로 즉시 전체 하드 삭제했는데, 고아 blob 은 에셋 탭
+ * 어디에도 안 보여서(이 탭은 프로젝트 구조를 순회해 렌더함) "안 쓰는 이미지가 없는데 고아가 많다고
+ * 나온다"는 혼란을 낳았다 — 지금은 OrphanCleanupModal 이 실물(썸네일·파일명·크기)을 보여준다.
+ */
 function CleanupSection() {
-  const cleanupOrphanAssets = useStore((s) => s.cleanupOrphanAssets);
+  // 필드 단위 구독 — findOrphanAssets/deleteOrphanAssets 는 store 함수 참조라 마운트 후 안 바뀌지만,
+  // 관례상(CLAUDE.md) whole-project 셀렉터를 쓰지 않는다.
+  const findOrphanAssets = useStore((s) => s.findOrphanAssets);
+  const deleteOrphanAssets = useStore((s) => s.deleteOrphanAssets);
+  const setToast = useStore((s) => s.setToast);
+  const [orphans, setOrphans] = useState<OrphanAsset[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const openModal = async () => {
+    setLoading(true);
+    try {
+      const found = await findOrphanAssets();
+      if (found.length === 0) setToast('고아 에셋이 없습니다.');
+      else setOrphans(found);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <section>
       <h3 className="section-title mb-1">🧹 저장소 정리</h3>
       <p className="text-xs text-gray-500 mb-3">
         옛 업로드를 다른 파일로 교체하거나 캐릭터·장면을 지우면, 더는 어디서도 쓰이지 않는 파일이 브라우저 저장소에
-        남을 수 있습니다. 지금은 아무 데도 연결되지 않은 파일만 찾아 지웁니다.
+        남을 수 있습니다. 협업으로 받았지만 이 프로젝트가 참조하지 않는 캐시나, 대본 재분석으로 이름 연결이 끊긴
+        옛 파일도 여기 섞여 있을 수 있습니다. 아무 데도 연결되지 않은 파일을 찾아 보여주고, 고른 것만 지웁니다.
       </p>
-      <button className="btn-ghost text-[11px] text-gray-400 hover:text-rose-500" onClick={() => void cleanupOrphanAssets()}>
-        참조되지 않는 에셋 정리
+      <button
+        className="btn-ghost text-[11px] text-gray-400 hover:text-rose-500"
+        disabled={loading}
+        onClick={() => void openModal()}
+      >
+        {loading ? <Spinner /> : '참조되지 않는 에셋 정리'}
       </button>
+      {orphans && (
+        <OrphanCleanupModal
+          orphans={orphans}
+          onClose={() => setOrphans(null)}
+          onDelete={(ids) => deleteOrphanAssets(ids)}
+        />
+      )}
     </section>
   );
 }

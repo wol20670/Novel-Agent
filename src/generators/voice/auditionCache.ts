@@ -1,6 +1,6 @@
 // 보이스 오디션(캐릭터 프리셋 미리듣기) 오디오 캐시 — 별도 IndexedDB DB. 프로젝트 에셋 저장소
 // (src/storage/assetStore.ts, DB 'novel-agent')와 완전히 분리한다: 고아 에셋 정리
-// (store.ts cleanupOrphanAssets)가 프로젝트에서 참조 안 되는 IDB 키를 전부 지우는데, 오디션
+// (store.ts findOrphanAssets/deleteOrphanAssets)가 프로젝트에서 참조 안 되는 IDB 키를 전부 지우는데, 오디션
 // 클립은 프로젝트에 저장되지 않는 "미리듣기 전용" 캐시라 그 정리 대상에 걸리면 크레딧 써서
 // 만든 미리듣기가 조용히 사라진다(src/fonts/fontCache.ts 와 같은 격리 이유).
 
