@@ -16,11 +16,17 @@ import {
   MAIN_MENU_SLOTS,
   MENU_BUTTON_STATES,
   menuButtonFile,
+  QUICK_MENU_SLOTS,
+  QUICK_BUTTON_STATES,
+  quickButtonFile,
+  QUICK_PANEL_FILE,
   type Character,
   type MainMenuPresetId,
   type MenuButtonSlot,
   type MenuButtonState,
   type Project,
+  type QuickButtonSlot,
+  type QuickButtonState,
   type Scene,
 } from '../src/types';
 import { getAsset } from '../src/storage/assetStore';
@@ -143,6 +149,17 @@ function allButtonsMainMenuUi(): NonNullable<Project['mainMenuUi']> {
   return { buttons, logo: 'asset-logo-1' };
 }
 
+/** 10슬롯 × 5상태(press 포함 — renpySupported=false 라 출력엔 안 나가야 정상) 전부 업로드 + 보조 패널. */
+function allButtonsQuickMenuUi(): NonNullable<Project['quickMenuUi']> {
+  const buttons: Partial<Record<QuickButtonSlot, Partial<Record<QuickButtonState, string>>>> = {};
+  for (const slot of QUICK_MENU_SLOTS) {
+    const states: Partial<Record<QuickButtonState, string>> = {};
+    for (const state of QUICK_BUTTON_STATES) states[state.id] = `asset-qbtn-${slot.id}-${state.id}`;
+    buttons[slot.id] = states;
+  }
+  return { buttons, panel: 'asset-quick-panel-1' };
+}
+
 /** gui.rpy/screens.rpy(텍스트)가 참조하는 game/ 상대 경로 중, files 목록에 실제로 없는 것들. */
 async function danglingRefs(project: Project): Promise<string[]> {
   const { files } = await collectProjectFiles(project);
@@ -247,6 +264,10 @@ describe('zip 에셋 불변식 매트릭스', () => {
       await expectNoDangling(kitchenSinkProject({ mainMenuUi: { preset: presetId } }));
     });
   }
+
+  it('8) 퀵메뉴 10슬롯 × 전 상태 업로드 + 보조 패널', async () => {
+    await expectNoDangling(kitchenSinkProject({ quickMenuUi: allButtonsQuickMenuUi() }));
+  });
 });
 
 // ── 타겟 회귀 3건 ────────────────────────────────────────────────────────────
@@ -312,5 +333,36 @@ describe('회귀 (c): 일본어 폰트 참조(guiRpy opts.locales) vs 번들 조
       const dangling = await danglingRefs(project);
       expect(dangling).toEqual([]);
     });
+  });
+});
+
+describe('회귀 (d): 퀵메뉴 버튼/패널 assetId 는 있지만 실제 blob 이 사라진 경우(고아 참조)', () => {
+  it('resolveQuickMenuArt 가 blob 없는 상태를 gui.rpy 생성 전에 가지치기한다', async () => {
+    vi.mocked(getAsset).mockImplementation(async (id: string) =>
+      id === 'asset-qbtn-history-idle' ? undefined : fakeBlob(id),
+    );
+    const project = kitchenSinkProject({
+      quickMenuUi: { buttons: { history: { idle: 'asset-qbtn-history-idle' } } },
+    });
+    // 고쳐지기 전 재현은 main-menu 쪽 회귀 (a)와 동일한 형태 — resolveQuickMenuArt 가 blob 없는
+    // 상태를 미리 걸러내 애초에 참조가 없어야 한다.
+    await expectNoDangling(project);
+  });
+
+  it('패널도 같은 패턴 — blob 없으면 패널 없이(버튼은 유지) 안전하게 폴백한다', async () => {
+    vi.mocked(getAsset).mockImplementation(async (id: string) =>
+      id === 'asset-quick-panel-missing' ? undefined : fakeBlob(id),
+    );
+    const project = kitchenSinkProject({
+      quickMenuUi: {
+        buttons: { history: { idle: 'asset-qbtn-history-idle' } },
+        panel: 'asset-quick-panel-missing',
+      },
+    });
+    const { files } = await collectProjectFiles(project);
+    const written = new Set(files.map((f) => f.path));
+    expect(written.has(`game/${quickButtonFile('history', 'idle')}`)).toBe(true);
+    expect(written.has(`game/${QUICK_PANEL_FILE}`)).toBe(false);
+    await expectNoDangling(project);
   });
 });

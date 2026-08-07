@@ -12,6 +12,9 @@ import type {
   MainMenuLayout,
   MainMenuPresetId,
   OrphanAsset,
+  QuickButtonSlot,
+  QuickButtonState,
+  QuickMenuLayout,
 } from './types';
 import {
   emptyProject,
@@ -24,6 +27,11 @@ import {
   matchMenuButtonFile,
   MAIN_MENU_SLOTS,
   MENU_BUTTON_STATES,
+  quickButtonFile,
+  QUICK_PANEL_FILE,
+  matchQuickButtonFile,
+  QUICK_MENU_SLOTS,
+  QUICK_BUTTON_STATES,
 } from './types';
 import { collectUntranslated } from './generators/translate/collect';
 import { translateBatch, chunkItems, isFatalTranslateError } from './generators/translate';
@@ -288,6 +296,20 @@ interface State {
   setMenuLabel: (slot: MenuButtonSlot, part: 'main' | 'sub', value: string) => void;
   /** 메인 메뉴 버튼 텍스트 폰트(주/부) 지정. undefined 면 폴백 규칙(주=본문 폰트, 부=주 폰트)으로 복귀. */
   setMenuFont: (which: 'main' | 'sub', fontId: string | undefined) => void;
+
+  // 인게임 우측 퀵메뉴 이미지 GUI(업로드 전용) — mainMenuUi 와 동일 계약(버튼 슬롯×상태 + 보조 패널).
+  /** 버튼 한 장(슬롯·상태) 업로드. */
+  importQuickButton: (slot: QuickButtonSlot, state: QuickButtonState, file: File) => Promise<void>;
+  /** 버튼 한 장(슬롯·상태) 업로드 해제. */
+  clearQuickButton: (slot: QuickButtonSlot, state: QuickButtonState) => Promise<void>;
+  /** 파일명 자동 매칭 일괄 업로드(예: GUI_기록_기본.png). 매칭 실패 파일은 토스트로 안내. */
+  importQuickButtons: (files: File[]) => Promise<void>;
+  /** 퀵메뉴 보조 패널(버튼 뒤 판) 업로드. */
+  importQuickPanel: (file: File) => Promise<void>;
+  /** 퀵메뉴 보조 패널 업로드 해제. */
+  clearQuickPanel: () => Promise<void>;
+  /** 퀵메뉴 좌표 오버라이드(panelX/panelY/btnX/menuY/listY/listStep 부분 갱신). */
+  setQuickMenuLayout: (patch: Partial<QuickMenuLayout>) => void;
 
   // 설정/저장
   /**
@@ -1808,6 +1830,170 @@ export const useStore = create<State>((set, get) => {
       if (fontId) mainMenuUi[key] = fontId;
       else delete mainMenuUi[key];
       get().updateProjectMeta({ mainMenuUi });
+    },
+
+    importQuickButton: async (slot, state, file) => {
+      // press(클릭 중) 상태는 Ren'Py imagebutton 이 지원하지 않는다 — importMenuButton 과 같은 이유
+      // (activate_ 프리픽스를 실제로 세팅하는 코드가 엔진에 없는 죽은 슬롯).
+      if (!QUICK_BUTTON_STATES.find((x) => x.id === state)?.renpySupported) {
+        flash("클릭(눌림) 이미지는 Ren'Py 가 지원하지 않아 적용할 수 없습니다.");
+        return;
+      }
+      try {
+        const id = await uploadAsset(file, 'background', `quick_${quickButtonFile(slot, state).split('/').pop()}`);
+        const prev = get().project.quickMenuUi?.buttons?.[slot]?.[state];
+        await commitAssetSwap(
+          (s) => ({
+            project: {
+              ...s.project,
+              quickMenuUi: {
+                ...s.project.quickMenuUi,
+                buttons: {
+                  ...s.project.quickMenuUi?.buttons,
+                  [slot]: { ...s.project.quickMenuUi?.buttons?.[slot], [state]: id },
+                },
+              },
+            },
+          }),
+          prev ? [prev] : [],
+          id,
+        );
+        const slotLabel = QUICK_MENU_SLOTS.find((x) => x.id === slot)?.label ?? slot;
+        const stateLabel = QUICK_BUTTON_STATES.find((x) => x.id === state)?.label ?? state;
+        flash(`${slotLabel} 버튼(${stateLabel}) 이미지를 적용했습니다.`);
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    clearQuickButton: async (slot, state) => {
+      const prev = get().project.quickMenuUi?.buttons?.[slot]?.[state];
+      await commitAssetSwap((s) => {
+        const slotStates = { ...s.project.quickMenuUi?.buttons?.[slot] };
+        delete slotStates[state];
+        return {
+          project: {
+            ...s.project,
+            quickMenuUi: {
+              ...s.project.quickMenuUi,
+              buttons: { ...s.project.quickMenuUi?.buttons, [slot]: slotStates },
+            },
+          },
+        };
+      }, prev ? [prev] : []);
+      const slotLabel = QUICK_MENU_SLOTS.find((x) => x.id === slot)?.label ?? slot;
+      const stateLabel = QUICK_BUTTON_STATES.find((x) => x.id === state)?.label ?? state;
+      flash(`${slotLabel} 버튼(${stateLabel}) 이미지를 해제했습니다.`);
+    },
+
+    // 파일명 자동 매칭 일괄 업로드(matchQuickButtonFile) — importMenuButtons 와 동일 패턴: 매칭된
+    // 것만 업로드하고 한 번의 commitAssetSwap 으로 반영. 매칭 실패 파일은 조용히 버리지 않고
+    // 파일명을 토스트에 함께 보여준다. press(클릭) 매칭분은 "인식 실패"와 원인이 다르므로
+    // "건너뜀"으로 따로 안내한다.
+    importQuickButtons: async (files) => {
+      const matched: { slot: QuickButtonSlot; state: QuickButtonState; file: File }[] = [];
+      const unmatched: string[] = [];
+      const skippedPress: string[] = [];
+      for (const file of files) {
+        const m = matchQuickButtonFile(file.name);
+        if (!m) {
+          unmatched.push(file.name);
+          continue;
+        }
+        if (QUICK_BUTTON_STATES.find((x) => x.id === m.state)?.renpySupported === false) {
+          skippedPress.push(file.name);
+          continue;
+        }
+        matched.push({ slot: m.slot, state: m.state, file });
+      }
+      const describe = (names: string[]) => {
+        const shown = names.slice(0, 3).join(', ');
+        const rest = names.length > 3 ? ` 외 ${names.length - 3}개` : '';
+        return `${shown}${rest}`;
+      };
+      if (matched.length === 0) {
+        const parts: string[] = [];
+        if (skippedPress.length) parts.push(`클릭 이미지는 지원하지 않아 제외: ${describe(skippedPress)}`);
+        if (unmatched.length) parts.push(`인식 실패: ${describe(unmatched)}`);
+        flash(parts.length ? parts.join(' / ') : '적용할 파일이 없습니다.');
+        return;
+      }
+      try {
+        const prevIds: string[] = [];
+        const updates: { slot: QuickButtonSlot; state: QuickButtonState; id: string }[] = [];
+        for (const { slot, state, file } of matched) {
+          const id = await uploadAsset(file, 'background', `quick_${quickButtonFile(slot, state).split('/').pop()}`);
+          const prev = get().project.quickMenuUi?.buttons?.[slot]?.[state];
+          if (prev) prevIds.push(prev);
+          updates.push({ slot, state, id });
+        }
+        await commitAssetSwap((s) => {
+          const buttons = { ...s.project.quickMenuUi?.buttons };
+          for (const u of updates) buttons[u.slot] = { ...buttons[u.slot], [u.state]: u.id };
+          return { project: { ...s.project, quickMenuUi: { ...s.project.quickMenuUi, buttons } } };
+        }, prevIds);
+        let msg = `퀵메뉴 버튼 ${updates.length}개를 적용했습니다.`;
+        if (skippedPress.length) {
+          msg += ` (클릭 이미지 ${skippedPress.length}개는 Ren'Py가 '누르는 중' 상태를 지원하지 않아 제외)`;
+        }
+        if (unmatched.length) msg += ` (인식 실패: ${describe(unmatched)})`;
+        flash(msg);
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    importQuickPanel: async (file) => {
+      try {
+        const id = await uploadAsset(file, 'background', `quick_${QUICK_PANEL_FILE.split('/').pop()}`);
+        // 패널 원본 가로/세로(px) — importTitleLogo 의 logoAspect 측정과 같은 이유(screensRpy 가
+        // 실제 비율로 배치). 실패해도 업로드는 성공시키고 조용히 치수만 비운다(screensRpy 폴백 232×625).
+        let panelWidth: number | undefined;
+        let panelHeight: number | undefined;
+        try {
+          const bitmap = await createImageBitmap(file);
+          if (bitmap.width > 0 && bitmap.height > 0) {
+            panelWidth = bitmap.width;
+            panelHeight = bitmap.height;
+          }
+          bitmap.close?.();
+        } catch {
+          // 치수 측정 실패 — panelWidth/panelHeight 미지정(screensRpy 폴백 사용).
+        }
+        const prev = get().project.quickMenuUi?.panel;
+        await commitAssetSwap(
+          (s) => ({
+            project: {
+              ...s.project,
+              quickMenuUi: { ...s.project.quickMenuUi, panel: id, panelWidth, panelHeight },
+            },
+          }),
+          prev ? [prev] : [],
+          id,
+        );
+        flash('퀵메뉴 패널 이미지를 업로드했습니다.');
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    clearQuickPanel: async () => {
+      const prev = get().project.quickMenuUi?.panel;
+      await commitAssetSwap((s) => {
+        const quickMenuUi = { ...s.project.quickMenuUi };
+        delete quickMenuUi.panel;
+        delete quickMenuUi.panelWidth; // 패널이 없는데 이전 치수만 남으면 다음 업로드 전까지 의미 없는 값.
+        delete quickMenuUi.panelHeight;
+        return { project: { ...s.project, quickMenuUi } };
+      }, prev ? [prev] : []);
+      flash('퀵메뉴 패널 업로드를 해제했습니다(패널 없이 버튼만 표시).');
+    },
+
+    setQuickMenuLayout: (patch) => {
+      const { project } = get();
+      get().updateProjectMeta({
+        quickMenuUi: { ...project.quickMenuUi, layout: { ...project.quickMenuUi?.layout, ...patch } },
+      });
     },
 
     setCollabConfig: async (patch) => {

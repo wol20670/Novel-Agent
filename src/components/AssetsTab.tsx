@@ -20,6 +20,7 @@ import Spinner from './Spinner';
 import VoiceLab from './VoiceLab';
 import VoiceReview from './VoiceReview';
 import MainMenuGui from './MainMenuGui';
+import QuickMenuGui from './QuickMenuGui';
 import OrphanCleanupModal from './OrphanCleanupModal';
 import { isCollabReady } from '../collab';
 import { REMOTE_GRACE_OPTIONS } from '../assetRefs';
@@ -162,6 +163,8 @@ export default function AssetsTab() {
       </section>
 
       <MainMenuGui />
+
+      <QuickMenuGui />
 
       <section>
         <h3 className="section-title mb-1">🎬 CG 컷 <span className="text-gray-500 font-normal text-xs">· {cgs.length}종</span></h3>

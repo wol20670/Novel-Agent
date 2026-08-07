@@ -1,7 +1,16 @@
 // 승인된 장면들로 Ren'Py 프로젝트 파일 집합을 생성한다.
 // 파일 본문(텍스트)만 만들고, 바이너리 에셋(PNG/WAV)은 zip 빌더가 채운다.
 
-import type { Project, Scene, Line, Character, Expression, OutfitRule, MenuButtonState } from '../types';
+import type {
+  Project,
+  Scene,
+  Line,
+  Character,
+  Expression,
+  OutfitRule,
+  MenuButtonState,
+  QuickButtonState,
+} from '../types';
 import {
   RENPY_LANG,
   LOCALE_LABEL,
@@ -15,9 +24,19 @@ import {
   mainMenuPreset,
   mainMenuLabels,
   DEFAULT_MAIN_MENU_PRESET,
+  QUICK_MENU_SLOTS,
+  QUICK_BUTTON_STATES,
+  quickMenuLayout,
 } from '../types';
 import { SlugMap } from './slug';
-import { generateGuiFiles, resolveTheme, withGuiOverrides, DEFAULT_GRADIENT_HEIGHT, type MainMenuPlan } from './gui';
+import {
+  generateGuiFiles,
+  resolveTheme,
+  withGuiOverrides,
+  DEFAULT_GRADIENT_HEIGHT,
+  type MainMenuPlan,
+  type QuickMenuPlan,
+} from './gui';
 import { CONFIRM_STRINGS, UI_STRINGS, uiTr } from './gui/uiStrings';
 import { inferEmotion } from '../generators/emotion';
 import { enforceContrast } from '../generators/theme/color';
@@ -1007,6 +1026,38 @@ function buildMainMenuPlan(project: Project, hasItems: boolean, hasCg: boolean):
 }
 
 /**
+ * project.quickMenuUi(업로드된 버튼·패널 assetId) → screensRpy 가 바로 쓸 수 있는 렌더 계획.
+ * mainMenuUi 와 같은 계약 — quickMenuUi 자체가 없으면(대부분의 프로젝트) undefined.
+ * "활성화" 조건은 mainMenuPlan 보다 좁다 — 'menu'(토글) 슬롯의 idle 이미지 하나뿐이다. 토글 이미지가
+ * 없으면 이미지 모드를 앵커할 곳이 없고, 절반만 이미지인 어색한 메뉴가 되므로 아예 텍스트로 되돌린다.
+ */
+function buildQuickMenuPlan(project: Project): QuickMenuPlan | undefined {
+  const src = project.quickMenuUi;
+  if (!src) return undefined;
+  const buttons: QuickMenuPlan['buttons'] = {};
+  for (const slot of QUICK_MENU_SLOTS) {
+    const states = src.buttons?.[slot.id];
+    if (!states) continue;
+    const present: Partial<Record<QuickButtonState, true>> = {};
+    for (const st of QUICK_BUTTON_STATES) {
+      // press 도 여기 담길 수 있지만(store 가 이미 걸러내지만 방어적으로) screensRpy 는 절대 참조하지
+      // 않는다 — 엔진에 "누르는 중" 이미지 슬롯이 없다(MainMenuPlan.buttons 와 동일한 패턴).
+      if (states[st.id]) present[st.id] = true;
+    }
+    if (Object.keys(present).length) buttons[slot.id] = present;
+  }
+  if (!buttons.menu?.idle) return undefined; // 게이트: 토글 idle 이미지 필수.
+  return {
+    buttons,
+    hasPanel: !!src.panel,
+    panelWidth: src.panelWidth ?? 232,
+    panelHeight: src.panelHeight ?? 625,
+    layout: quickMenuLayout(project),
+    scale: project.height / 1080,
+  };
+}
+
+/**
  * buildZip 이 "이 폰트 슬롯은 blob 을 하나도 못 구했다"(커스텀 실패 + 대체용 기본 폰트마저 실패)를
  * 알려주는 신호 — src/zip/buildZip.ts 의 selectedFontFiles 가 실제 다운로드 결과를 보고 채운다.
  * true 인 슬롯은 fontGamePath(= "fonts/…", game/fonts/ 번들 필요) 대신 Ren'Py 엔진에 내장된
@@ -1099,6 +1150,7 @@ export function generateRenpyFiles(
       hasItems: items.length > 0,
       hasCg: cgs.length > 0,
       mainMenu: buildMainMenuPlan(project, items.length > 0, cgs.length > 0),
+      quickMenu: buildQuickMenuPlan(project),
       menuFonts: { main: menuTextFont, sub: menuSubTextFont },
     }),
     { path: 'README.md', content: readme(theme) },

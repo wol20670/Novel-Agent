@@ -309,6 +309,19 @@ export interface Project {
      */
     textOutline?: boolean;
   };
+  /**
+   * 인게임 우측 퀵메뉴 이미지 GUI(업로드 전용). 비어 있으면 기존 텍스트 알약 메뉴 그대로 나간다
+   * (회귀 0 — mainMenuUi 와 같은 계약). 'menu' 슬롯의 idle 이미지가 있어야 이미지 모드가 켜진다.
+   */
+  quickMenuUi?: {
+    buttons?: Partial<Record<QuickButtonSlot, Partial<Record<QuickButtonState, string>>>>; // assetId
+    /** 버튼 뒤 보조 패널 assetId(선택 — 없으면 패널 없이 버튼만 그린다). */
+    panel?: string;
+    /** 패널 원본 가로/세로(px). importQuickPanel 이 업로드 시점에 잰다. 없으면 232×625 로 가정. */
+    panelWidth?: number;
+    panelHeight?: number;
+    layout?: QuickMenuLayout;
+  };
 }
 
 /** 메인 메뉴 버튼 슬롯(순서 고정 — 처음부터→이어하기→불러오기→환경설정→갤러리→게임종료). */
@@ -364,6 +377,125 @@ export const MENU_BUTTON_STATES: { id: MenuButtonState; label: string; fileKeywo
   { id: 'press', label: '클릭', fileKeywords: ['클릭', '눌림', 'press'], renpySupported: false },
   { id: 'disabled', label: '비활성화', fileKeywords: ['비활성화', '비활성', 'disabled'], renpySupported: true },
 ];
+
+/**
+ * 인게임 우측 퀵메뉴 버튼 슬롯(순서 = 화면 표시 순서). 'menu' 는 나머지를 펼치는 토글이라
+ * 목록에서 따로 떼어 맨 위 고정 위치에 그린다(QUICK_LIST_SLOTS 참고).
+ * fileKeywords 는 일괄 업로드 파일명 자동 매칭용 — '저장'이 '빠른저장'의 부분문자열이지만
+ * matchLongestKeyword 가 긴 키워드부터 검사해 정확히 갈린다.
+ */
+export type QuickButtonSlot =
+  | 'menu'
+  | 'back'
+  | 'history'
+  | 'skip'
+  | 'auto'
+  | 'hide'
+  | 'save'
+  | 'qsave'
+  | 'qload'
+  | 'prefs';
+
+/**
+ * 퀵메뉴 버튼 이미지 상태. 메인 메뉴 4종에 'selected'(활성화)를 더한 것 —
+ * 스킵·자동은 켜져 있는 동안 Ren'Py 가 selected 상태가 되므로 전용 이미지를 쓸 수 있다.
+ * (메인 메뉴 쪽 MENU_BUTTON_STATES 에는 selected 를 넣지 않는다 — 거기엔 토글 버튼이 없어
+ *  업로드 그리드에 의미 없는 열이 하나 늘 뿐이다.)
+ */
+export type QuickButtonState = MenuButtonState | 'selected';
+
+export const QUICK_MENU_SLOTS: {
+  id: QuickButtonSlot;
+  label: string;
+  fileKeywords: string[];
+  /** 이 슬롯이 selected(활성화) 이미지를 쓰는가 — 스킵·자동만 해당. */
+  selectable?: boolean;
+}[] = [
+  { id: 'menu', label: '메뉴', fileKeywords: ['메뉴'] },
+  { id: 'back', label: '뒤로', fileKeywords: ['뒤로'] },
+  { id: 'history', label: '기록', fileKeywords: ['기록'] },
+  { id: 'skip', label: '스킵', fileKeywords: ['스킵'], selectable: true },
+  { id: 'auto', label: '자동', fileKeywords: ['자동'], selectable: true },
+  { id: 'hide', label: '숨기기', fileKeywords: ['숨기기'] },
+  { id: 'save', label: '저장', fileKeywords: ['저장'] },
+  { id: 'qsave', label: '빠른저장', fileKeywords: ['빠른저장'] },
+  { id: 'qload', label: '빠른불러오기', fileKeywords: ['빠른불러오기'] },
+  { id: 'prefs', label: '설정', fileKeywords: ['설정'] },
+];
+
+/** 'menu'(토글) 를 뺀 펼침 목록 — 화면에서 listY 부터 listStep 간격으로 쌓인다. */
+export const QUICK_LIST_SLOTS = QUICK_MENU_SLOTS.filter((s) => s.id !== 'menu');
+
+/**
+ * 퀵메뉴 버튼 상태 정의. press 가 renpySupported=false 인 이유는 MENU_BUTTON_STATES 와 같다
+ * (엔진에 "누르는 중" 이미지 슬롯이 없다 — 누르는 동안엔 hover 가 보인다).
+ * '비활성화'가 '활성화'를 포함하지만 matchLongestKeyword 가 긴 쪽을 먼저 보므로 안전하다.
+ */
+export const QUICK_BUTTON_STATES: {
+  id: QuickButtonState;
+  label: string;
+  fileKeywords: string[];
+  renpySupported: boolean;
+}[] = [
+  { id: 'idle', label: '기본', fileKeywords: ['기본'], renpySupported: true },
+  { id: 'hover', label: '마우스오버', fileKeywords: ['마우스오버', '마우스 오버', '호버', 'hover'], renpySupported: true },
+  { id: 'press', label: '클릭', fileKeywords: ['클릭', '눌림', 'press'], renpySupported: false },
+  { id: 'disabled', label: '비활성화', fileKeywords: ['비활성화', '비활성', 'disabled'], renpySupported: true },
+  { id: 'selected', label: '활성화', fileKeywords: ['활성화', 'selected', 'active'], renpySupported: true },
+];
+
+/**
+ * 퀵메뉴 좌표(전부 1920×1080 기준 px — 렌더 시점에 height/1080 배율을 곱해 굽는다).
+ * 사용자 제공 스펙: 패널 X1688/Y0(232×625), 버튼 X1718, 메뉴 Y16, 목록 Y82 부터 53px 간격.
+ * 메뉴(토글)와 목록 시작 Y 를 따로 두는 건 스펙상 그 사이만 간격이 다르기(66px) 때문이다.
+ */
+export interface QuickMenuLayout {
+  panelX?: number;
+  panelY?: number;
+  btnX?: number;
+  menuY?: number;
+  listY?: number;
+  /** 목록 버튼의 행 간격(버튼 높이 포함한 시작점 간 거리). */
+  listStep?: number;
+}
+
+export const DEFAULT_QUICK_MENU_LAYOUT: Required<QuickMenuLayout> = {
+  panelX: 1688,
+  panelY: 0,
+  btnX: 1718,
+  menuY: 16,
+  listY: 82,
+  listStep: 53,
+};
+
+/** 프로젝트에 저장된 값 위에 기본값을 덮어 최종 좌표를 만든다. */
+export function quickMenuLayout(p: Project): Required<QuickMenuLayout> {
+  return { ...DEFAULT_QUICK_MENU_LAYOUT, ...p.quickMenuUi?.layout };
+}
+
+/**
+ * Ren'Py 프로젝트 안의 퀵메뉴 이미지 경로(game/ 기준). screensRpy·buildZip 공용 —
+ * menuButtonFile 과 같은 이유로 여기가 단일 소스다(어긋나면 없는 파일 참조 → 런타임 크래시).
+ * 메인 메뉴는 `gui/menu/`, 퀵메뉴는 `gui/quick/` 로 네임스페이스를 분리한다.
+ */
+export function quickButtonFile(slot: QuickButtonSlot, state: QuickButtonState): string {
+  return `gui/quick/${slot}_${state}.png`;
+}
+
+/** 퀵메뉴 보조 패널(버튼 뒤에 깔리는 아이보리 판) 경로. */
+export const QUICK_PANEL_FILE = 'gui/quick/panel.png';
+
+/** 파일명 → 퀵메뉴 슬롯·상태. matchMenuButtonFile 과 동일한 정규화 규칙. */
+export function matchQuickButtonFile(
+  filename: string,
+): { slot: QuickButtonSlot; state: QuickButtonState } | undefined {
+  const withoutExt = filename.replace(/\.[^.]+$/, '');
+  const norm = withoutExt.replace(/^GUI_/i, '').replace(/\s+/g, '').toLowerCase();
+  const slot = matchLongestKeyword(norm, QUICK_MENU_SLOTS);
+  const state = matchLongestKeyword(norm, QUICK_BUTTON_STATES);
+  if (!slot || !state) return undefined;
+  return { slot, state };
+}
 
 /**
  * 메인 메뉴 배치 프리셋 5종. `align`/`direction` 은 screensRpy 의 컨테이너(vbox/hbox)·정렬 축을

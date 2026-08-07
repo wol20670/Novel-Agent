@@ -2,8 +2,19 @@
 // 텍스트 .rpy 는 generate.ts, 바이너리는 IndexedDB 의 생성 에셋을 쓰되
 // 아직 생성되지 않은 배경/CG/BGM 은 즉석 폴백(Canvas/합성)으로 채워 실행 가능한 ZIP 을 보장한다.
 
-import type { Project, MenuButtonSlot, MenuButtonState } from '../types';
-import { effectiveTextLocales, effectiveVoiceLocales, MAIN_MENU_SLOTS, MENU_BUTTON_STATES, menuButtonFile, TITLE_LOGO_FILE } from '../types';
+import type { Project, MenuButtonSlot, MenuButtonState, QuickButtonSlot, QuickButtonState } from '../types';
+import {
+  effectiveTextLocales,
+  effectiveVoiceLocales,
+  MAIN_MENU_SLOTS,
+  MENU_BUTTON_STATES,
+  menuButtonFile,
+  TITLE_LOGO_FILE,
+  QUICK_MENU_SLOTS,
+  QUICK_BUTTON_STATES,
+  quickButtonFile,
+  QUICK_PANEL_FILE,
+} from '../types';
 import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName, extFromMime } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
 import { sanitizeAscii } from '../project/safeName';
@@ -122,10 +133,20 @@ export async function collectProjectFiles(
   // 미리 가지치기한다(resolveMainMenuArt, 위 — adopt*Fonts 와 동일 패턴). blobs 는 아래 파일
   // 목록 조립부가 재사용해 같은 assetId 로 getAsset 을 두 번 부르지 않는다.
   const { mainMenuUi: effectiveMainMenuUi, blobs: menuArtBlobs } = await resolveMainMenuArt(mainMenuUiWithFonts);
+  // 퀵메뉴는 mainMenuUi 와 달리 폰트 필드가 없으므로(QuickMenuLayout 에 menuFontId 류가 없다)
+  // adoptGuiOverrideFonts/adoptMainMenuUiFonts 대상이 아니다 — project.quickMenuUi 를 그대로 넣는다.
+  const { quickMenuUi: effectiveQuickMenuUi, blobs: quickArtBlobs } = await resolveQuickMenuArt(project.quickMenuUi);
   const effectiveProject: Project =
-    effectiveGuiOverrides === project.guiOverrides && effectiveMainMenuUi === project.mainMenuUi
+    effectiveGuiOverrides === project.guiOverrides &&
+    effectiveMainMenuUi === project.mainMenuUi &&
+    effectiveQuickMenuUi === project.quickMenuUi
       ? project
-      : { ...project, guiOverrides: effectiveGuiOverrides, mainMenuUi: effectiveMainMenuUi };
+      : {
+          ...project,
+          guiOverrides: effectiveGuiOverrides,
+          mainMenuUi: effectiveMainMenuUi,
+          quickMenuUi: effectiveQuickMenuUi,
+        };
 
   // fontResult.unresolved: 커스텀 폰트뿐 아니라 대체용 기본 폰트(나눔고딕)까지 못 구한 경우 —
   // gui.rpy 가 game/fonts/ 에 없는 파일을 참조하지 않도록 generateRenpyFiles 에 신호를 넘긴다
@@ -283,6 +304,25 @@ export async function collectProjectFiles(
   if (effectiveMainMenuUi?.logo) {
     const blob = menuArtBlobs.get(effectiveMainMenuUi.logo);
     if (blob) out.push({ path: `game/${TITLE_LOGO_FILE}`, data: blob });
+  }
+
+  // 퀵메뉴 이미지 GUI(업로드 전용) — mainMenuUi 블록과 동일 패턴(경로는 quickButtonFile/QUICK_PANEL_FILE
+  // 단일 소스, screensRpy 도 같은 헬퍼 사용). 미업로드 버튼은 선택 기능이라 placeholders 를 올리지
+  // 않는다. effectiveQuickMenuUi 는 이미 resolveQuickMenuArt 가 blob 없는 상태/패널을 걸러낸 뒤라
+  // 여기 남은 assetId 는 항상 quickArtBlobs 에 있다(같은 assetId 로 getAsset 을 또 부르지 않음).
+  for (const slot of QUICK_MENU_SLOTS) {
+    for (const state of QUICK_BUTTON_STATES) {
+      if (!state.renpySupported) continue; // press — 저장돼 있어도 출력하지 않는다.
+      const assetId = effectiveQuickMenuUi?.buttons?.[slot.id]?.[state.id];
+      if (!assetId) continue;
+      const blob = quickArtBlobs.get(assetId);
+      if (!blob) continue; // 방어적(resolveQuickMenuArt 를 거쳤으면 항상 있어야 함).
+      out.push({ path: `game/${quickButtonFile(slot.id, state.id)}`, data: blob });
+    }
+  }
+  if (effectiveQuickMenuUi?.panel) {
+    const blob = quickArtBlobs.get(effectiveQuickMenuUi.panel);
+    if (blob) out.push({ path: `game/${QUICK_PANEL_FILE}`, data: blob });
   }
 
   // 버튼 배경 PNG(gui.button_properties 요구) — 제네릭 prefix 세트.
@@ -533,6 +573,51 @@ async function resolveMainMenuArt(
   }
 
   return { mainMenuUi: { ...mainMenuUi, buttons, logo }, blobs };
+}
+
+/**
+ * 퀵메뉴 버튼/패널 blob 을 generateRenpyFiles 전에 미리 확보하고, 실제로 blob 이 있는 상태/패널만
+ * 남도록 quickMenuUi 를 가지치기한다 — resolveMainMenuArt 와 정확히 같은 패턴(이유도 같다: assetId
+ * 는 있는데 blob 이 없는 경우 없는 파일을 참조하는 zip 이 나가 크래시한다). panelWidth/panelHeight
+ * 는 blob 을 참조하지 않는 순수 치수값이라 그대로 통과시킨다(패널 자체가 가지치기되면 screensRpy
+ * 가 hasPanel=false 로 보고 폴백하므로 치수값이 남아 있어도 무해).
+ */
+async function resolveQuickMenuArt(
+  quickMenuUi: Project['quickMenuUi'],
+): Promise<{ quickMenuUi: Project['quickMenuUi']; blobs: Map<string, Blob> }> {
+  if (!quickMenuUi) return { quickMenuUi, blobs: new Map() };
+  const blobs = new Map<string, Blob>();
+
+  const buttons: Partial<Record<QuickButtonSlot, Partial<Record<QuickButtonState, string>>>> = {};
+  for (const slot of QUICK_MENU_SLOTS) {
+    const states = quickMenuUi.buttons?.[slot.id];
+    if (!states) continue;
+    const kept: Partial<Record<QuickButtonState, string>> = {};
+    for (const state of QUICK_BUTTON_STATES) {
+      const assetId = states[state.id];
+      if (!assetId) continue;
+      if (!state.renpySupported) {
+        // press — 메인 메뉴와 같은 이유로 값은 보존하되(레거시 데이터 무손실) 아래 파일 목록
+        // 조립부는 이 상태를 절대 쓰지 않는다.
+        kept[state.id] = assetId;
+        continue;
+      }
+      const blob = await getAsset(assetId);
+      if (!blob) continue; // 고아 참조(blob 소실) — 이 상태만 조용히 제외해 댕글링을 막는다.
+      blobs.set(assetId, blob);
+      kept[state.id] = assetId;
+    }
+    if (Object.keys(kept).length) buttons[slot.id] = kept;
+  }
+
+  let panel = quickMenuUi.panel;
+  if (panel) {
+    const blob = await getAsset(panel);
+    if (blob) blobs.set(panel, blob);
+    else panel = undefined; // blob 없으면 "패널 없음"(버튼만 표시)으로 안전하게 폴백.
+  }
+
+  return { quickMenuUi: { ...quickMenuUi, buttons, panel }, blobs };
 }
 
 /** 브라우저 다운로드 트리거. */

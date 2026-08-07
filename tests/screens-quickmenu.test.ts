@@ -43,3 +43,16 @@ describe('quick_menu "숨기기" 버튼 — 대사창/메뉴를 감출 방법이
     expect(ui).toContain('new "Hide UI"');
   });
 });
+
+describe('quickMenuUi 미지정 — 텍스트 퀵메뉴 회귀 0 (mainMenuUi 와 같은 계약)', () => {
+  it('quickMenuUi 가 없으면 quick_menu 화면은 이미지 모드로 전환되지 않는다', () => {
+    const p = projectWith([scene({ lines: [{ kind: 'narration', text: '안녕' }] })]);
+    const { files } = generateRenpyFiles(p);
+    const s = contentOf(files, 'game/screens.rpy');
+
+    expect(s).toContain('textbutton _("메뉴"):');
+    // 이 프로젝트는 mainMenuUi 도 미설정이라 파일 전체에 imagebutton/gui/quick 참조가 전혀 없어야 한다.
+    expect(s).not.toContain('imagebutton');
+    expect(s).not.toContain('gui/quick/');
+  });
+});

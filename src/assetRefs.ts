@@ -96,6 +96,10 @@ export function collectReferencedAssetIds(project: Project, opts?: { includeVoic
   for (const states of Object.values(project.mainMenuUi?.buttons ?? {})) {
     Object.values(states ?? {}).forEach(add);
   }
+  add(project.quickMenuUi?.panel);
+  for (const states of Object.values(project.quickMenuUi?.buttons ?? {})) {
+    Object.values(states ?? {}).forEach(add);
+  }
   return ids;
 }
 
@@ -142,6 +146,10 @@ export function collectReferencedAssetKinds(project: Project): Map<string, Asset
   add(project.menuArt?.game, 'cg');
   add(project.mainMenuUi?.logo, 'cg');
   for (const states of Object.values(project.mainMenuUi?.buttons ?? {})) {
+    Object.values(states ?? {}).forEach((id) => add(id, 'cg'));
+  }
+  add(project.quickMenuUi?.panel, 'cg');
+  for (const states of Object.values(project.quickMenuUi?.buttons ?? {})) {
     Object.values(states ?? {}).forEach((id) => add(id, 'cg'));
   }
   return kinds;

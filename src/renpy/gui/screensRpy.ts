@@ -5,8 +5,26 @@
 //   - nvl/bubble 화면과 phone 전용(이미지) 스타일은 제외(우리는 ADV 일반 대사)
 // 테마 의존 값이 없으므로 정적이지만, 다국어 선택 UI 주입을 위해 인자를 받는다.
 
-import type { Locale, MenuButtonSlot, MenuButtonState, MainMenuLayout, MainMenuPresetDef } from '../../types';
-import { RENPY_LANG, LOCALE_LABEL, MAIN_MENU_SLOTS, menuButtonFile, TITLE_LOGO_FILE } from '../../types';
+import type {
+  Locale,
+  MenuButtonSlot,
+  MenuButtonState,
+  MainMenuLayout,
+  MainMenuPresetDef,
+  QuickButtonSlot,
+  QuickButtonState,
+  QuickMenuLayout,
+} from '../../types';
+import {
+  RENPY_LANG,
+  LOCALE_LABEL,
+  MAIN_MENU_SLOTS,
+  menuButtonFile,
+  TITLE_LOGO_FILE,
+  QUICK_LIST_SLOTS,
+  quickButtonFile,
+  QUICK_PANEL_FILE,
+} from '../../types';
 import type { GuiLocales } from './index';
 // '../generate' 가 아니라 '../escape' 에서 직접 가져온다 — generate.ts → gui/index.ts →
 // screensRpy.ts 로 이미 한 방향 의존이 있어, 여기서 '../generate' 를 다시 참조하면 순환 import가
@@ -54,6 +72,26 @@ export interface MainMenuPlan {
    * 없앤 탓에 텍스트 프리셋은 배경 아트 위에 맨몸으로 놓인다 — 외곽선으로 자체 대비를 만든다.
    */
   textOutline: boolean;
+}
+
+/**
+ * 인게임 우측 퀵메뉴 이미지 GUI 렌더 계획(generate.ts 가 project.quickMenuUi 로 만들어 넘긴다).
+ * mainMenuUi 와 같은 계약 — 'menu'(토글) 슬롯의 idle 이미지가 없으면 generate.ts 의
+ * buildQuickMenuPlan 이 undefined 를 반환하고, screensRpy 는 기존 텍스트 알약 퀵메뉴를 그대로 낸다.
+ */
+export interface QuickMenuPlan {
+  /** 슬롯 → 실제 존재하는 상태 이미지 집합. press 도 담길 수 있으나 렌더링에서 절대 참조하지 않는다
+   * (엔진에 "누르는 중" 이미지 슬롯이 없다 — MainMenuPlan.buttons 와 동일한 이유). */
+  buttons: Partial<Record<QuickButtonSlot, Partial<Record<QuickButtonState, true>>>>;
+  /** 버튼 뒤 보조 패널 이미지 존재 여부 — 없으면 패널 없이 버튼만 그린다. */
+  hasPanel: boolean;
+  /** 패널 원본 px(기본값 232×625 병합 완료). */
+  panelWidth: number;
+  panelHeight: number;
+  /** 1920 기준 px(quickMenuLayout() 으로 기본값 병합됨). */
+  layout: Required<QuickMenuLayout>;
+  /** height / 1080 — 좌표를 이 배율로 곱해 최종 픽셀 값을 굽는다(런타임 계산 없음, gui.scale() 사용 금지). */
+  scale: number;
 }
 
 /**
@@ -589,6 +627,167 @@ screen cg_gallery():
                         text _("???") xalign 0.5 size gui.scale(16) color gui.insensitive_color
 `;
 
+/**
+ * 원본(텍스트 알약 메뉴) screen quick_menu() 정의(데스크톱) — base 템플릿의 `${quickMenuScreen}` 자리에
+ * 그대로 보간되는 "기본값"(quickMenuUi 미지정일 때). mainMenuUi 와 같은 회귀 0 계약 — 원본 텍스트가
+ * 여기 단 한 곳에만 존재한다(DEFAULT_MAIN_MENU_SCREEN 과 동일 패턴). 터치 variant(별도
+ * `screen quick_menu(): variant "touch"`)와 style quick_button/quick_gear_button 블록은 이 상수와
+ * 무관하게 base 템플릿에 항상 그대로 남는다(둘 다 텍스트 폴백·터치에서 계속 쓰인다).
+ */
+const DEFAULT_QUICK_MENU_SCREEN = `screen quick_menu():
+
+    zorder 100
+
+    if quick_menu:
+
+        # 우상단에 항상 떠 있는 톱니바퀴(메뉴) 버튼 — 누르면 바로 아래로 목록이 펼쳐진다.
+        # (진짜 원형 아이콘은 별도 PNG 에셋이 있어야 해서, 우선 둥근 느낌의 알약형 버튼으로 구현.)
+        textbutton _("메뉴"):
+            style "quick_gear_button"
+            xalign 1.0
+            yalign 0.0
+            action ToggleVariable("quick_menu_expanded")
+
+        if quick_menu_expanded:
+            # 개별 알약 버튼을 세로로 붙여 쌓는다 — 공용 style quick_menu(xoffset -12, spacing 8,
+            # 터치 variant 가 사용)는 쓰지 않고 인라인 속성으로 메뉴 버튼과 우측 끝을 맞춘다.
+            vbox:
+                style_prefix "quick"
+                xalign 1.0
+                yalign 0.0
+                yoffset gui.scale(56)
+                spacing 0
+
+                textbutton _("뒤로") action [Rollback(), SetVariable("quick_menu_expanded", False)]
+                textbutton _("기록") action [ShowMenu('history'), SetVariable("quick_menu_expanded", False)]
+                textbutton _("스킵") action [Skip(), SetVariable("quick_menu_expanded", False)] alternate Skip(fast=True, confirm=True)
+                textbutton _("자동") action [Preference("auto-forward", "toggle"), SetVariable("quick_menu_expanded", False)]
+                # 대사창·메뉴를 숨기고 CG/배경을 감상 — 아무 곳이나 클릭하면 자동으로 돌아온다
+                # (Ren'Py 기본 h 키·가운데 클릭과 동일한 동작을 버튼으로도 노출). 드롭다운을 먼저
+                # 접어야(SetVariable 먼저) HideInterface 가 클릭을 기다리는 동안 메뉴가 깔끔하게 사라진다.
+                textbutton _("숨기기") action [SetVariable("quick_menu_expanded", False), HideInterface()]
+                textbutton _("저장") action [ShowMenu('save'), SetVariable("quick_menu_expanded", False)]
+                textbutton _("빠른저장") action [QuickSave(), SetVariable("quick_menu_expanded", False)]
+                textbutton _("빠른불러오기") action [QuickLoad(), SetVariable("quick_menu_expanded", False)]
+                textbutton _("설정") action [ShowMenu('preferences'), SetVariable("quick_menu_expanded", False)]`;
+
+/**
+ * 퀵메뉴 슬롯 → Ren'Py action(+선택 alternate). 기존 텍스트 구현과 완전히 동일한 액션 리스트를
+ * 그대로 재사용한다(이미지 모드·텍스트 폴백 둘 다 이 함수를 공유) — 순서가 중요한 hide(SetVariable
+ * 먼저, HideInterface 나중 — 안 그러면 드롭다운이 접히기 전에 인터페이스가 사라져 버튼이 화면에
+ * 남는다)와 skip 의 alternate(길게 누르면 확인창과 함께 빠른 스킵) 는 CLAUDE.md/기존 구현 그대로.
+ */
+function quickMenuAction(slot: QuickButtonSlot): { action: string; alternate?: string } {
+  switch (slot) {
+    case 'menu':
+      return { action: 'ToggleVariable("quick_menu_expanded")' };
+    case 'back':
+      return { action: '[Rollback(), SetVariable("quick_menu_expanded", False)]' };
+    case 'history':
+      return { action: `[ShowMenu('history'), SetVariable("quick_menu_expanded", False)]` };
+    case 'skip':
+      return {
+        action: '[Skip(), SetVariable("quick_menu_expanded", False)]',
+        alternate: 'Skip(fast=True, confirm=True)',
+      };
+    case 'auto':
+      return { action: '[Preference("auto-forward", "toggle"), SetVariable("quick_menu_expanded", False)]' };
+    case 'hide':
+      return { action: '[SetVariable("quick_menu_expanded", False), HideInterface()]' };
+    case 'save':
+      return { action: `[ShowMenu('save'), SetVariable("quick_menu_expanded", False)]` };
+    case 'qsave':
+      return { action: '[QuickSave(), SetVariable("quick_menu_expanded", False)]' };
+    case 'qload':
+      return { action: '[QuickLoad(), SetVariable("quick_menu_expanded", False)]' };
+    case 'prefs':
+      return { action: `[ShowMenu('preferences'), SetVariable("quick_menu_expanded", False)]` };
+  }
+}
+
+/**
+ * 이미지 기반 screen quick_menu() 정의를 만든다(base 템플릿의 `${quickMenuScreen}` 자리에 보간).
+ * - 패널은 버튼(메뉴 토글 포함)보다 **먼저** add 해야 화면에서 뒤에 깔린다 — 패널이 Y0~625 를 덮는데
+ *   메뉴 토글이 Y16 이라 패널 뒤에 있으면 토글이 안 보인다. 정적 속성만(fit/xysize/xpos/ypos) —
+ *   CLAUDE.md 규칙: add 블록엔 애니메이션 ATL 금지.
+ * - 'menu'(토글)는 buildQuickMenuPlan 의 게이트 조건(idle 필수) 덕에 항상 imagebutton 이다.
+ * - 목록 9개는 슬롯별로 idle 이미지가 있으면 imagebutton, 없으면 원래 알약 textbutton 으로
+ *   폴백한다(같은 절대좌표) — buildMainMenuPlan/buildImageMainMenuScreen 과 동일한 "슬롯별 폴백"
+ *   패턴(half-image/half-text 를 피하되, 없는 파일을 참조해 크래시하지도 않는다).
+ * - press(클릭 중) 이미지는 절대 참조하지 않는다 — 엔진에 그 상태 이미지 슬롯이 없다(activate_
+ *   프리픽스는 죽은 슬롯, CLAUDE.md). selected_idle/selected_hover 는 selectable 슬롯(스킵·자동)만.
+ * - focus_mask 는 쓰지 않는다 — 투명 여백이 많은 버튼 아트의 히트박스가 좁아져 클릭이 막힌다.
+ * - 좌표는 quickMenuLayout() 이 준 1920 기준 px 에 scale(=height/1080)을 곱해 리터럴로 굽는다.
+ *   gui.scale()(720p 기준)은 쓰지 않는다.
+ */
+function buildQuickMenuScreen(plan: QuickMenuPlan): string {
+  const L = plan.layout;
+  const s = plan.scale;
+  const I = (n: number) => ' '.repeat(n);
+  const lines: string[] = [];
+  lines.push('screen quick_menu():', '', `${I(4)}zorder 100`, '', `${I(4)}if quick_menu:`, '');
+
+  if (plan.hasPanel) {
+    const pw = Math.round(plan.panelWidth * s);
+    const ph = Math.round(plan.panelHeight * s);
+    const px = Math.round(L.panelX * s);
+    const py = Math.round(L.panelY * s);
+    lines.push(`${I(8)}if quick_menu_expanded:`);
+    // 버튼(메뉴 토글 포함)보다 먼저 add 해야 뒤에 깔린다 — 정적 속성만, 애니메이션 ATL 금지(CLAUDE.md).
+    lines.push(`${I(12)}add Transform("${QUICK_PANEL_FILE}", fit="contain", xysize=(${pw}, ${ph})):`);
+    lines.push(`${I(16)}xpos ${px}`);
+    lines.push(`${I(16)}ypos ${py}`);
+    lines.push('');
+  }
+
+  const btnX = Math.round(L.btnX * s);
+  const menuStates = plan.buttons.menu ?? {};
+  lines.push(`${I(8)}imagebutton:`);
+  lines.push(`${I(12)}idle "${quickButtonFile('menu', 'idle')}"`);
+  if (menuStates.hover) lines.push(`${I(12)}hover "${quickButtonFile('menu', 'hover')}"`);
+  if (menuStates.disabled) lines.push(`${I(12)}insensitive "${quickButtonFile('menu', 'disabled')}"`);
+  lines.push(`${I(12)}xpos ${btnX}`);
+  lines.push(`${I(12)}ypos ${Math.round(L.menuY * s)}`);
+  lines.push(`${I(12)}action ToggleVariable("quick_menu_expanded")`);
+  lines.push('');
+
+  lines.push(`${I(8)}if quick_menu_expanded:`, '');
+  const itemBlocks: string[] = [];
+  QUICK_LIST_SLOTS.forEach((slotDef, i) => {
+    const states = plan.buttons[slotDef.id] ?? {};
+    const y = Math.round((L.listY + i * L.listStep) * s);
+    const { action, alternate } = quickMenuAction(slotDef.id);
+    const b: string[] = [];
+    if (states.idle) {
+      b.push(`${I(12)}imagebutton:`);
+      b.push(`${I(16)}idle "${quickButtonFile(slotDef.id, 'idle')}"`);
+      if (states.hover) b.push(`${I(16)}hover "${quickButtonFile(slotDef.id, 'hover')}"`);
+      if (states.disabled) b.push(`${I(16)}insensitive "${quickButtonFile(slotDef.id, 'disabled')}"`);
+      if (slotDef.selectable && states.selected) {
+        b.push(`${I(16)}selected_idle "${quickButtonFile(slotDef.id, 'selected')}"`);
+        // "누르는 중" 전용 에셋이 없듯 "선택+호버" 전용 에셋도 없다 — hover 이미지를 selected_hover 에 재사용.
+        if (states.hover) b.push(`${I(16)}selected_hover "${quickButtonFile(slotDef.id, 'hover')}"`);
+      }
+      b.push(`${I(16)}xpos ${btnX}`);
+      b.push(`${I(16)}ypos ${y}`);
+      b.push(`${I(16)}action ${action}`);
+      if (alternate) b.push(`${I(16)}alternate ${alternate}`);
+    } else {
+      // idle 이미지가 없는 슬롯 — 원래 알약 textbutton 으로 폴백(같은 절대좌표에 배치).
+      b.push(`${I(12)}textbutton _("${slotDef.label}"):`);
+      b.push(`${I(16)}style "quick_button"`);
+      b.push(`${I(16)}xpos ${btnX}`);
+      b.push(`${I(16)}ypos ${y}`);
+      b.push(`${I(16)}action ${action}`);
+      if (alternate) b.push(`${I(16)}alternate ${alternate}`);
+    }
+    itemBlocks.push(b.join('\n'));
+  });
+  lines.push(itemBlocks.join('\n\n'));
+
+  return lines.join('\n');
+}
+
 /** screensRpy 옵션(위치 인자가 너무 늘어나 객체로 통합 — generateGuiFiles 의 GuiGenOptions 와 동형). */
 interface ScreensRpyOptions {
   locales?: GuiLocales;
@@ -596,10 +795,12 @@ interface ScreensRpyOptions {
   hasCg?: boolean;
   /** 있으면(버튼 이미지·로고 중 하나라도) 이미지 기반 main_menu 를, 없으면 기존 텍스트 메뉴를 낸다. */
   mainMenu?: MainMenuPlan;
+  /** 있으면(메뉴 토글 idle 이미지) 이미지 기반 quick_menu 를, 없으면 기존 텍스트 알약 퀵메뉴를 낸다. */
+  quickMenu?: QuickMenuPlan;
 }
 
 export function screensRpy(opts?: ScreensRpyOptions): string {
-  const { locales, hasItems, hasCg, mainMenu } = opts ?? {};
+  const { locales, hasItems, hasCg, mainMenu, quickMenu } = opts ?? {};
   const languagePrefs = languagePrefsBlock(locales);
   // 아이템/CG 가 있을 때만 각각의 보관함 진입 버튼(내비)을 낸다.
   const galleryNav = [
@@ -623,6 +824,11 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
   // usesMmStyles 가 끝까지 false 라 이 블록 자체가 안 나온다).
   const mmStyles = built?.usesMmStyles ? buildMmStyles(mainMenu!) : '';
   const galleryHubScreen = active && mainMenu?.galleryTarget === 'hub' ? GALLERY_HUB_SCREEN : '';
+
+  // quickMenu 활성화 여부도 generate.ts 의 buildQuickMenuPlan 이 이미 판단해서 넘긴다(게이트: 'menu'
+  // 토글 idle 이미지). 없으면 undefined 를 넘겨 기존 텍스트 알약 퀵메뉴(DEFAULT_QUICK_MENU_SCREEN)
+  // 그대로 나간다(회귀 0 — mainMenuUi 와 같은 계약).
+  const quickMenuScreen = quickMenu ? buildQuickMenuScreen(quickMenu) : DEFAULT_QUICK_MENU_SCREEN;
 
   const base = String.raw`################################################################################
 ## 자동 생성: 자체 GUI 화면 (zero-PNG, Solid 기반)
@@ -838,42 +1044,7 @@ style choice_button_text is default:
 
 ## Quick Menu screen ###########################################################
 
-screen quick_menu():
-
-    zorder 100
-
-    if quick_menu:
-
-        # 우상단에 항상 떠 있는 톱니바퀴(메뉴) 버튼 — 누르면 바로 아래로 목록이 펼쳐진다.
-        # (진짜 원형 아이콘은 별도 PNG 에셋이 있어야 해서, 우선 둥근 느낌의 알약형 버튼으로 구현.)
-        textbutton _("메뉴"):
-            style "quick_gear_button"
-            xalign 1.0
-            yalign 0.0
-            action ToggleVariable("quick_menu_expanded")
-
-        if quick_menu_expanded:
-            # 개별 알약 버튼을 세로로 붙여 쌓는다 — 공용 style quick_menu(xoffset -12, spacing 8,
-            # 터치 variant 가 사용)는 쓰지 않고 인라인 속성으로 메뉴 버튼과 우측 끝을 맞춘다.
-            vbox:
-                style_prefix "quick"
-                xalign 1.0
-                yalign 0.0
-                yoffset gui.scale(56)
-                spacing 0
-
-                textbutton _("뒤로") action [Rollback(), SetVariable("quick_menu_expanded", False)]
-                textbutton _("기록") action [ShowMenu('history'), SetVariable("quick_menu_expanded", False)]
-                textbutton _("스킵") action [Skip(), SetVariable("quick_menu_expanded", False)] alternate Skip(fast=True, confirm=True)
-                textbutton _("자동") action [Preference("auto-forward", "toggle"), SetVariable("quick_menu_expanded", False)]
-                # 대사창·메뉴를 숨기고 CG/배경을 감상 — 아무 곳이나 클릭하면 자동으로 돌아온다
-                # (Ren'Py 기본 h 키·가운데 클릭과 동일한 동작을 버튼으로도 노출). 드롭다운을 먼저
-                # 접어야(SetVariable 먼저) HideInterface 가 클릭을 기다리는 동안 메뉴가 깔끔하게 사라진다.
-                textbutton _("숨기기") action [SetVariable("quick_menu_expanded", False), HideInterface()]
-                textbutton _("저장") action [ShowMenu('save'), SetVariable("quick_menu_expanded", False)]
-                textbutton _("빠른저장") action [QuickSave(), SetVariable("quick_menu_expanded", False)]
-                textbutton _("빠른불러오기") action [QuickLoad(), SetVariable("quick_menu_expanded", False)]
-                textbutton _("설정") action [ShowMenu('preferences'), SetVariable("quick_menu_expanded", False)]
+${quickMenuScreen}
 
 
 init python:
