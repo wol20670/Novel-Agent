@@ -14,6 +14,8 @@ import {
   QUICK_BUTTON_STATES,
   quickButtonFile,
   QUICK_PANEL_FILE,
+  GAME_ICON_FILE,
+  WINDOW_ICON_FILE,
 } from '../types';
 import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName, extFromMime } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
@@ -136,16 +138,21 @@ export async function collectProjectFiles(
   // 퀵메뉴는 mainMenuUi 와 달리 폰트 필드가 없으므로(QuickMenuLayout 에 menuFontId 류가 없다)
   // adoptGuiOverrideFonts/adoptMainMenuUiFonts 대상이 아니다 — project.quickMenuUi 를 그대로 넣는다.
   const { quickMenuUi: effectiveQuickMenuUi, blobs: quickArtBlobs } = await resolveQuickMenuArt(project.quickMenuUi);
+  // 게임 아이콘도 같은 이유로 미리 가지치기한다 — 특히 창 아이콘은 blob 이 있어야만 gui.rpy 가
+  // `define gui.window_icon` 을 내보내도 되기 때문에(없는 파일을 참조하면 zip 불변식이 깨진다).
+  const { gameIcon: effectiveGameIcon, blobs: iconBlobs } = await resolveGameIcon(project.gameIcon);
   const effectiveProject: Project =
     effectiveGuiOverrides === project.guiOverrides &&
     effectiveMainMenuUi === project.mainMenuUi &&
-    effectiveQuickMenuUi === project.quickMenuUi
+    effectiveQuickMenuUi === project.quickMenuUi &&
+    effectiveGameIcon === project.gameIcon
       ? project
       : {
           ...project,
           guiOverrides: effectiveGuiOverrides,
           mainMenuUi: effectiveMainMenuUi,
           quickMenuUi: effectiveQuickMenuUi,
+          gameIcon: effectiveGameIcon,
         };
 
   // fontResult.unresolved: 커스텀 폰트뿐 아니라 대체용 기본 폰트(나눔고딕)까지 못 구한 경우 —
@@ -323,6 +330,17 @@ export async function collectProjectFiles(
   if (effectiveQuickMenuUi?.panel) {
     const blob = quickArtBlobs.get(effectiveQuickMenuUi.panel);
     if (blob) out.push({ path: `game/${QUICK_PANEL_FILE}`, data: blob });
+  }
+
+  // 게임 아이콘 — ico 는 **game/ 밖 프로젝트 루트**로 나간다(Ren'Py 런처가 거기만 본다).
+  // ProjectFile.path 가 원래 프로젝트 루트 기준이라 README.md 처럼 접두어 없이 넣으면 된다.
+  if (effectiveGameIcon?.ico) {
+    const blob = iconBlobs.get(effectiveGameIcon.ico);
+    if (blob) out.push({ path: GAME_ICON_FILE, data: blob });
+  }
+  if (effectiveGameIcon?.window) {
+    const blob = iconBlobs.get(effectiveGameIcon.window);
+    if (blob) out.push({ path: `game/${WINDOW_ICON_FILE}`, data: blob });
   }
 
   // 버튼 배경 PNG(gui.button_properties 요구) — 제네릭 prefix 세트.
@@ -573,6 +591,28 @@ async function resolveMainMenuArt(
   }
 
   return { mainMenuUi: { ...mainMenuUi, buttons, logo }, blobs };
+}
+
+/**
+ * 게임 아이콘 blob 을 생성 전에 확보하고, blob 이 실제로 있는 항목만 남긴다.
+ * resolveMainMenuArt/resolveQuickMenuArt 와 같은 이유 + 하나 더: 창 아이콘은 여기서 살아남아야만
+ * guiRpy 가 `define gui.window_icon` 을 내보내므로, 이 가지치기가 곧 "참조하면 파일이 있다"는 보장이다.
+ */
+async function resolveGameIcon(
+  gameIcon: Project['gameIcon'],
+): Promise<{ gameIcon: Project['gameIcon']; blobs: Map<string, Blob> }> {
+  if (!gameIcon) return { gameIcon, blobs: new Map() };
+  const blobs = new Map<string, Blob>();
+  const kept: NonNullable<Project['gameIcon']> = {};
+  for (const which of ['ico', 'window'] as const) {
+    const assetId = gameIcon[which];
+    if (!assetId) continue;
+    const blob = await getAsset(assetId);
+    if (!blob) continue; // 고아 참조(blob 소실) — 조용히 빼서 없는 파일 참조를 막는다.
+    blobs.set(assetId, blob);
+    kept[which] = assetId;
+  }
+  return { gameIcon: kept, blobs };
 }
 
 /**

@@ -3,6 +3,7 @@
 // Chromium 계열 데스크톱(Chrome/Edge)에서 지원. 핸들은 IndexedDB 에 저장해 새로고침 후에도 재사용.
 
 import type { Project } from '../types';
+import { GAME_ICON_FILE } from '../types';
 import { collectProjectFiles } from '../zip/buildZip';
 import { sanitizeWindowsPath } from './safeName';
 
@@ -143,6 +144,9 @@ export async function syncProjectToFolder(project: Project): Promise<SyncResult>
     // 제목별 하위 폴더에 기록. 매번 game/ 을 비워 낡은 스크립트·에셋 잔존을 막는다.
     const projDir = (await handle.getDirectoryHandle(projectFolder, { create: true })) as DirHandle;
     await projDir.removeEntry('game', { recursive: true }).catch(() => {});
+    // 루트 파일은 game/ 비우기에 안 걸린다. README.md 는 매번 재생성돼 무해하지만 icon.ico 는
+    // 앱에서 아이콘을 해제해도 폴더에 남아, 배포 빌드가 옛 아이콘을 계속 박게 된다 — 먼저 지운다.
+    await projDir.removeEntry(GAME_ICON_FILE).catch(() => {});
     for (const f of files) await writeFile(projDir, f.path, f.data);
   } catch (e) {
     if (isStaleHandleError(e)) {

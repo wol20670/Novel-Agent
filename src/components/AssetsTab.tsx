@@ -162,6 +162,20 @@ export default function AssetsTab() {
         </div>
       </section>
 
+      <section>
+        <h3 className="section-title mb-1">🪟 게임 아이콘</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          배포용 실행 파일과 게임 창에 쓰일 아이콘입니다. 두 개는 <b>쓰이는 자리가 다릅니다</b> —{' '}
+          <b className="text-gray-300">.ico</b>는 배포 빌드가 <b>exe에 박아 넣는</b> 아이콘이라 폴더에서 바로
+          실행할 땐 보이지 않고, <b className="text-gray-300">창 아이콘</b>은 게임 실행 중 창 제목표시줄과
+          작업표시줄에 보입니다. 안 올리면 Ren'Py 기본 아이콘이 쓰입니다.
+        </p>
+        <div className="flex flex-col gap-2">
+          <GameIconRow which="ico" label="Windows 실행 파일 아이콘 (.ico)" hint="다중 크기 .ico 권장" />
+          <GameIconRow which="window" label="게임 창 아이콘 (PNG)" hint="256×256 이상 정사각 PNG 권장" />
+        </div>
+      </section>
+
       <MainMenuGui />
 
       <QuickMenuGui />
@@ -223,6 +237,41 @@ export default function AssetsTab() {
 }
 
 /** 타이틀·메뉴 배경 한 종(main/game) — 업로드 없으면 미업로드 표시(빌드 시 테마 그라데이션 폴백). */
+/**
+ * 게임 아이콘 한 줄(exe .ico / 창 PNG). MenuArtRow 와 같은 모양이되 썸네일이 정사각이고,
+ * .ico 는 파일 대화상자에서 image/* 필터에 안 걸리는 경우가 있어 accept 를 명시한다.
+ */
+function GameIconRow({ which, label, hint }: { which: 'ico' | 'window'; label: string; hint: string }) {
+  const importGameIcon = useStore((s) => s.importGameIcon);
+  const clearGameIcon = useStore((s) => s.clearGameIcon);
+  const assetId = useStore((s) => s.project.gameIcon?.[which]);
+  const url = useAssetUrl(assetId);
+  return (
+    <div className="card border-edge p-3 flex gap-3 items-center">
+      <div className="w-16 h-16 rounded-lg border border-edge overflow-hidden bg-ink shrink-0 flex items-center justify-center text-[10px] text-gray-600">
+        {url ? <img src={url} className="w-full h-full object-contain" /> : '미업로드'}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-200">{label}</p>
+        <p className="text-[11px] text-gray-500">{hint}</p>
+      </div>
+      <div className="flex flex-col gap-1 shrink-0 w-24">
+        <UploadButton
+          onFile={(f) => importGameIcon(which, f)}
+          label={url ? '✓ 교체' : '↥ 업로드'}
+          accept={which === 'ico' ? '.ico,image/x-icon,image/vnd.microsoft.icon' : 'image/*'}
+          className="btn-ghost text-[11px]"
+        />
+        {url && (
+          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => clearGameIcon(which)}>
+            해제
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MenuArtRow({ which, label }: { which: 'main' | 'game'; label: string }) {
   const importMenuArt = useStore((s) => s.importMenuArt);
   const clearMenuArt = useStore((s) => s.clearMenuArt);

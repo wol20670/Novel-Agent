@@ -18,6 +18,7 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 ## Ren'Py 생성 주의 (lint로도 못 잡는 런타임 버그)
 - 화면 언어의 `add x:` 블록엔 애니메이션 ATL(`easein` 등) 금지 — 정적 속성만. 애니메이션은 `add x at transform:`으로 감쌀 것(`src/renpy/gui/screensRpy.ts`).
 - **사용자 텍스트는 반드시 `esc`/`escRpyText`를 거칠 것**(`src/renpy/generate.ts`) — `%`·`[`·`{` 미이스케이프는 typecheck·lint 둘 다 못 잡는 **런타임** 크래시("할인 20%", "[속보]"). 새 .rpy 출력 경로를 추가할 땐 이스케이프부터 확인.
+- **게임 아이콘은 두 군데, 이름도 다르다** — exe 아이콘은 **프로젝트 루트의 `icon.ico`**(빌드 시 런처가 exe 리소스에 박음, `launcher/game/distribute.rpy`), 실행 중 창 아이콘은 **`config.window_icon`**(options.rpy). ⚠️ `gui.window_icon`으로 정의하면 **조용히 무시된다** — 그 값을 config로 옮겨주는 코드가 엔진에 없다(실기에서 아이콘이 안 바뀌는 걸로 발견). 경로는 `GAME_ICON_FILE`/`WINDOW_ICON_FILE`(`src/types.ts`) 단일 소스.
 - **`imagebutton`에 `focus_mask True` 금지** — 히트박스가 "불투명 픽셀"로 좁아지는데 메뉴 버튼 아트는 대개 여백이 투명(글자 획만 불투명)이라 **hover·클릭이 아예 안 먹는다**(실기 재현 확인). lint·typecheck 둘 다 못 잡음.
 - **버튼 "눌린 상태" 이미지는 엔진이 지원 안 함** — `imagebutton` 상태는 idle/hover/selected_*/insensitive 뿐. `ImageButton`에 `activate_image` 슬롯이 남아 있으나 `activate_` 프리픽스를 세팅하는 코드가 엔진에 없다(레거시). 누르는 동안엔 hover 이미지가 보인다.
 - **메뉴 버튼·로고 파일 경로는 `menuButtonFile()`/`TITLE_LOGO_FILE`(`src/types.ts`) 단일 소스**로만 만들 것 — `screensRpy.ts`(참조)와 `buildZip.ts`(배치)가 어긋나면 없는 파일 참조로 런타임 크래시(폰트 `guiOverrides` 함정과 같은 종류). **메뉴 폰트(`menuFontId`/`menuSubFontId`)도 같은 대상** — `buildZip`의 `selectedFontFiles`에 빠뜨리면 커스텀 폰트 선택 순간 게임이 안 켜진다.

@@ -23,11 +23,15 @@ interface ProjectManifest {
 // 가 manifest 의 mime 을 그대로 써서 복원)은 무사했지만, zip 을 밖에서 열면 오라벨이었다.
 // 오디오는 buildZip.ts 가 쓰는 extFromMime(generate.ts) 과 동일 규칙(mp3/wav)으로 통일하고,
 // 이미지는 jpg/webp/gif 를 추가 인식한다(그 외엔 기존처럼 png 로 폴백).
-function extFor(mime: string): string {
+/** 내보내기/가져오기 양쪽이 쓰는 확장자 규칙(export 는 단위 테스트용 — tests/game-icon.test.ts). */
+export function extFor(mime: string): string {
   if (mime.startsWith('audio/')) return extFromMime(mime);
   if (mime === 'image/jpeg' || mime === 'image/jpg') return 'jpg';
   if (mime === 'image/webp') return 'webp';
   if (mime === 'image/gif') return 'gif';
+  // 게임 아이콘(.ico). 이 기능 전에는 ico 를 올릴 방법 자체가 없어서 기존 .npproj.zip 에 ico 에셋이
+  // 없다 — 그래서 읽기/쓰기 양쪽에 쓰이는 이 함수를 바꿔도 옛 파일 가져오기가 깨지지 않는다.
+  if (mime === 'image/x-icon' || mime === 'image/vnd.microsoft.icon') return 'ico';
   return 'png';
 }
 

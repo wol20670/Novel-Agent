@@ -24,6 +24,8 @@ import {
   translateModelFor,
   menuButtonFile,
   TITLE_LOGO_FILE,
+  GAME_ICON_FILE,
+  WINDOW_ICON_FILE,
   matchMenuButtonFile,
   MAIN_MENU_SLOTS,
   MENU_BUTTON_STATES,
@@ -273,6 +275,12 @@ interface State {
   clearBgmGroup: (key: string) => Promise<void>;
   importMenuArt: (which: 'main' | 'game', file: File) => Promise<void>;
   clearMenuArt: (which: 'main' | 'game') => Promise<void>;
+  /**
+   * 게임 아이콘 업로드. which='ico' 는 Windows exe 아이콘(.ico, 프로젝트 루트로 나감),
+   * which='window' 는 실행 중 창 아이콘(PNG). 자세한 차이는 Project.gameIcon JSDoc 참고.
+   */
+  importGameIcon: (which: 'ico' | 'window', file: File) => Promise<void>;
+  clearGameIcon: (which: 'ico' | 'window') => Promise<void>;
 
   // 메인 메뉴 이미지 GUI(업로드 전용) — 버튼 슬롯×상태별 이미지 + 로고 + 좌표 오버라이드.
   /** 버튼 한 장(슬롯·상태) 업로드. */
@@ -513,9 +521,21 @@ export const useStore = create<State>((set, get) => {
   };
 
   // 외부 업로드 파일을 에셋으로 저장하고 id 반환. bgm/voice 는 오디오, 그 외는 이미지만 허용.
-  const uploadAsset = async (file: File, kind: AssetMeta['kind'], filename: string): Promise<string> => {
+  // opts.mime 은 브라우저가 type 을 못 알아본 파일(대표적으로 .ico — OS 에 MIME 이 등록 안 돼 있으면
+  // File.type 이 빈 문자열로 온다)을 호출측이 확장자로 판정해 넘겨줄 때 쓴다. 넘어오면 타입 검사를
+  // 건너뛰고 이 값을 메타 mime 으로 저장한다(빈 mime 을 그대로 두면 내보내기 확장자·썸네일이 다 깨진다).
+  const uploadAsset = async (
+    file: File,
+    kind: AssetMeta['kind'],
+    filename: string,
+    opts?: { mime?: string },
+  ): Promise<string> => {
     const isAudioKind = kind === 'bgm' || kind === 'voice';
-    const okType = isAudioKind ? file.type.startsWith('audio/') : file.type.startsWith('image/');
+    const okType = opts?.mime
+      ? true
+      : isAudioKind
+        ? file.type.startsWith('audio/')
+        : file.type.startsWith('image/');
     if (!okType) {
       throw new Error(
         isAudioKind ? '오디오 파일(MP3/WAV 등)만 업로드할 수 있습니다.' : '이미지 파일(PNG/JPG 등)만 업로드할 수 있습니다.',
@@ -528,7 +548,7 @@ export const useStore = create<State>((set, get) => {
       id,
       kind,
       prompt: '(직접 업로드)',
-      mime: file.type,
+      mime: opts?.mime ?? file.type,
       source: 'upload',
       filename,
       createdAt: Date.now(),
@@ -1640,6 +1660,46 @@ export const useStore = create<State>((set, get) => {
         return { project: { ...s.project, menuArt } };
       }, prev ? [prev] : []);
       flash(`${which === 'main' ? '메인' : '게임'} 메뉴 배경 업로드를 해제했습니다(Canvas 생성으로 복귀).`);
+    },
+
+    importGameIcon: async (which, file) => {
+      const isIco = which === 'ico';
+      // .ico 는 OS 에 MIME 이 등록 안 돼 있으면 File.type 이 빈 문자열로 온다(Windows 에서 흔함).
+      // 그때만 확장자로 판정해 mime 을 직접 넘긴다 — uploadAsset 의 image/* 검사에 막히지 않도록.
+      const icoByExt = isIco && !file.type && /\.ico$/i.test(file.name);
+      if (isIco && !icoByExt && !/^image\/(x-icon|vnd\.microsoft\.icon)$/.test(file.type)) {
+        // png 를 .ico 슬롯에 올리면 Ren'Py 빌드가 조용히 아이콘을 안 바꾼다(파서가 ICO 헤더를 기대).
+        // 여기서 막지 않으면 "배포했는데 아이콘이 기본값"이라는 나중에 알아채기 어려운 실패가 된다.
+        flash('exe 아이콘은 .ico 파일이어야 합니다(PNG 는 아래 창 아이콘 칸에 올리세요).', 'error');
+        return;
+      }
+      try {
+        const id = await uploadAsset(
+          file,
+          'background',
+          isIco ? GAME_ICON_FILE : (WINDOW_ICON_FILE.split('/').pop() as string),
+          icoByExt ? { mime: 'image/x-icon' } : undefined,
+        );
+        const prev = get().project.gameIcon?.[which];
+        await commitAssetSwap(
+          (s) => ({ project: { ...s.project, gameIcon: { ...s.project.gameIcon, [which]: id } } }),
+          prev ? [prev] : [],
+          id,
+        );
+        flash(isIco ? 'exe 아이콘(.ico)을 적용했습니다.' : '게임 창 아이콘을 적용했습니다.');
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    clearGameIcon: async (which) => {
+      const prev = get().project.gameIcon?.[which];
+      await commitAssetSwap((s) => {
+        const gameIcon = { ...s.project.gameIcon };
+        delete gameIcon[which];
+        return { project: { ...s.project, gameIcon } };
+      }, prev ? [prev] : []);
+      flash(which === 'ico' ? 'exe 아이콘을 해제했습니다.' : '게임 창 아이콘을 해제했습니다.');
     },
 
     importMenuButton: async (slot, state, file) => {

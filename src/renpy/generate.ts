@@ -27,6 +27,7 @@ import {
   QUICK_MENU_SLOTS,
   QUICK_BUTTON_STATES,
   quickMenuLayout,
+  WINDOW_ICON_FILE,
 } from '../types';
 import { SlugMap } from './slug';
 import {
@@ -709,6 +710,11 @@ function optionsRpy(project: Project): string {
         ]
       : []),
     `define config.window_title = "${t}"`,
+    // 실행 중 창·작업표시줄 아이콘. 변수는 gui.window_icon 이 아니라 **config.window_icon** 이다
+    // (스톡 템플릿도 gui.rpy 가 아니라 여기 options.rpy 에 둔다 — gui.window_icon 을 정의해봐야
+    //  그걸 config 로 옮겨주는 코드가 엔진 어디에도 없어 조용히 무시된다. 실행 검증으로 확인).
+    // 업로드가 있을 때만 낸다 — 없는 파일을 참조하면 zip 불변식이 깨진다(buildZip 이 미리 가지친다).
+    ...(project.gameIcon?.window ? [`define config.window_icon = "${WINDOW_ICON_FILE}"`] : []),
     `define gui.about = _("제작: ${esc(project.author)}")`,
     '',
     '## 스킵 버튼이 첫 플레이(아직 안 읽은 대사)에서도 동작하도록 기본 허용.',

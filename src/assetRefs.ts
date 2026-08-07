@@ -100,6 +100,8 @@ export function collectReferencedAssetIds(project: Project, opts?: { includeVoic
   for (const states of Object.values(project.quickMenuUi?.buttons ?? {})) {
     Object.values(states ?? {}).forEach(add);
   }
+  add(project.gameIcon?.ico);
+  add(project.gameIcon?.window);
   return ids;
 }
 
@@ -152,5 +154,7 @@ export function collectReferencedAssetKinds(project: Project): Map<string, Asset
   for (const states of Object.values(project.quickMenuUi?.buttons ?? {})) {
     Object.values(states ?? {}).forEach((id) => add(id, 'cg'));
   }
+  add(project.gameIcon?.ico, 'cg');
+  add(project.gameIcon?.window, 'cg');
   return kinds;
 }

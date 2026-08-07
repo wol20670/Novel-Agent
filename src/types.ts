@@ -263,6 +263,16 @@ export interface Project {
   /** 외부에서 업로드한 메뉴 배경(자체 GUI 위에 덮어씀). 없으면 Canvas 생성. */
   menuArt?: { main?: string; game?: string };
   /**
+   * 게임 아이콘(선택) — 둘은 Ren'Py 안에서 쓰이는 자리가 완전히 다르다.
+   *  · ico    : 프로젝트 **루트**의 `icon.ico`. 배포 빌드 때 Ren'Py 런처가 exe 의 리소스를 다시 써
+   *             박아 넣는다(launcher/game/distribute.rpy 가 `<프로젝트경로>/icon.ico` 를 읽는다).
+   *             그래서 `renpy.exe <폴더>` 로 그냥 실행해선 안 보이고, 배포 결과물에서만 보인다.
+   *  · window : 실행 중 창·작업표시줄 아이콘(`gui.window_icon` → game/gui/window_icon.png).
+   *             엔진 기본값이 None 이라 안 올리면 Ren'Py 기본 아이콘이 뜬다.
+   * 하나만 올려도 되고, 둘 다 없으면 생성물이 기존과 바이트 단위로 같다(회귀 0).
+   */
+  gameIcon?: { ico?: string; window?: string };
+  /**
    * 아이템(소품) 팝업 이미지 — 아이템 이름 → assetId. 같은 이름은 한 이미지를 공유한다.
    * 대본 `#아이템 <이름>` 태그로 참조되고, "발견한 아이템" 보관함이 이 목록을 갤러리로 보여준다.
    */
@@ -657,6 +667,16 @@ export function menuButtonFile(slot: MenuButtonSlot, state: MenuButtonState): st
 
 /** 타이틀 로고 이미지 경로(game/ 기준). */
 export const TITLE_LOGO_FILE = 'gui/title_logo.png';
+
+/**
+ * Windows exe 아이콘 — **프로젝트 루트**(game/ 의 형제) 경로다. Ren'Py 런처가 배포 빌드 때
+ * `os.path.join(project.path, "icon.ico")` 로 딱 이 이름만 찾으므로 바꾸면 안 된다.
+ * (루트 파일 출력은 README.md 가 이미 쓰는 경로라 별도 배관이 필요 없다.)
+ */
+export const GAME_ICON_FILE = 'icon.ico';
+
+/** 실행 중 창·작업표시줄 아이콘(game/ 기준). gui.window_icon 이 가리킨다. */
+export const WINDOW_ICON_FILE = 'gui/window_icon.png';
 
 /**
  * text 안에서 entries 의 키워드 중 가장 긴 것부터 순서대로 찾아 첫 매치의 id 를 반환한다.
