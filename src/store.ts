@@ -19,6 +19,7 @@ import type {
 import {
   emptyProject,
   effectiveExpressions,
+  matchExpressionFile,
   baseLocaleOf,
   translateModeOf,
   translateModelFor,
@@ -41,6 +42,9 @@ import { sleep } from './generators/shared/retry';
 import { collectVoiceTargets, type VoiceBatchItem } from './generators/voice/collectByCharacter';
 import { typecastTTS, getSubscription } from './generators/voice/typecastProvider';
 import { estimateVoiceCostForProject, type VoiceEstimate } from './generators/voice/estimate';
+import { collectEmotionTargets, selectEmotionsBatch } from './generators/emotion/aiSelect';
+import { estimateEmotionCost } from './generators/emotion/estimate';
+import { buildSynopsis } from './generators/theme';
 import { aiConfig } from './config/aiConfig';
 import type { ScriptMeta, BuildResult } from './parser';
 import { mergeScenes, type AnalyzeMode } from './project/mergeScenes';
@@ -88,6 +92,16 @@ function assetId(): string {
 }
 
 /** 업로드 파일명에 쓸 안전한 파일명(특수문자 제거·공백을 밑줄로, 최대 50자). */
+/**
+ * 일괄 업로드 실패 목록을 토스트에 넣을 짧은 문구로 — "a.png, b.png, c.png 외 5개".
+ * 메뉴 버튼·퀵메뉴·스프라이트 세 곳이 같은 문구를 쓰는데 각자 지역 함수로 복붙돼 있던 걸 모았다.
+ */
+function describeNames(names: string[]): string {
+  const shown = names.slice(0, 3).join(', ');
+  const rest = names.length > 3 ? ` 외 ${names.length - 3}개` : '';
+  return `${shown}${rest}`;
+}
+
 function safeFileName(s: string): string {
   return sanitizeWindowsPath(s, 50, 'asset');
 }
@@ -151,6 +165,28 @@ function applyVoiceUpdates(scenes: Scene[], updates: VoiceAttachUpdate[]): { sce
   return { scenes: nextScenes, locales: [...localeSet] };
 }
 
+/**
+ * autoAssignEmotionAll 이 모아둔 (sceneId → lineIndex → 배정된 표정) 결과를 scenes 에 한 번에
+ * 반영하는 순수 함수 — applyVoiceUpdates 와 같은 절충(배치 중 매 줄마다 scenes 를 재빌드하지 않고
+ * 끝에 1회)이되, **export 해서 단위테스트 대상으로 뺀다**(autoTranslateAll 의 커밋은 액션 안에
+ * 인라인되어 있어 테스트가 없다 — 여기서는 그 빚을 지지 않는다).
+ */
+export function applyEmotionUpdates(scenes: Scene[], updates: Map<string, Map<number, Expression>>): Scene[] {
+  if (!updates.size) return scenes;
+  return scenes.map((sc) => {
+    const lineMap = updates.get(sc.id);
+    if (!lineMap) return sc;
+    return {
+      ...sc,
+      lines: sc.lines.map((l, i) => {
+        const expr = lineMap.get(i);
+        if (!expr || l.kind !== 'dialogue') return l;
+        return { ...l, emotionAuto: expr };
+      }),
+    };
+  });
+}
+
 interface State {
   project: Project;
   assets: Record<string, AssetMeta>;
@@ -190,6 +226,15 @@ interface State {
   autoTranslateAll: () => Promise<void>;
   /** 자동 번역 진행 상황(장면 기준) — null = 실행 중 아님. CenterPanel 이 "N/M 장면" 으로 표시. */
   translateProgress: { done: number; total: number } | null;
+  /**
+   * AI 문맥 표정 배정(GPT) — emotion(작가 수동)·emotionAuto(AI) 가 둘 다 없고 실제 업로드된
+   * 스프라이트가 있는 대사만 채운다(증분: 이미 채운 줄은 재실행해도 다시 API 를 안 태움).
+   * autoTranslateAll 과 같은 구조(busy 키·진행률·PACE_MS·outer 루프·단일 커밋) — 실행 전 비용
+   * 견적(estimateEmotionCost)을 window.confirm 으로 보여준다. off/키없음이면 no-op/에러.
+   */
+  autoAssignEmotionAll: () => Promise<void>;
+  /** AI 표정 배정 진행 상황(장면 기준) — null = 실행 중 아님. translateProgress 와 동일한 표시 계약. */
+  emotionProgress: { done: number; total: number } | null;
   setSceneStatus: (id: string, status: Scene['status']) => void;
   approveAll: () => void;
   selectScene: (id: string | null) => void;
@@ -222,6 +267,8 @@ interface State {
   addExpression: (name: string) => void;
   renameExpression: (oldName: string, newName: string) => void;
   removeExpression: (name: string) => Promise<void>;
+  /** 표정 이름 → 한 줄 설명(project.expressionNotes, AI 표정 배정 프롬프트 전용) 편집. 빈 값이면 그 표정의 설명을 지운다. */
+  setExpressionNote: (name: string, value: string) => void;
 
   /** 아이템(소품) 팝업 이미지 업로드 — 이름 기준 공유(project.itemAssetIds). */
   uploadItem: (name: string, file: File) => Promise<void>;
@@ -229,6 +276,11 @@ interface State {
   // 외부 제작 에셋 업로드 (ChatGPT/Suno 등에서 만든 파일을 그대로 적용)
   importBackground: (sceneId: string, file: File) => Promise<void>;
   importSprite: (name: string, expr: Expression, file: File, outfit?: string) => Promise<void>;
+  /**
+   * 스프라이트 일괄 업로드 — 파일명에 든 표정 이름으로 자동 매칭해 선택된 의상 세트에 넣는다.
+   * 표정 24종 × 캐릭터를 한 칸씩 올리는 걸 대체한다(메뉴 버튼 일괄 업로드와 같은 관용구).
+   */
+  importSpritesBatch: (name: string, outfit: string, files: File[]) => Promise<void>;
   importCg: (sceneId: string, index: number, file: File) => Promise<void>;
   clearCg: (sceneId: string, index: number) => Promise<void>;
   /** BGM 오디오 업로드 — 같은 BGM 이름(#BGM)을 쓰는 모든 장면에 함께 적용. */
@@ -700,6 +752,7 @@ export const useStore = create<State>((set, get) => {
     selectedSceneId: null,
     busy: {},
     translateProgress: null,
+    emotionProgress: null,
     voiceEstimate: null,
     toast: null,
     toastType: 'info',
@@ -847,7 +900,7 @@ export const useStore = create<State>((set, get) => {
             else groups.set(sig, { targets: need, items: [it] });
           }
           for (const { targets: groupTargets, items: groupItems } of groups.values()) {
-            for (const chunk of chunkItems(groupItems)) {
+            for (const chunk of chunkItems(groupItems, (it) => it.ko.length)) {
               if (callIndex > 0) await sleep(PACE_MS);
               callIndex++;
               try {
@@ -906,6 +959,123 @@ export const useStore = create<State>((set, get) => {
       } else {
         const msg =
           `자동 번역 완료 — ${done}건 채움` + (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
+        flash(msg, failScenes ? 'error' : 'success');
+      }
+    },
+
+    // autoTranslateAll 과 완전히 같은 골격(busy 키·진행률·PACE_MS·outer 루프 abort·finally 정리·
+    // 단일 커밋·완료 토스트)이다 — 다른 건 대상 수집(collectEmotionTargets)·청크당 호출
+    // (selectEmotionsBatch)·커밋 함수(applyEmotionUpdates, export 되어 단위테스트 가능)뿐.
+    autoAssignEmotionAll: async () => {
+      const project = get().project;
+      const key = get().openaiKey.trim();
+      if (!key) {
+        flash('OpenAI 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
+        return;
+      }
+      const batches = collectEmotionTargets(project);
+      if (!batches.length) {
+        flash('AI 로 배정할 표정이 없습니다(이미 모두 채워짐 또는 업로드된 스프라이트 없음).');
+        return;
+      }
+      const estimate = estimateEmotionCost(project);
+      const ok = window.confirm(
+        `AI 표정 배정을 실행합니다.\n` +
+          `대상 대사: ${estimate.targetLines}줄 · 예상 요청 ${estimate.requests}회\n` +
+          `예상 비용: 약 $${estimate.usd.toFixed(4)}(gpt-4o-mini 기준, 실제 과금은 OpenAI 대시보드가 정본)\n` +
+          `계속할까요?`,
+      );
+      if (!ok) return;
+
+      set((s) => ({
+        busy: { ...s.busy, 'batch:emotion': true },
+        emotionProgress: { done: 0, total: batches.length },
+      }));
+      const synopsis = buildSynopsis(project);
+      let done = 0;
+      let failScenes = 0;
+      let doneScenes = 0;
+      let aborted = false; // 키/쿼터 오류처럼 재시도해도 의미 없는 치명적 오류 — 배치 전체 중단
+      // sceneId → lineIndex → 배정된 표정. 루프가 끝난 뒤 applyEmotionUpdates 로 딱 1번만 커밋한다
+      // (autoTranslateAll 의 updates Map 누적 → 단일 커밋과 동일한 이유 — 채워질 때마다 scenes 를
+      // 재빌드하면 장면·줄 수에 비례해 리렌더/저장이 반복된다).
+      const updates = new Map<string, Map<number, Expression>>();
+      const PACE_MS = 1200; // 연속 호출 레이트리밋 회피(자동 번역과 동일 기준)
+      let callIndex = 0;
+      try {
+        outer: for (const batch of batches) {
+          const scene = sceneById(project.scenes, batch.sceneId);
+          if (!scene) {
+            doneScenes++;
+            continue;
+          }
+          let sceneFailed = false;
+          const chunks = chunkItems(batch.items, (it) => it.text.length);
+          // 청크 경계에서 감정 흐름이 끊기지 않도록 직전 청크의 마지막 몇 줄을 다음 청크 프롬프트에
+          // 읽기 전용 문맥으로 넘긴다(AI 응답이 아니라 원본 줄 — 다음 청크 호출 전에 이미 알 수 있다).
+          let prevContextLines: { speaker: string; text: string }[] = [];
+          for (const chunk of chunks) {
+            if (callIndex > 0) await sleep(PACE_MS);
+            callIndex++;
+            // 프롬프트 비대화 방지 — 이 청크에 실제로 등장하는 화자의 후보만 추려 넘긴다.
+            const speakersInChunk = new Set(chunk.map((it) => it.speaker));
+            const candidatesBySpeaker = new Map(
+              [...batch.candidatesBySpeaker].filter(([sp]) => speakersInChunk.has(sp)),
+            );
+            try {
+              const result = await selectEmotionsBatch(
+                chunk,
+                {
+                  sceneTitle: scene.title,
+                  background: scene.background,
+                  direction: scene.direction,
+                  cg: scene.cg,
+                  synopsis,
+                  candidatesBySpeaker,
+                  expressionNotes: project.expressionNotes,
+                  prevContextLines,
+                },
+                key,
+              );
+              for (const it of chunk) {
+                const expr = result[it.i];
+                if (!expr) continue; // 파싱 실패/후보 밖 — resolve.ts 의 휴리스틱 폴백에 맡긴다
+                let sceneUpdates = updates.get(batch.sceneId);
+                if (!sceneUpdates) {
+                  sceneUpdates = new Map();
+                  updates.set(batch.sceneId, sceneUpdates);
+                }
+                sceneUpdates.set(it.i, expr);
+                done++;
+              }
+            } catch (e) {
+              sceneFailed = true;
+              console.warn('[AI 표정 배정] 청크 실패:', batch.sceneId, e);
+              if (isFatalTranslateError(e)) {
+                aborted = true;
+                break outer;
+              }
+            }
+            prevContextLines = chunk.slice(-3).map((it) => ({ speaker: it.speaker, text: it.text }));
+          }
+          if (sceneFailed) failScenes++;
+          doneScenes++;
+          set(() => ({ emotionProgress: { done: doneScenes, total: batches.length } }));
+        }
+      } finally {
+        set((s) => ({ busy: { ...s.busy, 'batch:emotion': false }, emotionProgress: null }));
+      }
+      if (updates.size) {
+        setScenes(applyEmotionUpdates(get().project.scenes, updates)); // 단일 set + 단일 autoSave
+      }
+      if (aborted) {
+        flash(
+          `AI 표정 배정 중단 — ${done}건 채움 · API 키/쿼터 오류로 중단됨(키·잔액을 확인하세요).`,
+          'error',
+        );
+      } else {
+        const msg =
+          `AI 표정 배정 완료 — ${done}건 채움` + (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
         flash(msg, failScenes ? 'error' : 'success');
       }
     },
@@ -1004,6 +1174,17 @@ export const useStore = create<State>((set, get) => {
       flash(`'${n}' 표정을 추가했습니다.`);
     },
 
+    setExpressionNote: (name, value) => {
+      const v = value.trim();
+      set((s) => {
+        const notes = { ...s.project.expressionNotes };
+        if (v) notes[name] = v;
+        else delete notes[name];
+        return { project: { ...s.project, expressionNotes: Object.keys(notes).length ? notes : undefined } };
+      });
+      autoSave();
+    },
+
     renameExpression: (oldName, newName) => {
       const next = newName.trim();
       if (oldName === '기본') return flash('기본 표정은 이름을 바꿀 수 없습니다.');
@@ -1015,20 +1196,46 @@ export const useStore = create<State>((set, get) => {
         project: {
           ...s.project,
           expressions: cur.map((e) => (e === oldName ? next : e)),
-          // 각 캐릭터의 표정→에셋 키 이전(이미 만든 입화 유지).
+          // 이 표정을 설명하던 한 줄 메모(AI 프롬프트용)도 키를 따라간다 — 안 옮기면 이름을 바꾸는
+          // 순간 그 설명이 조용히 사라져(원래 이름을 다시 안 쓰면 영영 못 찾음), AI 배정이 그 표정을
+          // 다시 헷갈리기 시작한다("옅은 미소"였다는 걸 잊는 것과 같다).
+          expressionNotes: (() => {
+            if (!s.project.expressionNotes || !(oldName in s.project.expressionNotes)) return s.project.expressionNotes;
+            const notes = { ...s.project.expressionNotes };
+            notes[next] = notes[oldName];
+            delete notes[oldName];
+            return notes;
+          })(),
+          // 각 캐릭터의 표정→에셋 키 이전(이미 만든 입화 유지) — 기본 의상 + 24종까지 갈 수 있는
+          // 추가 의상(c.outfits[].expressions)도 같은 키를 쓰므로 빠뜨리면 그 의상만 옛 이름에 눌러
+          // 붙어 있다가(스프라이트가 있어도) removeExpression 이 못 찾아 고아로 남는다.
           characters: s.project.characters.map((c) => {
-            if (!(oldName in c.expressions)) return c;
-            const ex = { ...c.expressions };
-            ex[next] = ex[oldName];
-            delete ex[oldName];
-            return { ...c, expressions: ex };
+            const migrate = (ex: Partial<Record<string, string>>) => {
+              if (!(oldName in ex)) return ex;
+              const next2 = { ...ex };
+              next2[next] = next2[oldName];
+              delete next2[oldName];
+              return next2;
+            };
+            const expressions = migrate(c.expressions);
+            const outfits = c.outfits?.map((o) => ({ ...o, expressions: migrate(o.expressions) }));
+            if (expressions === c.expressions && outfits === c.outfits) return c;
+            return { ...c, expressions, ...(outfits ? { outfits } : {}) };
           }),
-          // 대사에 지정된 표정 이름도 함께 이전.
+          // 대사에 지정된 표정 이름도 함께 이전 — 작가 수동(emotion)뿐 아니라 AI 배정(emotionAuto)도
+          // 같은 이름 공간을 쓴다(안 옮기면 resolve.ts 의 "선언된 표정 목록" 검증에 걸려 조용히
+          // 휴리스틱으로 떨어진다 — 유령 표정 취급을 당한다).
           scenes: s.project.scenes.map((sc) => ({
             ...sc,
-            lines: sc.lines.map((l) =>
-              l.kind === 'dialogue' && l.emotion === oldName ? { ...l, emotion: next } : l,
-            ),
+            lines: sc.lines.map((l) => {
+              if (l.kind !== 'dialogue') return l;
+              if (l.emotion !== oldName && l.emotionAuto !== oldName) return l;
+              return {
+                ...l,
+                emotion: l.emotion === oldName ? next : l.emotion,
+                emotionAuto: l.emotionAuto === oldName ? next : l.emotionAuto,
+              };
+            }),
           })),
         },
       }));
@@ -1040,23 +1247,58 @@ export const useStore = create<State>((set, get) => {
       if (name === '기본') return flash('기본 표정은 삭제할 수 없습니다.');
       const cur = effectiveExpressions(get().project.expressions);
       if (!cur.includes(name)) return;
-      // 해당 표정으로 만든 입화 에셋 수집(삭제용).
+      // 해당 표정으로 만든 입화 에셋 수집(삭제용) — 기본 의상뿐 아니라 추가 의상(c.outfits[])도
+      // 같은 표정 키를 쓰므로 함께 걷지 않으면 그 파일들은 참조가 사라졌는데도 IndexedDB 에
+      // 계속 남는다(고아 에셋 스윕조차 "이 표정이 있었다"는 걸 모르니 대상이 아니었다).
       const toDelete: string[] = [];
       for (const c of get().project.characters) {
         const id = c.expressions[name];
         if (id) toDelete.push(id);
+        for (const o of c.outfits ?? []) {
+          const oid = o.expressions[name];
+          if (oid) toDelete.push(oid);
+        }
       }
       await commitAssetSwap(
         (s) => ({
           project: {
             ...s.project,
             expressions: cur.filter((e) => e !== name),
+            // 이 표정의 설명 메모도 함께 삭제 — 안 지우면 이름을 재활용(같은 이름으로 addExpression)
+            // 했을 때 엉뚱한 옛 설명이 되살아난다.
+            expressionNotes: (() => {
+              if (!s.project.expressionNotes || !(name in s.project.expressionNotes)) return s.project.expressionNotes;
+              const notes = { ...s.project.expressionNotes };
+              delete notes[name];
+              return notes;
+            })(),
             characters: s.project.characters.map((c) => {
-              if (!(name in c.expressions)) return c;
-              const ex = { ...c.expressions };
-              delete ex[name];
-              return { ...c, expressions: ex };
+              const strip = (ex: Partial<Record<string, string>>) => {
+                if (!(name in ex)) return ex;
+                const next = { ...ex };
+                delete next[name];
+                return next;
+              };
+              const expressions = strip(c.expressions);
+              const outfits = c.outfits?.map((o) => ({ ...o, expressions: strip(o.expressions) }));
+              if (expressions === c.expressions && outfits === c.outfits) return c;
+              return { ...c, expressions, ...(outfits ? { outfits } : {}) };
             }),
+            // 대사에 남아 있던 참조도 지운다 — 안 지우면 삭제된 이름이 유령 표정으로 남아
+            // resolve.ts 의 "선언된 표정 목록" 검증에 걸려 (조용히 휴리스틱으로 떨어지긴 하지만)
+            // 사용자 눈엔 "분명 지웠는데 왜 아직 값이 있지"로 보인다.
+            scenes: s.project.scenes.map((sc) => ({
+              ...sc,
+              lines: sc.lines.map((l) => {
+                if (l.kind !== 'dialogue') return l;
+                if (l.emotion !== name && l.emotionAuto !== name) return l;
+                return {
+                  ...l,
+                  emotion: l.emotion === name ? undefined : l.emotion,
+                  emotionAuto: l.emotionAuto === name ? undefined : l.emotionAuto,
+                };
+              }),
+            })),
           },
         }),
         toDelete,
@@ -1195,6 +1437,71 @@ export const useStore = create<State>((set, get) => {
         flash(`${name} · ${outfit === '기본' ? '' : outfit + ' '}${expr} 입화를 업로드했습니다.`);
       } catch (e) {
         flash((e as Error).message);
+      }
+    },
+
+    /**
+     * 스프라이트 일괄 업로드 — 파일명에서 표정 이름을 찾아 해당 칸에 넣는다.
+     * 표정 24종 × 히로인을 한 칸씩 클릭해 올리는 건 비현실적이라 메뉴 버튼의 importMenuButtons
+     * 관용구를 그대로 가져왔다: 매칭/미매칭 분류 → 전부 업로드 → **commitAssetSwap 을 한 번만**
+     * (20장을 올려도 리렌더·autoSave 는 1회). 못 맞춘 파일은 조용히 버리지 않고 목록으로 알린다.
+     */
+    importSpritesBatch: async (name, outfit, files) => {
+      const char = get().project.characters.find((c) => c.name === name);
+      if (!char) return;
+      if (outfit !== '기본' && !char.outfits?.some((o) => o.name === outfit)) {
+        return flash(`'${outfit}' 의상을 찾지 못했습니다.`);
+      }
+      const exprList = effectiveExpressions(get().project.expressions);
+      const matched: { expr: Expression; file: File }[] = [];
+      const unmatched: string[] = [];
+      const seen = new Set<string>();
+      const duplicated: string[] = [];
+      for (const file of files) {
+        const expr = matchExpressionFile(file.name, exprList);
+        if (!expr) {
+          unmatched.push(file.name);
+          continue;
+        }
+        // 같은 표정에 여러 파일이 걸리면 앞의 것만 쓰고 나머지는 알린다 — 조용히 덮어쓰면
+        // 어느 파일이 적용됐는지 알 수 없다.
+        if (seen.has(expr)) {
+          duplicated.push(file.name);
+          continue;
+        }
+        seen.add(expr);
+        matched.push({ expr, file });
+      }
+      if (matched.length === 0) {
+        const parts: string[] = [];
+        if (unmatched.length) parts.push(`인식 실패: ${describeNames(unmatched)}`);
+        if (duplicated.length) parts.push(`중복: ${describeNames(duplicated)}`);
+        return flash(parts.length ? parts.join(' / ') : '적용할 파일이 없습니다.', 'error');
+      }
+      try {
+        const sub = outfit === '기본' ? '' : safeFileName(outfit) + '_';
+        const prevIds: string[] = [];
+        const updates: { expr: Expression; id: string }[] = [];
+        for (const { expr, file } of matched) {
+          const id = await uploadAsset(file, 'sprite', `sprite_${name}_${sub}${expr}.png`);
+          const cur = get().project.characters.find((c) => c.name === name);
+          const store =
+            outfit === '기본' ? cur?.expressions : cur?.outfits?.find((o) => o.name === outfit)?.expressions;
+          const prev = store?.[expr];
+          if (prev) prevIds.push(prev);
+          updates.push({ expr, id });
+        }
+        await commitAssetSwap((s) => {
+          let characters = s.project.characters;
+          for (const u of updates) characters = withSpriteAsset(characters, name, outfit, u.expr, u.id);
+          return { project: { ...s.project, characters } };
+        }, prevIds);
+        let msg = `${name} · ${outfit === '기본' ? '' : outfit + ' '}입화 ${updates.length}종을 적용했습니다.`;
+        if (unmatched.length) msg += ` (인식 실패 ${unmatched.length}개: ${describeNames(unmatched)})`;
+        if (duplicated.length) msg += ` (중복 ${duplicated.length}개 건너뜀)`;
+        flash(msg, 'success');
+      } catch (e) {
+        flash((e as Error).message, 'error');
       }
     },
 
@@ -1779,15 +2086,10 @@ export const useStore = create<State>((set, get) => {
         }
         matched.push({ slot: m.slot, state: m.state, file });
       }
-      const describe = (names: string[]) => {
-        const shown = names.slice(0, 3).join(', ');
-        const rest = names.length > 3 ? ` 외 ${names.length - 3}개` : '';
-        return `${shown}${rest}`;
-      };
       if (matched.length === 0) {
         const parts: string[] = [];
-        if (skippedPress.length) parts.push(`클릭 이미지는 지원하지 않아 제외: ${describe(skippedPress)}`);
-        if (unmatched.length) parts.push(`인식 실패: ${describe(unmatched)}`);
+        if (skippedPress.length) parts.push(`클릭 이미지는 지원하지 않아 제외: ${describeNames(skippedPress)}`);
+        if (unmatched.length) parts.push(`인식 실패: ${describeNames(unmatched)}`);
         flash(parts.length ? parts.join(' / ') : '적용할 파일이 없습니다.');
         return;
       }
@@ -1809,7 +2111,7 @@ export const useStore = create<State>((set, get) => {
         if (skippedPress.length) {
           msg += ` (클릭 이미지 ${skippedPress.length}개는 Ren'Py가 '누르는 중' 상태를 지원하지 않아 제외)`;
         }
-        if (unmatched.length) msg += ` (인식 실패: ${describe(unmatched)})`;
+        if (unmatched.length) msg += ` (인식 실패: ${describeNames(unmatched)})`;
         flash(msg);
       } catch (e) {
         flash((e as Error).message);
@@ -1966,15 +2268,10 @@ export const useStore = create<State>((set, get) => {
         }
         matched.push({ slot: m.slot, state: m.state, file });
       }
-      const describe = (names: string[]) => {
-        const shown = names.slice(0, 3).join(', ');
-        const rest = names.length > 3 ? ` 외 ${names.length - 3}개` : '';
-        return `${shown}${rest}`;
-      };
       if (matched.length === 0) {
         const parts: string[] = [];
-        if (skippedPress.length) parts.push(`클릭 이미지는 지원하지 않아 제외: ${describe(skippedPress)}`);
-        if (unmatched.length) parts.push(`인식 실패: ${describe(unmatched)}`);
+        if (skippedPress.length) parts.push(`클릭 이미지는 지원하지 않아 제외: ${describeNames(skippedPress)}`);
+        if (unmatched.length) parts.push(`인식 실패: ${describeNames(unmatched)}`);
         flash(parts.length ? parts.join(' / ') : '적용할 파일이 없습니다.');
         return;
       }
@@ -1996,7 +2293,7 @@ export const useStore = create<State>((set, get) => {
         if (skippedPress.length) {
           msg += ` (클릭 이미지 ${skippedPress.length}개는 Ren'Py가 '누르는 중' 상태를 지원하지 않아 제외)`;
         }
-        if (unmatched.length) msg += ` (인식 실패: ${describe(unmatched)})`;
+        if (unmatched.length) msg += ` (인식 실패: ${describeNames(unmatched)})`;
         flash(msg);
       } catch (e) {
         flash((e as Error).message);

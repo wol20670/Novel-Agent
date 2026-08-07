@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { inferEmotion } from '../generators/emotion';
+import { resolveEmotion } from '../generators/emotion';
 import { canvasSprite } from '../generators/image/canvasSprite';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { getAsset } from '../storage/assetStore';
@@ -18,7 +18,16 @@ import {
   DEFAULT_GRADIENT_HEIGHT,
 } from '../renpy/gui';
 import { gradientAlphaAt } from '../generators/image/canvasMenu';
-import { emojiFor, spriteAssetId, resolveOutfit, type Scene, type Character, type Expression, type Line } from '../types';
+import {
+  emojiFor,
+  spriteAssetId,
+  resolveOutfit,
+  type Scene,
+  type Character,
+  type Expression,
+  type Line,
+
+} from '../types';
 
 const speakersOf = (l: Line): string[] =>
   l.kind === 'dialogue' ? (l.members?.length ? l.members : [l.speaker]) : [];
@@ -140,11 +149,13 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
 
   const charByName = useMemo(() => new Map(characters.map((c) => [c.name, c])), [characters]);
   const isNarrOnly = (name: string) => !!charByName.get(name)?.isProtagonist;
-  const emoOf = (l: Line): Expression =>
-    l.kind === 'dialogue'
-      ? ((l.emotion as Expression | undefined) ??
-        inferEmotion(l.text, { direction: scene.direction, background: scene.background }))
-      : '기본';
+  // 표정 판정은 resolveEmotion(generators/emotion/resolve.ts) 단일 소스에 위임 — generate.ts 의
+  // effectiveEmotion 과 완전히 같은 우선순위(작가 태그 > AI 배정 > 휴리스틱 > 기본)라야 미리보기가
+  // 실제 생성 게임과 어긋나지 않는다. resolveEmotion 은 Project 전체를 요구하지만 실제로 읽는 필드는
+  // expressions(선언된 표정 목록 검증용) 뿐이라, `s.project` 통째 구독(키 입력마다 전체 리렌더 —
+  // CLAUDE.md 함정) 대신 그 필드 하나만 좁게 구독해 최소 shape 로 넘긴다.
+  const expressions = useStore((s) => s.project.expressions);
+  const emoOf = (l: Line): Expression => resolveEmotion(l, scene, { expressions });
 
   const total = scene.lines.length;
   const i = Math.min(step, Math.max(0, total - 1));

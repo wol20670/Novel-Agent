@@ -39,7 +39,7 @@ import {
   type QuickMenuPlan,
 } from './gui';
 import { CONFIRM_STRINGS, UI_STRINGS, uiTr } from './gui/uiStrings';
-import { inferEmotion } from '../generators/emotion';
+import { resolveEmotion } from '../generators/emotion';
 import { enforceContrast } from '../generators/theme/color';
 import { fontGamePath } from '../fonts/fontCatalog';
 
@@ -111,15 +111,13 @@ interface SpriteRef {
 }
 
 /**
- * 대사 줄의 "유효 표정" — 명시 태그가 있으면 그대로, 없으면 문맥에서 추론.
- * 이미지 API 연동 후에는 검수 단계에서 line.emotion 을 미리 채워두면 그 값이 우선한다.
+ * 대사 줄의 "유효 표정" — resolveEmotion(단일 판정 소스, generators/emotion/resolve.ts)에 위임.
+ * 우선순위(작가 태그 emotion > AI 배정 emotionAuto > 오프라인 휴리스틱 > '기본')와 "선언된 표정
+ * 목록(effectiveExpressions)" 검증은 그쪽 파일 하나에 모여 있다 — 예전엔 이 판정을 여기·ScenePlayer
+ * 두 곳이 각자 다시 짰다(emotionAuto 도입 전까지는 사실상 `line.emotion ?? inferEmotion(...)`).
  */
-function effectiveEmotion(line: Line, scene: Scene): Expression {
-  if (line.kind !== 'dialogue') return '기본';
-  return (
-    (line.emotion as Expression | undefined) ??
-    inferEmotion(line.text, { direction: scene.direction, background: scene.background })
-  );
+function effectiveEmotion(line: Line, scene: Scene, project: Project): Expression {
+  return resolveEmotion(line, scene, project);
 }
 
 /** 캐릭터별로 (인페어런스 포함) 대본에서 실제 쓰이는 표정 집합. 이미지 API 생성 대상 목록이기도 하다. */
@@ -129,7 +127,7 @@ function expressionPlan(project: Project, ids: Map<string, string>): Map<string,
     if (scene.status !== 'approved') continue;
     for (const line of scene.lines) {
       if (line.kind !== 'dialogue') continue;
-      const emo = effectiveEmotion(line, scene);
+      const emo = effectiveEmotion(line, scene, project);
       for (const id of lineSpeakerIds(line, ids)) {
         const set = plan.get(id) ?? plan.set(id, new Set<Expression>()).get(id)!;
         set.add(emo);
@@ -495,6 +493,7 @@ function scriptBody(
   sideById: Map<string, 'left' | 'right' | 'auto'>,
   outfitRules: OutfitRule[] | undefined,
   characterScale: number | undefined,
+  project: Project,
 ): string {
   const resolve = makeResolver(refs);
   const itemTag = new Map(items.map((it) => [it.name, it.tag]));
@@ -620,7 +619,7 @@ function scriptBody(
             }
           }
         }
-        const want = attrFor(effectiveEmotion(line, s));
+        const want = attrFor(effectiveEmotion(line, s, project));
         // 스프라이트가 있는 화자(들) 등장 — 합동 대사면 멤버 전원이 함께 선다. CG 배경 중엔 세우지 않음.
         for (const sid of cgActive ? [] : speakerIds) {
           const owned = spritesByChar.get(sid);
@@ -1131,7 +1130,7 @@ export function generateRenpyFiles(
       : menuTextFont;
 
   const files: RenpyFile[] = [
-    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules, project.guiOverrides?.characterScale) },
+    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules, project.guiOverrides?.characterScale, project) },
     { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites, items) },
     { path: 'game/options.rpy', content: optionsRpy(project) },

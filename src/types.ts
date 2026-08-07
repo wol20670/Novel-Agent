@@ -56,7 +56,18 @@ export type Line =
       kind: 'dialogue';
       speaker: string; // 표시 이름표 (합동 대사면 "한지수 & 강민주")
       text: string; // base(원문) 언어. 자막 번역은 i18n, Ren'Py 출력은 tl 블록으로 분리된다.
+      /**
+       * 작가가 정한 표정 — 대본의 `이름(표정):` 태그이거나 장면 카드 드롭다운에서 직접 고른 값.
+       * "사람이 명시한 의도"만 담는다(아래 emotionAuto 와 반드시 구분).
+       */
       emotion?: string;
+      /**
+       * AI 가 문맥으로 배정한 표정. emotion 과 같은 필드에 쓰면 안 되는 이유가 둘 있다 —
+       * ① mergeScenes 의 `emotion: next.emotion ?? prev.emotion` 규칙 때문에 재분석 후에도 AI 값이
+       *    "작가 태그"인 척 살아남는다 ② UI 가 사람이 정한 값과 구분할 수 없어 되돌릴 수가 없다.
+       * 우선순위는 emotion > emotionAuto > 휴리스틱 > '기본' (resolveEmotion 단일 판정).
+       */
+      emotionAuto?: string;
       /** 합동 대사(둘 이상이 동시에) — 등록 캐릭터 이름 배열. 있으면 speaker 는 묶음 라벨이다. */
       members?: string[];
       /** 로케일별 번역 검수본(엑셀 C/D열 등). 없으면 자막은 원문 폴백. */
@@ -255,6 +266,13 @@ export interface Project {
    * '기본'은 항상 포함되며(스프라이트 기준 입화) 이름변경·삭제 불가.
    */
   expressions?: string[];
+  /**
+   * 표정 이름 → 한 줄 설명(선택). AI 표정 배정 프롬프트에 그대로 실린다 — 표정이 20종을 넘어가면
+   * 이름만으로는 사람도 AI 도 못 가른다("옅은 미소" vs "어색한 미소" vs "장난스러운 미소").
+   * 전부 채울 필요는 없고 헷갈리는 계열만 적으면 된다. expressions 배열의 타입을 바꾸지 않고
+   * 병렬 맵으로 두는 건 기존 저장 프로젝트(문자열 배열)와의 호환 때문.
+   */
+  expressionNotes?: Record<string, string>;
   /**
    * 게임 내 "크레딧/라이선스 고지" 화면에 표시할 자유 텍스트(선택).
    * 사용한 일러스트·BGM·효과음·성우 등의 출처/라이선스를 적는다(상업 배포 전 필수 정리).
@@ -710,6 +728,21 @@ export function matchMenuButtonFile(filename: string): { slot: MenuButtonSlot; s
   const state = matchLongestKeyword(norm, MENU_BUTTON_STATES);
   if (!slot || !state) return undefined;
   return { slot, state };
+}
+
+/**
+ * 파일명 → 표정 이름(스프라이트 일괄 업로드). 메뉴 버튼 매칭과 같은 정규화지만, 후보가 모듈 상수가
+ * 아니라 **사용자가 정의한 표정 목록**이라 런타임 테이블을 만들어 넘긴다.
+ * 긴 이름부터 검사하는 건 여기서도 필수다 — '미소'와 '옅은 미소'가 둘 다 있으면 짧은 쪽이 먼저
+ * 걸려 엉뚱한 칸에 들어간다(메뉴 쪽 '저장' vs '빠른저장'과 같은 함정).
+ * 캐릭터 이름은 매칭에 쓰지 않는다 — 업로드는 이미 특정 캐릭터 카드에서 일어나므로 축이 하나뿐이고,
+ * 파일명에 캐릭터 이름이 들어 있어도(`한지수_옅은미소.png`) 표정만 찾으면 된다.
+ */
+export function matchExpressionFile(filename: string, expressions: string[]): string | undefined {
+  const withoutExt = filename.replace(/\.[^.]+$/, '');
+  const norm = withoutExt.replace(/\s+/g, '').toLowerCase();
+  const table = expressions.map((e) => ({ id: e, fileKeywords: [e] }));
+  return matchLongestKeyword(norm, table);
 }
 
 /** 프로젝트의 유효 표정 목록('기본'을 항상 맨 앞에 포함). list 미지정/빈 배열이면 기본 세트. */

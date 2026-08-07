@@ -21,8 +21,13 @@ interface GeneratedTheme {
   note?: string;
 }
 
-/** 파싱된 장면에서 짧은 시놉시스(제목+장면제목+앞부분 대사)를 만든다. */
-function buildSynopsis(project: Project, maxLen = 700): string {
+/**
+ * 파싱된 장면에서 짧은 시놉시스(제목+장면제목+앞부분 대사)를 만든다.
+ * export: generators/emotion/aiSelect.ts 가 AI 표정 배정 프롬프트에도 같은 시놉시스를 재사용한다
+ * (테마 생성과 표정 배정 둘 다 "이 이야기가 어떤 이야기인지" 같은 요약이 필요해서 — 대본이 클 때
+ * 대사 전체를 매 요청마다 실어 보내는 대신 700자 요약 하나로 문맥을 준다).
+ */
+export function buildSynopsis(project: Project, maxLen = 700): string {
   const parts: string[] = [];
   for (const s of project.scenes) {
     parts.push(`# ${s.title}`);

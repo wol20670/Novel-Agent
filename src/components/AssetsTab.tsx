@@ -1,11 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import {
   effectiveExpressions,
   effectiveTextLocales,
   baseLocaleOf,
   LOCALE_LABEL,
-  emojiFor,
   characterOutfits,
   isTypecastVoiceId,
   type Expression,
@@ -21,6 +20,7 @@ import VoiceLab from './VoiceLab';
 import VoiceReview from './VoiceReview';
 import MainMenuGui from './MainMenuGui';
 import QuickMenuGui from './QuickMenuGui';
+import ExpressionSetEditor from './ExpressionSetEditor';
 import OrphanCleanupModal from './OrphanCleanupModal';
 import { isCollabReady } from '../collab';
 import { REMOTE_GRACE_OPTIONS } from '../assetRefs';
@@ -124,9 +124,10 @@ export default function AssetsTab() {
         <p className="text-xs text-gray-500 mb-3">
           표정별 입화를 업로드합니다(투명 배경 PNG 권장). 대본에서{' '}
           <code className="text-accent">이름(기쁨): 대사</code> 처럼 적으면 그 표정으로 등장하고, 표정을
-          안 적어도 대사 문맥으로 자동 선택됩니다. 업로드 전엔 임시 실루엣으로 미리보기가 채워집니다.
+          안 적어도 AI가 대사 문맥을 보고 자동으로 배정합니다. 업로드 전엔 임시 실루엣으로 미리보기가 채워집니다.
         </p>
-        <ExpressionEditor />
+        <ExpressionSetEditor />
+        <AssignEmotionsRow />
         {characters.length === 0 && <p className="text-gray-600 text-sm">등장 캐릭터 없음</p>}
         <div className="grid grid-cols-2 gap-3">
           {characters.filter((c) => !c.isProtagonist).map((c) => (
@@ -564,120 +565,35 @@ function NarrationOnlyRow() {
   );
 }
 
-/** 표정 칩 — 클릭하면 이름 편집(엔터 확정 / Esc 취소). '기본'은 고정. */
-function ExpressionChip({
-  name,
-  onRename,
-  onRemove,
-}: {
-  name: string;
-  onRename: (next: string) => void;
-  onRemove: () => void;
-}) {
-  const fixed = name === '기본';
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(name);
-  if (editing && !fixed) {
-    const commit = () => {
-      setEditing(false);
-      const next = val.trim();
-      if (next && next !== name) onRename(next);
-      else setVal(name);
-    };
-    return (
-      <input
-        autoFocus
-        className="field text-xs w-24 py-0.5"
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit();
-          if (e.key === 'Escape') {
-            setEditing(false);
-            setVal(name);
-          }
-        }}
-      />
-    );
-  }
+/**
+ * 🎭 표정 자동 배정(AI) 실행 버튼 — CenterPanel 의 🌐 전체 자동 번역과 같은
+ * "버튼이 곧 진행률"(disabled + Spinner + done/total) 패턴. VoiceSection 의 배치 버튼들과 같은 이유로
+ * CenterPanel 을 건드리지 않고(다른 에이전트 담당) 여기(표정 세트 바로 아래)에 둔다.
+ */
+function AssignEmotionsRow() {
+  const busy = useStore((s) => !!s.busy['batch:emotion']);
+  const progress = useStore((s) => s.emotionProgress);
+  // 계약 초안은 assignEmotionsAll 이었지만 실제 착지한 store 액션명은 autoAssignEmotionAll —
+  // 실제 이름을 따른다(스토어는 다른 에이전트 소유).
+  const autoAssignEmotionAll = useStore((s) => s.autoAssignEmotionAll);
   return (
-    <span
-      className={`inline-flex items-center gap-1 rounded border border-edge px-2 py-0.5 text-xs ${
-        fixed ? 'bg-ink/60 text-gray-400' : 'bg-ink'
-      }`}
-    >
-      <span>{emojiFor(name)}</span>
+    <div className="flex items-center gap-2 mb-3 -mt-1.5">
       <button
-        className="hover:text-accent disabled:cursor-default"
-        disabled={fixed}
-        onClick={() => {
-          setVal(name);
-          setEditing(true);
-        }}
-        title={fixed ? '기본 표정은 고정' : '이름 변경'}
+        className="btn-ghost text-xs"
+        disabled={busy}
+        onClick={() => void autoAssignEmotionAll()}
+        title="표정이 지정되지 않은 대사에만 AI가 문맥을 보고 표정을 배정합니다. 직접 고른 표정은 절대 덮어쓰지 않습니다."
       >
-        {name}
+        {busy ? (
+          <span className="flex items-center gap-1.5">
+            <Spinner />
+            {progress ? `${progress.done}/${progress.total} 배정 중…` : '배정 중…'}
+          </span>
+        ) : (
+          '🎭 표정 자동 배정'
+        )}
       </button>
-      {!fixed && (
-        <button className="text-gray-600 hover:text-rose-500 leading-none" onClick={onRemove} title="이 표정 삭제">
-          ×
-        </button>
-      )}
-    </span>
-  );
-}
-
-/** 표정 세트 편집 — 추가/이름변경/삭제('기본'은 고정). 전 캐릭터 공통. */
-function ExpressionEditor() {
-  const exprs = effectiveExpressions(useStore((s) => s.project.expressions));
-  const addExpression = useStore((s) => s.addExpression);
-  const renameExpression = useStore((s) => s.renameExpression);
-  const removeExpression = useStore((s) => s.removeExpression);
-  const [adding, setAdding] = useState('');
-  const submit = () => {
-    if (adding.trim()) {
-      addExpression(adding.trim());
-      setAdding('');
-    }
-  };
-  return (
-    <div className="card border-edge p-2.5 mb-3">
-      <div className="flex items-center justify-between mb-1.5">
-        <p className="text-xs text-gray-300 font-semibold">😀 표정 세트 · {exprs.length}종</p>
-        <span className="text-[10px] text-gray-500">이름을 바꾸거나 칸을 늘릴 수 있어요 · '기본'은 고정</span>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {exprs.map((ex) => (
-          <ExpressionChip
-            key={ex}
-            name={ex}
-            onRename={(next) => renameExpression(ex, next)}
-            onRemove={() => {
-              if (
-                window.confirm(
-                  `'${ex}' 표정을 삭제할까요?\n이 표정으로 업로드한 모든 캐릭터 입화도 함께 삭제됩니다.`,
-                )
-              )
-                removeExpression(ex);
-            }}
-          />
-        ))}
-      </div>
-      <div className="flex gap-1.5 mt-2">
-        <input
-          className="field text-xs flex-1"
-          placeholder="새 표정 이름 (예: 당황, 황당, 윙크) — 엔터로 추가"
-          value={adding}
-          onChange={(e) => setAdding(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit();
-          }}
-        />
-        <button className="btn-ghost text-[11px]" disabled={!adding.trim()} onClick={submit}>
-          ＋ 추가
-        </button>
-      </div>
+      <span className="text-[10px] text-gray-500">표정 미지정 대사에만 적용 · 직접 고른 표정은 유지됩니다</span>
     </div>
   );
 }
@@ -967,6 +883,7 @@ function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Local
           />
         ))}
       </div>
+      <SpriteBatchUploadRow charName={name} outfit={outfit} />
       <div className="flex items-center gap-3 mt-2">
         {hasAny && outfit === '기본' && (
           <button className="text-[11px] text-gray-500 hover:text-rose-600" onClick={() => clearAll(name)}>
@@ -981,6 +898,59 @@ function CharacterCard({ name, nameLocales }: { name: string; nameLocales: Local
           내레이션 전용으로
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 📦 한 번에 업로드 — 파일명 자동 매칭(주 동선) + 폴더 통째 선택. QuickMenuGui.tsx 의 BatchUploadRow 와
+ * 같은 패턴(multi-file UploadButton + webkitdirectory 숨김 input)이되, 대상이 고정 슬롯이 아니라
+ * (캐릭터, 의상) 이라 그 둘을 props 로 받는다. **지금 선택된 의상**(outfit)에만 적용된다 — 의상 탭을
+ * 바꾸면 같은 버튼이 다른 의상을 대상으로 한다.
+ */
+function SpriteBatchUploadRow({ charName, outfit }: { charName: string; outfit: string }) {
+  const importSpritesBatch = useStore((s) => s.importSpritesBatch);
+  const dirRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const el = dirRef.current;
+    if (!el) return;
+    // webkitdirectory/directory 는 JSX 속성 타입이 없어(표준화 안 됨) DOM 에 직접 세팅해야
+    // "폴더 선택" 다이얼로그로 뜬다.
+    el.setAttribute('webkitdirectory', '');
+    el.setAttribute('directory', '');
+  }, []);
+
+  const handleDirFiles = (fileList: FileList | null) => {
+    const files = fileList ? Array.from(fileList).filter((f) => f.type.startsWith('image/')) : [];
+    if (files.length) void importSpritesBatch(charName, outfit, files);
+    if (dirRef.current) dirRef.current.value = '';
+  };
+
+  return (
+    <div className="mb-1.5">
+      <div className="flex items-center gap-1.5">
+        <UploadButton
+          multiple
+          onFiles={(files) => void importSpritesBatch(charName, outfit, files)}
+          label="📦 한 번에 업로드"
+          className="btn-ghost text-[11px]"
+          title={`파일명으로 표정을 자동 매칭해 '${outfit}' 의상에 한 번에 업로드`}
+        />
+        <button
+          className="btn-ghost text-[11px]"
+          onClick={() => dirRef.current?.click()}
+          title="폴더 하나를 통째로 선택합니다"
+        >
+          📁 폴더 선택
+        </button>
+        <input ref={dirRef} type="file" multiple className="hidden" onChange={(e) => handleDirFiles(e.target.files)} />
+      </div>
+      <p className="text-[10px] text-gray-500 leading-snug mt-0.5">
+        파일명에 표정 이름이 들어 있으면 자동 매칭됩니다(예: <code className="text-accent">옅은미소.png</code>,{' '}
+        <code className="text-accent">한지수_옅은 미소.png</code>) — 인식 못한 파일은 건너뛰고 알려드립니다. 지금
+        선택된 의상(<b className="text-gray-300">{outfit}</b>)에만 적용됩니다.
+      </p>
     </div>
   );
 }

@@ -123,17 +123,22 @@ export function isFatalTranslateError(e: unknown): boolean {
 /**
  * items 를 줄 수(maxLines)·글자 수(maxChars) 상한 안에서 순서를 보존하며 청크로 묶는다.
  * 한 아이템 자체가 maxChars 를 넘어도 누락/무한루프 없이 그 아이템 단독 청크가 된다.
+ *
+ * 제네릭 — 원래는 TranslateItem 전용이었지만 generators/emotion/aiSelect.ts(AI 표정 배정)도
+ * "장면당 항목을 글자수 상한으로 청크 나누기"가 그대로 필요해서, 항목 타입과 무관하게 sizeOf 로
+ * 글자수를 뽑도록 일반화했다(번역 호출부는 `(it) => it.ko.length` 를 넘겨 기존 동작 그대로).
  */
-export function chunkItems(
-  items: TranslateItem[],
+export function chunkItems<T>(
+  items: T[],
+  sizeOf: (item: T) => number,
   maxLines = LINES_PER_CHUNK,
   maxChars = CHARS_PER_CHUNK,
-): TranslateItem[][] {
-  const chunks: TranslateItem[][] = [];
-  let current: TranslateItem[] = [];
+): T[][] {
+  const chunks: T[][] = [];
+  let current: T[] = [];
   let currentChars = 0;
   for (const it of items) {
-    const len = it.ko.length;
+    const len = sizeOf(it);
     const wouldExceed = current.length > 0 && (current.length + 1 > maxLines || currentChars + len > maxChars);
     if (wouldExceed) {
       chunks.push(current);

@@ -18,6 +18,7 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 ## Ren'Py 생성 주의 (lint로도 못 잡는 런타임 버그)
 - 화면 언어의 `add x:` 블록엔 애니메이션 ATL(`easein` 등) 금지 — 정적 속성만. 애니메이션은 `add x at transform:`으로 감쌀 것(`src/renpy/gui/screensRpy.ts`).
 - **사용자 텍스트는 반드시 `esc`/`escRpyText`를 거칠 것**(`src/renpy/generate.ts`) — `%`·`[`·`{` 미이스케이프는 typecheck·lint 둘 다 못 잡는 **런타임** 크래시("할인 20%", "[속보]"). 새 .rpy 출력 경로를 추가할 땐 이스케이프부터 확인.
+- **표정 판정은 `resolveEmotion`(`src/generators/emotion/resolve.ts`) 단일 소스** — 생성기·미리보기·장면카드가 각자 계산하면 어긋난다. 우선순위 = 작가 태그(`Line.emotion`) > AI 배정(`Line.emotionAuto`) > 휴리스틱 > `기본`. ⚠️ **작가 태그는 검증하지 않는다**(파서가 `이름(당황):`을 "작가 신뢰"로 자유 문자열 채택하므로, 선언 목록으로 거르면 대본 태그가 조용히 무시된다). 검증 대상은 사람이 안 쓴 값(AI·휴리스틱)뿐 — 휴리스틱은 `project.expressions`를 모른 채 옛 기본 6종만 뱉어서, 커스텀 세트에선 유령 표정 슬롯 + 플레이스홀더가 게임에 섞인다. **AI 후보 집합(`availableExpressions`, 업로드된 것만)과 최종 검증 집합(선언 목록)은 다르다** — 같게 만들면 "업로드 전 임시 실루엣" 워크플로가 죽는다.
 - **게임 아이콘은 두 군데, 이름도 다르다** — exe 아이콘은 **프로젝트 루트의 `icon.ico`**(빌드 시 런처가 exe 리소스에 박음, `launcher/game/distribute.rpy`), 실행 중 창 아이콘은 **`config.window_icon`**(options.rpy). ⚠️ `gui.window_icon`으로 정의하면 **조용히 무시된다** — 그 값을 config로 옮겨주는 코드가 엔진에 없다(실기에서 아이콘이 안 바뀌는 걸로 발견). 경로는 `GAME_ICON_FILE`/`WINDOW_ICON_FILE`(`src/types.ts`) 단일 소스.
 - **`imagebutton`에 `focus_mask True` 금지** — 히트박스가 "불투명 픽셀"로 좁아지는데 메뉴 버튼 아트는 대개 여백이 투명(글자 획만 불투명)이라 **hover·클릭이 아예 안 먹는다**(실기 재현 확인). lint·typecheck 둘 다 못 잡음.
 - **버튼 "눌린 상태" 이미지는 엔진이 지원 안 함** — `imagebutton` 상태는 idle/hover/selected_*/insensitive 뿐. `ImageButton`에 `activate_image` 슬롯이 남아 있으나 `activate_` 프리픽스를 세팅하는 코드가 엔진에 없다(레거시). 누르는 동안엔 hover 이미지가 보인다.

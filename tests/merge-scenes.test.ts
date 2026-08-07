@@ -120,6 +120,44 @@ describe('mergeScenes: 재분석(엑셀/텍스트) 시 기존 에셋·번역·�
     expect(l2.emotion).toBe('슬픔');
   });
 
+  it('merge: AI 배정(emotionAuto)은 텍스트가 그대로인 줄만 승계되고, 텍스트가 바뀐 줄은 새로 배정해야 하므로 승계되지 않는다', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '안녕', emotionAuto: '기쁨' },
+          { kind: 'dialogue', speaker: '민주', text: '잘 가', emotionAuto: '슬픔' },
+        ],
+      }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '안녕' }, // 텍스트 동일 → AI 배정 승계 기대
+          { kind: 'dialogue', speaker: '민주', text: '다시 만나' }, // 텍스트 변경 → 매칭 실패, 승계 없음
+        ],
+      }),
+    ];
+
+    const result = mergeScenes(prev, next, 'merge');
+
+    const [l1, l2] = result[0].lines as Extract<Line, { kind: 'dialogue' }>[];
+    expect(l1.emotionAuto).toBe('기쁨');
+    expect(l2.emotionAuto).toBeUndefined();
+  });
+
+  it('merge: 표기만 고쳐진(느슨 매칭) 줄도 emotionAuto 가 승계된다 — voice/i18n 과 동일한 메타 승계 규칙', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', { lines: [{ kind: 'dialogue', speaker: '민주', text: '안녕, 반가워!', emotionAuto: '기쁨' }] }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', { lines: [{ kind: 'dialogue', speaker: '민주', text: '안녕 반가워.' }] }), // 공백/문장부호만 다름
+    ];
+
+    const result = mergeScenes(prev, next, 'merge');
+    const line = result[0].lines[0] as Extract<Line, { kind: 'dialogue' }>;
+    expect(line.emotionAuto).toBe('기쁨');
+  });
+
   it('merge: 장면 내용(라인·배경·BGM·CG)이 완전히 같으면 status가 승계되고, 대사가 바뀌면 review로 리셋된다', () => {
     const linesSame: Line[] = [{ kind: 'dialogue', speaker: '민주', text: '안녕' }];
     const prev: Scene[] = [
@@ -279,6 +317,34 @@ describe('previewMerge: 줄 단위 diff — 재분석 모달이 사용자가 실
     expect(preview.linesRemoved).toBe(1);
     expect(preview.voiceLoss).toBe(2); // ko/en 두 로케일 폐기
     expect(preview.voiceCarriedLoose).toBe(0);
+  });
+
+  it('emotionLoss: 사라지는 줄의 표정 배정(수동 emotion·AI emotionAuto)이 손실로 집계된다 — i18nLoss/voiceLoss 와 동일 원칙', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '지워질 대사1', emotion: '기쁨' }, // 작가 수동 배정
+          { kind: 'dialogue', speaker: '민주', text: '지워질 대사2', emotionAuto: '슬픔' }, // AI 배정
+          { kind: 'dialogue', speaker: '민주', text: '표정 없는 대사' }, // 손실 집계 대상 아님
+        ],
+      }),
+    ];
+    const next: Scene[] = [scene('n1', '장면1', { lines: [] })]; // 전부 삭제
+
+    const preview = previewMerge(prev, next);
+    expect(preview.emotionLoss).toBe(2);
+  });
+
+  it('emotionLoss: 텍스트가 그대로면(승계됨) 손실로 잡히지 않는다', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', { lines: [{ kind: 'dialogue', speaker: '민주', text: '안녕', emotionAuto: '기쁨' }] }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', { lines: [{ kind: 'dialogue', speaker: '민주', text: '안녕' }] }),
+    ];
+
+    const preview = previewMerge(prev, next);
+    expect(preview.emotionLoss).toBe(0);
   });
 
   it('공백·문장부호만 바뀐 줄은 voiceCarriedLoose 로 잡히고 voiceLoss 는 0이며, 실제 병합에서도 음성이 승계되고 텍스트는 새 표기로 바뀐다', () => {

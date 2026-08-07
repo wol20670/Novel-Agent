@@ -13,8 +13,9 @@ import {
   type Line,
   type Locale,
   type Character,
+  type Scene,
 } from '../types';
-import { inferEmotion } from '../generators/emotion';
+import { resolveEmotionDetailed } from '../generators/emotion/resolve';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
 import VoiceLab from './VoiceLab';
@@ -225,15 +226,7 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
       <div className="bg-ink/70 rounded-lg border border-edge p-3 max-h-44 overflow-y-auto text-sm mb-3 space-y-0.5">
         {scene.lines.length === 0 && <span className="text-gray-600 text-xs">대사 없음</span>}
         {scene.lines.map((l, i) => (
-          <LineRow
-            key={i}
-            sceneId={sceneId}
-            index={i}
-            line={l}
-            background={scene.background}
-            direction={scene.direction}
-            charMap={charMap}
-          />
+          <LineRow key={i} sceneId={sceneId} index={i} line={l} scene={scene} charMap={charMap} />
         ))}
         {scene.cg.map((c, i) => (
           <p key={`cg${i}`} className="text-pink-600 text-xs">
@@ -285,15 +278,13 @@ function LineRow({
   sceneId,
   index,
   line,
-  background,
-  direction,
+  scene,
   charMap,
 }: {
   sceneId: string;
   index: number;
   line: Line;
-  background?: string;
-  direction: string[];
+  scene: Scene;
   charMap: Map<string, Character>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -407,14 +398,7 @@ function LineRow({
         </button>
 
         {isDlg && (
-          <LineEmotion
-            sceneId={sceneId}
-            index={index}
-            line={line as DialogueLine}
-            background={background}
-            direction={direction}
-            charMap={charMap}
-          />
+          <LineEmotion sceneId={sceneId} index={index} line={line as DialogueLine} scene={scene} charMap={charMap} />
         )}
       </div>
 
@@ -425,47 +409,65 @@ function LineRow({
   );
 }
 
-/** 대사 한 줄의 표정 선택 — 기본 "자동"(대사 분석 결과), 직접 6종 중 지정 가능. */
+/**
+ * 대사 한 줄의 표정 선택 — 기본 "자동"(작가 태그 > AI 배정 > 문맥 휴리스틱 > '기본' 순, 판정은
+ * resolveEmotionDetailed 단일 소스), 프로젝트 표정 목록 중 직접 지정도 가능.
+ */
 function LineEmotion({
   sceneId,
   index,
   line,
-  background,
-  direction,
+  scene,
   charMap,
 }: {
   sceneId: string;
   index: number;
   line: DialogueLine;
-  background?: string;
-  direction: string[];
+  scene: Scene;
   charMap: Map<string, Character>;
 }) {
   const setEmotion = useStore((s) => s.setLineEmotion);
-  const exprList = effectiveExpressions(useStore((s) => s.project.expressions));
+  // project 전체가 아니라 expressions 필드만 — resolveEmotionDetailed 호출에 필요한 값도 이거 하나뿐이다.
+  const expressions = useStore((s) => s.project.expressions);
+  const exprList = effectiveExpressions(expressions);
   // 화면에 안 서는 화자(주인공 등)는 표정 의미가 없으니 선택기를 숨긴다.
   const narrationOnly = !line.members?.length && !!charMap.get(line.speaker)?.isProtagonist;
-  // inferEmotion 은 대사 분석(휴리스틱)이라 가볍지 않다 — 텍스트/연출/배경이 그대로면 매 렌더 재계산하지 않는다.
-  const directionKey = direction.join('|');
-  const auto = useMemo(
-    () => inferEmotion(line.text, { direction, background }),
+  // resolveEmotionDetailed 는 내부적으로 inferEmotion(휴리스틱)을 부를 수 있어 가볍지 않다 —
+  // 판정에 실제 영향을 주는 필드(대사문·수동 지정·AI 배정·연출·배경·표정 목록)가 그대로면 재계산하지 않는다.
+  // scene 객체 자체는 카드의 다른 필드(제목 등)가 바뀔 때마다 새로 만들어지므로 deps 에 넣지 않는다.
+  const directionKey = scene.direction.join('|');
+  // resolveEmotionDetailed 는 Pick<Project,'expressions'> 만 받으므로 캐스팅 없이 그대로 넘긴다.
+  const resolved = useMemo(
+    () => resolveEmotionDetailed(line, scene, { expressions }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [line.text, directionKey, background],
+    [line.text, line.emotion, line.emotionAuto, directionKey, scene.background, expressions],
   );
   if (narrationOnly) return null;
 
   const value = (line.emotion as Expression | undefined) ?? '';
+  // AI 가 배정한 값이 지금 실제로 쓰이는 중(사람이 아직 손대지 않음) — 검토를 유도하려면 눈에 띄어야 한다.
+  const aiActive = !value && resolved.source === 'ai';
   return (
     <select
       className={`text-[11px] rounded px-1 py-0.5 shrink-0 border outline-none ${
-        value ? 'border-accent text-accent bg-accent/10' : 'border-edge text-gray-400 bg-panel2'
+        value
+          ? 'border-accent text-accent bg-accent/10'
+          : aiActive
+            ? 'border-violet-500/60 text-violet-400 bg-violet-500/10'
+            : 'border-edge text-gray-400 bg-panel2'
       }`}
       value={value}
       onClick={(e) => e.stopPropagation()}
       onChange={(e) => setEmotion(sceneId, index, (e.target.value || undefined) as Expression | undefined)}
-      title="이 대사의 표정 — 자동(대사 분석) 또는 직접 선택"
+      title={
+        aiActive
+          ? 'AI가 대사 문맥으로 배정한 표정입니다 — 직접 고르면 이 배정을 덮어씁니다.'
+          : '이 대사의 표정 — 자동(문맥 분석) 또는 직접 선택. 직접 고르면 AI 배정을 덮어씁니다.'
+      }
     >
-      <option value="">자동 · {emojiFor(auto)}{auto}</option>
+      <option value="">
+        {resolved.source === 'ai' ? `자동 · 🤖 ${resolved.expr}` : `자동 · ${emojiFor(resolved.expr)}${resolved.expr}`}
+      </option>
       {exprList.map((ex) => (
         <option key={ex} value={ex}>
           {emojiFor(ex)} {ex}

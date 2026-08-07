@@ -78,17 +78,21 @@ function mkItems(n: number, koLen = 3): TranslateItem[] {
   return Array.from({ length: n }, (_, i) => ({ i, ko: 'x'.repeat(koLen) }));
 }
 
+// chunkItems 가 제네릭(<T>(items, sizeOf, ...))으로 바뀌어(generators/emotion/aiSelect.ts 도 재사용)
+// 모든 호출부가 sizeOf 를 명시해야 한다 — 번역 항목은 항상 ko.length 로 크기를 잰다.
+const koLen = (it: TranslateItem) => it.ko.length;
+
 describe('chunkItems', () => {
   it('줄 수가 상한 이하면 청크 1개로 묶는다(회귀 가드)', () => {
     const items = mkItems(40);
-    const chunks = chunkItems(items);
+    const chunks = chunkItems(items, koLen);
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toHaveLength(40);
   });
 
   it('90개면 40/40/10 으로 나누고 순서·인덱스를 보존한다', () => {
     const items = mkItems(90);
-    const chunks = chunkItems(items);
+    const chunks = chunkItems(items, koLen);
     expect(chunks.map((c) => c.length)).toEqual([40, 40, 10]);
     for (const c of chunks) expect(c.length).toBeLessThanOrEqual(40);
     const seen = chunks.flat().map((it) => it.i);
@@ -98,7 +102,7 @@ describe('chunkItems', () => {
   it('글자 수 상한에 걸리면 줄 수 상한 전에 분할한다', () => {
     // 10개 × 500자 = 5000자 > 4000자 캡 → 40줄 캡(=10개 미만이라 안 걸림)보다 먼저 글자 수로 쪼개져야 함
     const items = mkItems(10, 500);
-    const chunks = chunkItems(items);
+    const chunks = chunkItems(items, koLen);
     expect(chunks.length).toBeGreaterThan(1);
     for (const c of chunks) {
       const chars = c.reduce((sum, it) => sum + it.ko.length, 0);
@@ -112,13 +116,13 @@ describe('chunkItems', () => {
       { i: 0, ko: 'x'.repeat(50) },
       { i: 1, ko: 'y'.repeat(5) },
     ];
-    const chunks = chunkItems(items, 40, 10); // 작은 maxChars 로 빠르게 테스트
+    const chunks = chunkItems(items, koLen, 40, 10); // 작은 maxChars 로 빠르게 테스트
     expect(chunks.flat().map((it) => it.i)).toEqual([0, 1]);
     expect(chunks.some((c) => c.length === 1 && c[0].i === 0)).toBe(true);
   });
 
   it('빈 입력은 빈 배열을 반환한다', () => {
-    expect(chunkItems([])).toEqual([]);
+    expect(chunkItems([] as TranslateItem[], koLen)).toEqual([]);
   });
 });
 

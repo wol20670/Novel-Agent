@@ -33,6 +33,11 @@ export interface MergePreview {
   voiceLoss: number;
   /** 사라지는 번역 칸 수(줄 × 로케일 합산, next 가 같은 로케일을 다시 채워준 경우는 제외). */
   i18nLoss: number;
+  /**
+   * 사라지는 표정 배정 줄 수(작가 수동 emotion 또는 AI emotionAuto 중 하나라도 있던 줄). i18nLoss와
+   * 같은 이유로 센다 — AI 배정은 API 비용이 드는데, 오늘까지는 이 손실이 사용자에게 안 보였다.
+   */
+  emotionLoss: number;
   /** 승인(approved)·수정필요 상태였다가 내용 변경으로 검토중(review)으로 되돌아가는 장면 수. */
   statusReset: number;
   /** 배경/BGM 이름이 바뀌어 업로드 에셋 연결이 끊기는(재연결 실패) 매칭된 장면 수. */
@@ -78,6 +83,11 @@ function carryLineMeta(next: Line, prev: Line): Line {
     return {
       ...next,
       emotion: next.emotion ?? prev.emotion, // 엑셀 명시 태그 우선, 없으면 앱에서 수동 지정한 값 유지
+      // AI 가 배정한 표정(emotionAuto)도 함께 승계. 필드별 "텍스트가 바뀌면 지운다" 규칙은 따로
+      // 없어도 된다 — 이 줄이 여기(pairLines 매칭)까지 왔다는 것 자체가 "텍스트가 그대로거나
+      // 발음만 같다"는 뜻이고, 실질적으로 바뀐 줄은 애초에 매칭에 실패해 next 가 그대로 쓰이므로
+      // (emotionAuto 없음) 옛 AI 배정이 새 문맥에 잘못 눌러앉는 사고가 자연히 방지된다.
+      emotionAuto: prev.emotionAuto,
       i18n: mergeI18n(prev.i18n, next.i18n),
       voiced: prev.voiced,
       voiceAssetIds: prev.voiceAssetIds,
@@ -227,6 +237,11 @@ function i18nCount(line: Line): number {
   return line.kind === 'dialogue' || line.kind === 'narration' ? Object.keys(line.i18n ?? {}).length : 0;
 }
 
+/** dialogue 라인이 표정 배정(작가 수동 emotion 또는 AI emotionAuto)을 갖고 있으면 1, 아니면 0. */
+function emotionCount(line: Line): number {
+  return line.kind === 'dialogue' && (line.emotion || line.emotionAuto) ? 1 : 0;
+}
+
 interface SceneDiff {
   /** 텍스트가 그대로(정확·느슨 매칭 포함)라 메타가 승계되는 줄 수. */
   linesCarried: number;
@@ -242,6 +257,8 @@ interface SceneDiff {
   voiceLoss: number;
   /** 사라지는 줄들이 갖고 있던 번역 칸 수(줄 × 로케일). */
   i18nLoss: number;
+  /** 사라지는 줄들이 갖고 있던 표정 배정(emotion/emotionAuto) 수. */
+  emotionLoss: number;
   /** 배경·BGM·CG 중 하나라도 바뀌었는지. */
   attrChanged: boolean;
   /** 태그성 필드(점프·선택지·의상·연출) 중 하나라도 바뀌었는지. */
@@ -272,6 +289,7 @@ export function diffMatchedScene(prev: Scene, next: Scene): SceneDiff {
 
   const voiceLoss = unmatchedPrev.reduce((sum, l) => sum + voiceCount(l), 0);
   const i18nLoss = unmatchedPrev.reduce((sum, l) => sum + i18nCount(l), 0);
+  const emotionLoss = unmatchedPrev.reduce((sum, l) => sum + emotionCount(l), 0);
 
   const attrChanged =
     (prev.background ?? '') !== (next.background ?? '') ||
@@ -289,6 +307,7 @@ export function diffMatchedScene(prev: Scene, next: Scene): SceneDiff {
     voiceCarriedLoose,
     voiceLoss,
     i18nLoss,
+    emotionLoss,
     attrChanged,
     tagChanged,
   };
@@ -421,6 +440,7 @@ export function previewMerge(prev: Scene[], next: Scene[]): MergePreview {
   let voiceCarriedLoose = 0;
   let voiceLoss = 0;
   let i18nLoss = 0;
+  let emotionLoss = 0;
   let statusReset = 0;
   let assetUnlink = 0;
   let scenesTagChanged = 0;
@@ -441,6 +461,7 @@ export function previewMerge(prev: Scene[], next: Scene[]): MergePreview {
     voiceCarriedLoose += diff.voiceCarriedLoose;
     voiceLoss += diff.voiceLoss;
     i18nLoss += diff.i18nLoss;
+    emotionLoss += diff.emotionLoss;
     if (diff.attrChanged) scenesAttrChanged += 1;
     if (diff.tagChanged) {
       scenesTagChanged += 1;
@@ -460,6 +481,7 @@ export function previewMerge(prev: Scene[], next: Scene[]): MergePreview {
     for (const l of sc.lines) {
       voiceLoss += voiceCount(l);
       i18nLoss += i18nCount(l);
+      emotionLoss += emotionCount(l);
     }
   }
 
@@ -475,6 +497,7 @@ export function previewMerge(prev: Scene[], next: Scene[]): MergePreview {
     voiceCarriedLoose,
     voiceLoss,
     i18nLoss,
+    emotionLoss,
     statusReset,
     assetUnlink,
     scenesTagChanged,
