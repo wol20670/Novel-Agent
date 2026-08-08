@@ -15,6 +15,7 @@ import type {
   QuickButtonSlot,
   QuickButtonState,
   QuickMenuLayout,
+  EscImageId,
 } from './types';
 import {
   emptyProject,
@@ -35,6 +36,8 @@ import {
   matchQuickButtonFile,
   QUICK_MENU_SLOTS,
   QUICK_BUTTON_STATES,
+  matchEscImageFile,
+  ESC_IMAGES,
 } from './types';
 import { collectUntranslated } from './generators/translate/collect';
 import { translateBatch, chunkItems, isFatalTranslateError } from './generators/translate';
@@ -370,6 +373,15 @@ interface State {
   clearQuickPanel: () => Promise<void>;
   /** 퀵메뉴 좌표 오버라이드(panelX/panelY/btnX/menuY/listY/listStep 부분 갱신). */
   setQuickMenuLayout: (patch: Partial<QuickMenuLayout>) => void;
+
+  // ESC(게임 중) 메뉴 이미지 GUI(업로드 전용) — mainMenuUi/quickMenuUi 와 달리 슬롯×상태 격자가
+  // 아니라 역할(EscImageId)마다 파일 1장인 평평한 맵이라 액션도 그만큼 단순하다.
+  /** 이미지 한 장(역할) 업로드. */
+  importEscImage: (id: EscImageId, file: File) => Promise<void>;
+  /** 이미지 한 장(역할) 업로드 해제. */
+  clearEscImage: (id: EscImageId) => Promise<void>;
+  /** 파일명 자동 매칭 일괄 업로드(예: GUI_좌측메뉴_기본.png). 매칭 실패 파일은 토스트로 안내. */
+  importEscImages: (files: File[]) => Promise<void>;
 
   // 설정/저장
   /**
@@ -2351,6 +2363,81 @@ export const useStore = create<State>((set, get) => {
       get().updateProjectMeta({
         quickMenuUi: { ...project.quickMenuUi, layout: { ...project.quickMenuUi?.layout, ...patch } },
       });
+    },
+
+    importEscImage: async (id, file) => {
+      try {
+        const assetId = await uploadAsset(file, 'background', `esc_${id}.png`);
+        const prev = get().project.escMenuUi?.images?.[id];
+        await commitAssetSwap(
+          (s) => ({
+            project: {
+              ...s.project,
+              escMenuUi: {
+                ...s.project.escMenuUi,
+                images: { ...s.project.escMenuUi?.images, [id]: assetId },
+              },
+            },
+          }),
+          prev ? [prev] : [],
+          assetId,
+        );
+        const label = ESC_IMAGES.find((x) => x.id === id)?.label ?? id;
+        flash(`${label} 이미지를 적용했습니다.`);
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    clearEscImage: async (id) => {
+      const prev = get().project.escMenuUi?.images?.[id];
+      await commitAssetSwap((s) => {
+        const images = { ...s.project.escMenuUi?.images };
+        delete images[id];
+        return { project: { ...s.project, escMenuUi: { ...s.project.escMenuUi, images } } };
+      }, prev ? [prev] : []);
+      const label = ESC_IMAGES.find((x) => x.id === id)?.label ?? id;
+      flash(`${label} 이미지를 해제했습니다.`);
+    },
+
+    // 파일명 자동 매칭 일괄 업로드(matchEscImageFile) — importQuickButtons 와 동일 패턴이지만
+    // 슬롯×상태 격자가 아니라 역할 하나뿐이라 "press 건너뜀" 같은 세 번째 분류가 없다(매칭/불일치 둘뿐).
+    // 23장을 업로드해도 commitAssetSwap 은 배치 전체에 한 번만 호출한다(재렌더·autoSave 1회).
+    importEscImages: async (files) => {
+      const matched: { id: EscImageId; file: File }[] = [];
+      const unmatched: string[] = [];
+      for (const file of files) {
+        const id = matchEscImageFile(file.name);
+        if (!id) {
+          unmatched.push(file.name);
+          continue;
+        }
+        matched.push({ id, file });
+      }
+      if (matched.length === 0) {
+        flash(unmatched.length ? `인식 실패: ${describeNames(unmatched)}` : '적용할 파일이 없습니다.');
+        return;
+      }
+      try {
+        const prevIds: string[] = [];
+        const updates: { id: EscImageId; assetId: string }[] = [];
+        for (const { id, file } of matched) {
+          const assetId = await uploadAsset(file, 'background', `esc_${id}.png`);
+          const prev = get().project.escMenuUi?.images?.[id];
+          if (prev) prevIds.push(prev);
+          updates.push({ id, assetId });
+        }
+        await commitAssetSwap((s) => {
+          const images = { ...s.project.escMenuUi?.images };
+          for (const u of updates) images[u.id] = u.assetId;
+          return { project: { ...s.project, escMenuUi: { ...s.project.escMenuUi, images } } };
+        }, prevIds);
+        let msg = `ESC 메뉴 이미지 ${updates.length}개를 적용했습니다.`;
+        if (unmatched.length) msg += ` (인식 실패: ${describeNames(unmatched)})`;
+        flash(msg);
+      } catch (e) {
+        flash((e as Error).message);
+      }
     },
 
     setCollabConfig: async (patch) => {

@@ -10,6 +10,7 @@ import type {
   OutfitRule,
   MenuButtonState,
   QuickButtonState,
+  EscImageId,
 } from '../types';
 import {
   RENPY_LANG,
@@ -28,6 +29,7 @@ import {
   QUICK_BUTTON_STATES,
   quickMenuLayout,
   WINDOW_ICON_FILE,
+  ESC_IMAGES,
 } from '../types';
 import { SlugMap } from './slug';
 import {
@@ -37,6 +39,7 @@ import {
   DEFAULT_GRADIENT_HEIGHT,
   type MainMenuPlan,
   type QuickMenuPlan,
+  type EscMenuPlan,
 } from './gui';
 import { CONFIRM_STRINGS, UI_STRINGS, uiTr } from './gui/uiStrings';
 import { resolveEmotion } from '../generators/emotion';
@@ -1063,6 +1066,24 @@ function buildQuickMenuPlan(project: Project): QuickMenuPlan | undefined {
 }
 
 /**
+ * project.escMenuUi(업로드된 ESC 메뉴 이미지 롤 → assetId) → screensRpy 가 바로 쓸 수 있는 렌더
+ * 계획. mainMenuUi/quickMenuUi 와 게이트 조건이 다르다 — "슬롯 × 상태" 격자가 아니라 역할마다 파일
+ * 1장인 평평한 맵이라, 하나라도 업로드돼 있으면(어떤 롤이든) 활성화한다(퀵메뉴처럼 특정 토글 이미지
+ * 하나를 앵커로 요구하지 않는다 — ESC 메뉴는 새 화면이 아니라 기존 화면의 부분 스타일 교체라 "일부만
+ * 이미지"가 어색하지 않다). escMenuUi 자체가 없거나 images 가 비어 있으면 undefined(회귀 0).
+ */
+function buildEscMenuPlan(project: Project): EscMenuPlan | undefined {
+  const images = project.escMenuUi?.images;
+  if (!images) return undefined;
+  const has = new Set<EscImageId>();
+  for (const { id } of ESC_IMAGES) {
+    if (images[id]) has.add(id);
+  }
+  if (has.size === 0) return undefined;
+  return { has, scale: project.height / 1080 };
+}
+
+/**
  * buildZip 이 "이 폰트 슬롯은 blob 을 하나도 못 구했다"(커스텀 실패 + 대체용 기본 폰트마저 실패)를
  * 알려주는 신호 — src/zip/buildZip.ts 의 selectedFontFiles 가 실제 다운로드 결과를 보고 채운다.
  * true 인 슬롯은 fontGamePath(= "fonts/…", game/fonts/ 번들 필요) 대신 Ren'Py 엔진에 내장된
@@ -1156,6 +1177,7 @@ export function generateRenpyFiles(
       hasCg: cgs.length > 0,
       mainMenu: buildMainMenuPlan(project, items.length > 0, cgs.length > 0),
       quickMenu: buildQuickMenuPlan(project),
+      escMenu: buildEscMenuPlan(project),
       menuFonts: { main: menuTextFont, sub: menuSubTextFont },
     }),
     { path: 'README.md', content: readme(theme) },

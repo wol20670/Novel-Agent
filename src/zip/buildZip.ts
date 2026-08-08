@@ -2,7 +2,7 @@
 // 텍스트 .rpy 는 generate.ts, 바이너리는 IndexedDB 의 생성 에셋을 쓰되
 // 아직 생성되지 않은 배경/CG/BGM 은 즉석 폴백(Canvas/합성)으로 채워 실행 가능한 ZIP 을 보장한다.
 
-import type { Project, MenuButtonSlot, MenuButtonState, QuickButtonSlot, QuickButtonState } from '../types';
+import type { Project, MenuButtonSlot, MenuButtonState, QuickButtonSlot, QuickButtonState, EscImageId } from '../types';
 import {
   effectiveTextLocales,
   effectiveVoiceLocales,
@@ -16,6 +16,8 @@ import {
   QUICK_PANEL_FILE,
   GAME_ICON_FILE,
   WINDOW_ICON_FILE,
+  ESC_IMAGES,
+  escImageFile,
 } from '../types';
 import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName, extFromMime } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
@@ -138,6 +140,9 @@ export async function collectProjectFiles(
   // 퀵메뉴는 mainMenuUi 와 달리 폰트 필드가 없으므로(QuickMenuLayout 에 menuFontId 류가 없다)
   // adoptGuiOverrideFonts/adoptMainMenuUiFonts 대상이 아니다 — project.quickMenuUi 를 그대로 넣는다.
   const { quickMenuUi: effectiveQuickMenuUi, blobs: quickArtBlobs } = await resolveQuickMenuArt(project.quickMenuUi);
+  // ESC 메뉴도 같은 이유로 미리 가지치기한다(resolveQuickMenuArt 와 정확히 같은 패턴 — 격자가 아니라
+  // 역할 하나짜리 평평한 맵이라는 점만 다르다).
+  const { escMenuUi: effectiveEscMenuUi, blobs: escArtBlobs } = await resolveEscMenuArt(project.escMenuUi);
   // 게임 아이콘도 같은 이유로 미리 가지치기한다 — 특히 창 아이콘은 blob 이 있어야만 gui.rpy 가
   // `define gui.window_icon` 을 내보내도 되기 때문에(없는 파일을 참조하면 zip 불변식이 깨진다).
   const { gameIcon: effectiveGameIcon, blobs: iconBlobs } = await resolveGameIcon(project.gameIcon);
@@ -145,6 +150,7 @@ export async function collectProjectFiles(
     effectiveGuiOverrides === project.guiOverrides &&
     effectiveMainMenuUi === project.mainMenuUi &&
     effectiveQuickMenuUi === project.quickMenuUi &&
+    effectiveEscMenuUi === project.escMenuUi &&
     effectiveGameIcon === project.gameIcon
       ? project
       : {
@@ -152,6 +158,7 @@ export async function collectProjectFiles(
           guiOverrides: effectiveGuiOverrides,
           mainMenuUi: effectiveMainMenuUi,
           quickMenuUi: effectiveQuickMenuUi,
+          escMenuUi: effectiveEscMenuUi,
           gameIcon: effectiveGameIcon,
         };
 
@@ -281,6 +288,15 @@ export async function collectProjectFiles(
   // 그라데이션 폴백만 깐다(장식 아트 없음, 게임이 안 깨지게 하는 최소한의 대비책).
   const theme = resolveTheme(project.genre, project.guiTheme);
   const menuArtFor = async (which: 'main' | 'game'): Promise<Blob> => {
+    // ESC 메뉴 GUI 의 'bg'(공통 배경)는 곧 gui.game_menu_background 이므로, 올라와 있으면
+    // menuArt.game·그라데이션 폴백보다 우선한다(파일을 둘로 안 늘린다 — escImageFile('bg') 경로는
+    // 실제로 쓰지 않고 이 자리에 쓴다). effectiveEscMenuUi 는 이미 resolveEscMenuArt 가 blob 없는
+    // 역할을 걸러낸 뒤라 남아있는 assetId 는 항상 escArtBlobs 에 있다.
+    if (which === 'game') {
+      const escBgId = effectiveEscMenuUi?.images?.bg;
+      const escBg = escBgId ? escArtBlobs.get(escBgId) : undefined;
+      if (escBg) return escBg;
+    }
     const upId = project.menuArt?.[which];
     if (upId) {
       const up = await getAsset(upId);
@@ -330,6 +346,20 @@ export async function collectProjectFiles(
   if (effectiveQuickMenuUi?.panel) {
     const blob = quickArtBlobs.get(effectiveQuickMenuUi.panel);
     if (blob) out.push({ path: `game/${QUICK_PANEL_FILE}`, data: blob });
+  }
+
+  // ESC(게임 중) 메뉴 이미지 GUI(업로드 전용) — 슬롯×상태 격자가 아니라 역할 하나짜리 평평한 맵.
+  // 'bg' 는 예외로 위 menuArtFor('game') 이 이미 game/gui/game_menu.png 에 썼으므로 여기서는
+  // 건너뛴다(escImageFile('bg') 경로는 실제로 쓰지 않는다 — 파일을 둘로 안 늘린다).
+  // effectiveEscMenuUi 는 이미 resolveEscMenuArt 가 blob 없는 역할을 걸러낸 뒤라 여기 남은 assetId 는
+  // 항상 escArtBlobs 에 있다(같은 assetId 로 getAsset 을 또 부르지 않음).
+  for (const img of ESC_IMAGES) {
+    if (img.id === 'bg') continue;
+    const assetId = effectiveEscMenuUi?.images?.[img.id];
+    if (!assetId) continue;
+    const blob = escArtBlobs.get(assetId);
+    if (!blob) continue; // 방어적(resolveEscMenuArt 를 거쳤으면 항상 있어야 함).
+    out.push({ path: `game/${escImageFile(img.id)}`, data: blob });
   }
 
   // 게임 아이콘 — ico 는 **game/ 밖 프로젝트 루트**로 나간다(Ren'Py 런처가 거기만 본다).
@@ -658,6 +688,32 @@ async function resolveQuickMenuArt(
   }
 
   return { quickMenuUi: { ...quickMenuUi, buttons, panel }, blobs };
+}
+
+/**
+ * ESC 메뉴 이미지 blob 을 generateRenpyFiles 전에 미리 확보하고, 실제로 blob 이 있는 역할만 남도록
+ * escMenuUi 를 가지치기한다 — resolveQuickMenuArt 와 정확히 같은 이유(assetId 는 있는데 blob 이
+ * 없으면 없는 파일을 참조하는 zip 이 나가 크래시한다). 슬롯×상태 격자가 아니라 역할(EscImageId)
+ * 마다 파일 1장인 평평한 맵이라 안쪽 루프가 하나뿐이다. 'bg' 도 여기서는 그냥 하나의 역할로 취급
+ * 한다 — game_menu.png 로 옮겨 쓰는 특수 처리는 호출 측(collectProjectFiles)의 몫이다.
+ */
+async function resolveEscMenuArt(
+  escMenuUi: Project['escMenuUi'],
+): Promise<{ escMenuUi: Project['escMenuUi']; blobs: Map<string, Blob> }> {
+  if (!escMenuUi) return { escMenuUi, blobs: new Map() };
+  const blobs = new Map<string, Blob>();
+
+  const images: Partial<Record<EscImageId, string>> = {};
+  for (const img of ESC_IMAGES) {
+    const assetId = escMenuUi.images?.[img.id];
+    if (!assetId) continue;
+    const blob = await getAsset(assetId);
+    if (!blob) continue; // 고아 참조(blob 소실) — 이 역할만 조용히 제외해 댕글링을 막는다.
+    blobs.set(assetId, blob);
+    images[img.id] = assetId;
+  }
+
+  return { escMenuUi: { ...escMenuUi, images }, blobs };
 }
 
 /** 브라우저 다운로드 트리거. */

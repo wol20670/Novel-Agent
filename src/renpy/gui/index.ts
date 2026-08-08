@@ -5,7 +5,7 @@ import type { RenpyFile } from '../generate';
 import type { Locale } from '../../types';
 import type { GuiTheme } from './theme';
 import { guiRpy, type DialogueGradientOptions } from './guiRpy';
-import { screensRpy, type MainMenuPlan, type QuickMenuPlan } from './screensRpy';
+import { screensRpy, type MainMenuPlan, type QuickMenuPlan, type EscMenuPlan } from './screensRpy';
 
 /** 설정 화면에 낼 다국어 선택 목록(자막·음성 각각). 각 2개 이상일 때만 해당 선택 UI 가 생긴다. */
 export interface GuiLocales {
@@ -28,6 +28,8 @@ interface GuiGenOptions {
   mainMenu?: MainMenuPlan;
   /** 인게임 우측 퀵메뉴 이미지 GUI 렌더 계획(generate.ts 가 project.quickMenuUi 로 만들어 넘김). */
   quickMenu?: QuickMenuPlan;
+  /** ESC(게임 중) 메뉴 이미지 GUI 렌더 계획(generate.ts 가 project.escMenuUi 로 만들어 넘김). */
+  escMenu?: EscMenuPlan;
   /** 메인 메뉴 버튼 텍스트 폰트(주/부, 이미 fontGamePath 로 해석된 경로). generate.ts 가 계산해 넘긴다. */
   menuFonts?: { main: string; sub: string };
 }
@@ -46,14 +48,14 @@ init -100 python in gui:
 
 /** GuiTheme + 해상도 → game/gui.rpy · screens.rpy · guisupport.rpy */
 export function generateGuiFiles(theme: GuiTheme, width: number, height: number, opts?: GuiGenOptions): RenpyFile[] {
-  const { outline, dialogueGradient, locales, hasItems, hasCg, mainMenu, quickMenu, menuFonts } = opts ?? {};
+  const { outline, dialogueGradient, locales, hasItems, hasCg, mainMenu, quickMenu, escMenu, menuFonts } = opts ?? {};
   // 일본어(자막·음성 어느 쪽이든)가 하나라도 있으면 gui.rpy 가 JP 폰트(FontGroup)를 참조·번들한다.
   // 없으면 생략 → buildZip 의 폰트 번들 조건과 일치해야 한다(같은 규칙: ja ∈ text|voice).
   const japanese = !!locales && (locales.text.includes('ja') || locales.voice.includes('ja'));
   return [
     { path: 'game/guisupport.rpy', content: guisupportRpy(height) },
     { path: 'game/gui.rpy', content: guiRpy(theme, width, height, outline, dialogueGradient, japanese, menuFonts) },
-    { path: 'game/screens.rpy', content: screensRpy({ locales, hasItems, hasCg, mainMenu, quickMenu }) },
+    { path: 'game/screens.rpy', content: screensRpy({ locales, hasItems, hasCg, mainMenu, quickMenu, escMenu }) },
   ];
 }
 
@@ -69,4 +71,4 @@ export {
   DEFAULT_GRADIENT_HEIGHT,
 } from './theme';
 export type { GuiTheme, GenreId } from './theme';
-export type { MainMenuPlan, QuickMenuPlan } from './screensRpy';
+export type { MainMenuPlan, QuickMenuPlan, EscMenuPlan } from './screensRpy';

@@ -20,7 +20,10 @@ import {
   QUICK_BUTTON_STATES,
   quickButtonFile,
   QUICK_PANEL_FILE,
+  ESC_IMAGES,
+  escImageFile,
   type Character,
+  type EscImageId,
   type MainMenuPresetId,
   type MenuButtonSlot,
   type MenuButtonState,
@@ -160,6 +163,13 @@ function allButtonsQuickMenuUi(): NonNullable<Project['quickMenuUi']> {
   return { buttons, panel: 'asset-quick-panel-1' };
 }
 
+/** ESC 메뉴 23개 역할 전부 업로드(슬롯×상태 격자가 아니라 역할 하나짜리 평평한 맵). */
+function allEscImages(): NonNullable<Project['escMenuUi']> {
+  const images: Partial<Record<EscImageId, string>> = {};
+  for (const img of ESC_IMAGES) images[img.id] = `asset-esc-${img.id}`;
+  return { images };
+}
+
 /** gui.rpy/screens.rpy(텍스트)가 참조하는 game/ 상대 경로 중, files 목록에 실제로 없는 것들. */
 async function danglingRefs(project: Project): Promise<string[]> {
   const { files } = await collectProjectFiles(project);
@@ -268,6 +278,10 @@ describe('zip 에셋 불변식 매트릭스', () => {
   it('8) 퀵메뉴 10슬롯 × 전 상태 업로드 + 보조 패널', async () => {
     await expectNoDangling(kitchenSinkProject({ quickMenuUi: allButtonsQuickMenuUi() }));
   });
+
+  it('9) ESC 메뉴 23종 역할 전부 업로드(bg 포함 — game/gui/game_menu.png 로 옮겨 씀)', async () => {
+    await expectNoDangling(kitchenSinkProject({ escMenuUi: allEscImages() }));
+  });
 });
 
 // ── 타겟 회귀 3건 ────────────────────────────────────────────────────────────
@@ -364,5 +378,48 @@ describe('회귀 (d): 퀵메뉴 버튼/패널 assetId 는 있지만 실제 blob 
     expect(written.has(`game/${quickButtonFile('history', 'idle')}`)).toBe(true);
     expect(written.has(`game/${QUICK_PANEL_FILE}`)).toBe(false);
     await expectNoDangling(project);
+  });
+});
+
+describe('회귀 (e): ESC 메뉴 이미지 assetId 는 있지만 실제 blob 이 사라진 경우(고아 참조)', () => {
+  it('resolveEscMenuArt 가 blob 없는 역할을 gui.rpy 생성 전에 가지치기한다', async () => {
+    vi.mocked(getAsset).mockImplementation(async (id: string) =>
+      id === 'asset-esc-nav-idle-missing' ? undefined : fakeBlob(id),
+    );
+    const project = kitchenSinkProject({
+      escMenuUi: { images: { nav_idle: 'asset-esc-nav-idle-missing', nav_hover: 'asset-esc-nav-hover' } },
+    });
+    const { files } = await collectProjectFiles(project);
+    const written = new Set(files.map((f) => f.path));
+    // 고쳐지기 전엔 여기서 [escImageFile('nav_idle')] 이 나왔다(참조는 하는데 파일은 안 씀).
+    // 지금은 blob 없는 역할만 조용히 빠지고, blob 있는 역할(nav_hover)은 정상적으로 살아남는다.
+    expect(written.has(`game/${escImageFile('nav_idle')}`)).toBe(false);
+    expect(written.has(`game/${escImageFile('nav_hover')}`)).toBe(true);
+    await expectNoDangling(project);
+  });
+});
+
+describe("회귀 (f): ESC 메뉴 'bg'(공통 배경)는 game/gui/game_menu.png 를 대체하고 escImageFile('bg') 경로는 쓰지 않는다", () => {
+  it("escMenuUi.images.bg 가 project.menuArt.game 보다 우선한다", async () => {
+    const project = kitchenSinkProject({
+      menuArt: { game: 'asset-menu-game-1' },
+      escMenuUi: { images: { bg: 'asset-esc-bg' } },
+    });
+    const { files } = await collectProjectFiles(project);
+    const gameMenu = files.find((f) => f.path === 'game/gui/game_menu.png');
+    expect(gameMenu).toBeDefined();
+    // menuArt.game('asset-menu-game-1')이 아니라 esc bg('asset-esc-bg') blob 이 실제로 쓰여야 한다.
+    expect(await (gameMenu!.data as Blob).text()).toBe('stub:asset-esc-bg');
+    // escImageFile('bg') = 'gui/esc/bg.png' 자리엔 파일을 두 번 안 쓴다(둘로 안 늘린다).
+    expect(files.some((f) => f.path === `game/${escImageFile('bg')}`)).toBe(false);
+    await expectNoDangling(project);
+  });
+
+  it('bg 가 없으면 기존처럼 menuArt.game → 그라데이션 폴백 순서를 그대로 따른다(회귀 0)', async () => {
+    const project = kitchenSinkProject({ menuArt: { game: 'asset-menu-game-1' } });
+    const { files } = await collectProjectFiles(project);
+    const gameMenu = files.find((f) => f.path === 'game/gui/game_menu.png');
+    expect(gameMenu).toBeDefined();
+    expect(await (gameMenu!.data as Blob).text()).toBe('stub:asset-menu-game-1');
   });
 });

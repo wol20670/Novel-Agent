@@ -20,6 +20,7 @@ import VoiceLab from './VoiceLab';
 import VoiceReview from './VoiceReview';
 import MainMenuGui from './MainMenuGui';
 import QuickMenuGui from './QuickMenuGui';
+import EscMenuGui from './EscMenuGui';
 import ExpressionSetEditor from './ExpressionSetEditor';
 import OrphanCleanupModal from './OrphanCleanupModal';
 import { isCollabReady } from '../collab';
@@ -180,6 +181,8 @@ export default function AssetsTab() {
       <MainMenuGui />
 
       <QuickMenuGui />
+
+      <EscMenuGui />
 
       <section>
         <h3 className="section-title mb-1">🎬 CG 컷 <span className="text-gray-500 font-normal text-xs">· {cgs.length}종</span></h3>

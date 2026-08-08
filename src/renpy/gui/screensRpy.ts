@@ -14,6 +14,7 @@ import type {
   QuickButtonSlot,
   QuickButtonState,
   QuickMenuLayout,
+  EscImageId,
 } from '../../types';
 import {
   RENPY_LANG,
@@ -24,6 +25,7 @@ import {
   QUICK_LIST_SLOTS,
   quickButtonFile,
   QUICK_PANEL_FILE,
+  escImageFile,
 } from '../../types';
 import type { GuiLocales } from './index';
 // '../generate' 가 아니라 '../escape' 에서 직접 가져온다 — generate.ts → gui/index.ts →
@@ -91,6 +93,25 @@ export interface QuickMenuPlan {
   /** 1920 기준 px(quickMenuLayout() 으로 기본값 병합됨). */
   layout: Required<QuickMenuLayout>;
   /** height / 1080 — 좌표를 이 배율로 곱해 최종 픽셀 값을 굽는다(런타임 계산 없음, gui.scale() 사용 금지). */
+  scale: number;
+}
+
+/**
+ * ESC(게임 중) 메뉴 이미지 GUI 렌더 계획(generate.ts 가 project.escMenuUi 로 만들어 넘긴다).
+ * 메인/퀵메뉴와 근본적으로 다르다 — 새 화면을 만들지 않고 기존 화면(navigation/game_menu/
+ * file_slots/preferences/confirm/item_gallery/cg_gallery)을 그대로 둔 채 **style 블록만 뒤에
+ * 이어붙인다**(Ren'Py 는 나중에 나온 style 문을 먼저 것 위에 얹는다). has 가 비어 있으면(즉
+ * escMenuUi.images 자체가 없거나 전부 비어 있으면) generate.ts 의 buildEscMenuPlan 이 undefined 를
+ * 반환해 screensRpy 는 아무 것도 추가하지 않는다(회귀 0 — mainMenuUi/quickMenuUi 와 같은 계약).
+ */
+export interface EscMenuPlan {
+  /** 실제로 업로드된 롤 집합('bg' 도 포함될 수 있지만 화면 출력엔 관여하지 않는다 — 아래 참고). */
+  has: Set<EscImageId>;
+  /**
+   * height / 1080. 이 파일에서 유일하게 쓰는 리터럴 계산은 card 의 9-slice 테두리(24px 기준)뿐이다
+   * — 나머지는 절대좌표가 아니라 style 교체라 스케일이 필요 없다. gui.scale()(720p 기준)은 금지
+   * (CLAUDE.md — 메인/퀵메뉴와 같은 이유, 이미 굽는 배율과 또 곱하면 이중 스케일링이 된다).
+   */
   scale: number;
 }
 
@@ -533,8 +554,24 @@ screen gallery_lightbox(img, caption):
     key "game_menu" action Hide("gallery_lightbox")
 `;
 
-/** 아이템(소품) 팝업(인게임) + 발견한 아이템 보관함 화면(hasItems 일 때만 방출). */
-const ITEM_SCREENS = String.raw`
+/**
+ * 아이템(소품) 팝업(인게임) + 발견한 아이템 보관함 화면(hasItems 일 때만 방출).
+ * escMenu 가 gallery_idle/gallery_locked 를 갖고 있을 때만 셀에 style 태그를 끼워 넣는다 — 그 외엔
+ * 원본과 바이트 단위로 동일(회귀 0). 이 두 줄이 이 함수에서 유일하게 "화면 코드"를 건드리는
+ * 지점이다: 잠금 칸의 `background Solid(...)` 는 인라인 프로퍼티라 나중에 오는 `style frame:` 로도
+ * 덮어쓸 수 없고(인라인이 항상 이긴다), 해금 칸의 `button:` 은 원래 스타일 이름이 없어(default
+ * "button" 스타일) 뒤에서 style 블록만 추가해선 대상을 지정할 수 없다 — 그래서 이름 있는 스타일을
+ * 붙이는 쪽으로 대신한다(buildEscMenuStyles 가 정의하는 esc_gallery_idle_button/
+ * esc_gallery_locked_frame). file_slots 의 save_empty 분기와 같은 종류의 예외.
+ */
+function itemScreens(escMenu?: EscMenuPlan): string {
+  const idleStyleLine = escMenu?.has.has('gallery_idle')
+    ? '\n                            style "esc_gallery_idle_button"'
+    : '';
+  const lockedBackground = escMenu?.has.has('gallery_locked')
+    ? 'style "esc_gallery_locked_frame"'
+    : 'background Solid(gui.frame_bg_color)';
+  return String.raw`
 
 ################################################################################
 ## 아이템(소품) 팝업 + 발견한 아이템 보관함
@@ -572,7 +609,7 @@ screen item_gallery():
                     spacing gui.scale(4)
                     xsize gui.scale(200)
                     if persistent.item_found.get(it_tag, False):
-                        button:
+                        button:${idleStyleLine}
                             xysize (gui.scale(200), gui.scale(200))
                             action Show("gallery_lightbox", img=it_tag, caption=it_name)
                             add it_tag:
@@ -583,10 +620,11 @@ screen item_gallery():
                     else:
                         frame:
                             xysize (gui.scale(200), gui.scale(200))
-                            background Solid(gui.frame_bg_color)
+                            ${lockedBackground}
                             text "???" align (0.5, 0.5) size gui.scale(34) color gui.insensitive_color
                         text _("???") xalign 0.5 size gui.scale(16) color gui.insensitive_color
 `;
+}
 
 /**
  * 감상한 CG 갤러리(hasCg 일 때만 방출). CG 는 배경과 같은 와이드스크린 비율이라 아이템 갤러리보다
@@ -594,7 +632,14 @@ screen item_gallery():
  * scene <tag>_scene 진입 시 기록), 목록은 gui.cgs_all(cg.rpy, resolveCgs 가 assets.rpy 와 같은
  * 태그 번호를 재사용해 계산).
  */
-const CG_SCREENS = String.raw`
+function cgScreens(escMenu?: EscMenuPlan): string {
+  const idleStyleLine = escMenu?.has.has('gallery_idle')
+    ? '\n                            style "esc_gallery_idle_button"'
+    : '';
+  const lockedBackground = escMenu?.has.has('gallery_locked')
+    ? 'style "esc_gallery_locked_frame"'
+    : 'background Solid(gui.frame_bg_color)';
+  return String.raw`
 
 ################################################################################
 ## 감상한 CG 갤러리
@@ -611,7 +656,7 @@ screen cg_gallery():
                     spacing gui.scale(4)
                     xsize gui.scale(300)
                     if persistent.cg_seen.get(cg_tag, False):
-                        button:
+                        button:${idleStyleLine}
                             xysize (gui.scale(300), gui.scale(190))
                             action Show("gallery_lightbox", img=cg_tag, caption=cg_name)
                             add cg_tag:
@@ -622,10 +667,11 @@ screen cg_gallery():
                     else:
                         frame:
                             xysize (gui.scale(300), gui.scale(190))
-                            background Solid(gui.frame_bg_color)
+                            ${lockedBackground}
                             text "???" align (0.5, 0.5) size gui.scale(34) color gui.insensitive_color
                         text _("???") xalign 0.5 size gui.scale(16) color gui.insensitive_color
 `;
+}
 
 /**
  * 원본(텍스트 알약 메뉴) screen quick_menu() 정의(데스크톱) — base 템플릿의 `${quickMenuScreen}` 자리에
@@ -788,6 +834,239 @@ function buildQuickMenuScreen(plan: QuickMenuPlan): string {
   return lines.join('\n');
 }
 
+/**
+ * ESC(게임 중) 메뉴 이미지 GUI — 새 화면을 만들지 않고 기존 화면(navigation/game_menu/file_slots/
+ * preferences/confirm/item_gallery/cg_gallery)의 style 블록만 뒤에 이어붙인다(base 템플릿 맨 끝,
+ * Ren'Py 는 나중에 나온 style 문을 먼저 것 위에 얹는다). plan 이 undefined 면 빈 문자열 — screens.rpy
+ * 가 기존과 바이트 단위로 같다(회귀 0, mainMenuUi/quickMenuUi 와 같은 계약).
+ *
+ * ⚠️ CRASH TRAP(퀵메뉴 이미지화 때 실제로 겪음 — CLAUDE.md 최상위 함정): `properties
+ * gui.button_properties(kind)` 가 심어두는 "background" 는 실존하지 않는 gui/button/*.png 를
+ * 가리키는 Frame 이다(zero-PNG 빌드). idle_background 등 상태별 프로퍼티를 "일부만" 지정하면
+ * (background 단일 프로퍼티가 아니라 개별 상태 프로퍼티로 갈아끼우는 순간) 지정 안 한 상태는 그
+ * 기본값에 그대로 남아, 그 화면이 열릴 때(프리캐시) 없는 파일을 찾다 크래시한다. 그래서 버튼류
+ * (navigation_button/return_button/radio_button/check_button/slot_button/confirm_button/
+ * esc_gallery_idle_button/esc_save_empty_button)는 이미지를 하나라도 얹을 땐 반드시
+ * idle/hover/selected/insensitive 네 롤을 전부 채운다 — 대응 에셋이 없는 롤은 idle 이미지로 폴백.
+ * bar/slider/vscrollbar 는 gui.button_properties 를 전혀 쓰지 않는 순수 Solid 기반이라(base 템플릿에
+ * 이미 모든 상태가 명시돼 있다) 이 함정 대상이 아니다 — 준 롤만 부분 교체해도 안전하다.
+ *
+ * Frame 테두리(9-slice): card(96×96, 24px 테두리)만 치수가 명세돼 있다. 나머지 버튼류 에셋은
+ * 폭이 라벨 길이·프리셋에 따라 달라질 수 있어 모서리 반경을 추측하지 않고 border 0 을 쓴다 — Frame
+ * 이 이미지를 실제 버튼 박스 크기에 맞춰 통짜로 늘려 채우는 안전한 기본값이다.
+ */
+function buildEscMenuStyles(plan: EscMenuPlan | undefined): string {
+  if (!plan) return '';
+  const has = (id: EscImageId) => plan.has.has(id);
+  const file = (id: EscImageId) => escImageFile(id);
+  const parts: string[] = [];
+
+  /**
+   * 이미지 버튼 위 글자색 고정. 테마의 버튼 글자색은 **어두운 배경**을 전제로 잡혀 있어, 밝은
+   * 아이보리 버튼 아트 위에 그대로 얹으면 글자가 묻혀 사라진다(실기 확인 — lint·테스트로는 절대
+   * 안 잡힌다). 퀵메뉴의 quick_button_text 가 같은 이유로 이미 색을 고정하고 있다.
+   *
+   * ⚠️ **두 규칙이 정반대라 하나로 통일하면 안 된다**(처음에 통일했다가 실기에서 걸렸다):
+   *  · 'onLight' — 선택버튼·슬롯·팝업버튼. 평상시 배경이 **밝은 크림**이고 선택됐을 때 진해진다
+   *    → 평상시 어두운 글자, 선택 시 밝은 글자.
+   *  · 'onDark' — 좌측 내비게이션. 평상시엔 **어두운 사이드바** 위에 맨몸으로 놓이고(nav_idle 이
+   *    거의 투명) 선택됐을 때만 밝은 알약이 깔린다 → 정확히 반대.
+   */
+  const ESC_TEXT_COLORS = (styleName: string, on: 'onLight' | 'onDark') =>
+    on === 'onLight'
+      ? `
+style ${styleName}:
+    idle_color "#4a3a2f"
+    hover_color "#2e241d"
+    selected_color "#fdf6ec"
+    insensitive_color "#a89684"`
+      : `
+style ${styleName}:
+    idle_color "#e8dcc8"
+    hover_color "#fdf6ec"
+    selected_color "#4a3a2f"
+    insensitive_color "#7a6a58"`;
+
+  // ── 공통 배경을 가리는 어두운 스크림 제거 ────────────────────────────────
+  // game_menu_outer_frame 은 원래 화면 전체에 Solid(gui.menu_overlay_color) 를 깐다(텍스트 메뉴가
+  // 대사 화면 위에서 읽히게 하는 장치). 업로드한 공통배경은 이미 사이드바+카드가 그려진 완성 아트라
+  // 그 스크림이 위를 덮으면 **배경이 통째로 안 보인다** — 실기로 확인한 실제 버그다(lint·테스트 통과).
+  if (has('bg')) {
+    parts.push(String.raw`
+
+## ESC 메뉴 이미지 GUI — 업로드한 공통배경이 보이도록 기본 스크림을 걷는다.
+style game_menu_outer_frame:
+    background None
+`);
+  }
+
+  // ── 좌측 내비게이션(게임 메뉴 공용 목록) + 돌아가기 ──────────────────────
+  if (has('nav_idle')) {
+    const idle = file('nav_idle');
+    const hover = has('nav_hover') ? file('nav_hover') : idle;
+    const selected = has('nav_selected') ? file('nav_selected') : idle;
+    parts.push(String.raw`
+
+## ESC 메뉴 이미지 GUI — 좌측 내비게이션 버튼(기록/저장/불러오기/설정/정보/크레딧/도움말/종료 공용).
+style navigation_button:
+    idle_background Frame("${idle}", 0, 0)
+    hover_background Frame("${hover}", 0, 0)
+    selected_background Frame("${selected}", 0, 0)
+    insensitive_background Frame("${idle}", 0, 0)
+
+## return_button 은 "style return_button is navigation_button" 이지만, 상속 체인에 기대지 않고
+## art 를 확실히 물려받도록 여기서도 명시적으로 선언한다.
+style return_button:
+    idle_background Frame("${idle}", 0, 0)
+    hover_background Frame("${hover}", 0, 0)
+    selected_background Frame("${selected}", 0, 0)
+    insensitive_background Frame("${idle}", 0, 0)
+${ESC_TEXT_COLORS('navigation_button_text', 'onDark')}
+${ESC_TEXT_COLORS('return_button_text', 'onDark')}
+`);
+  }
+
+  // ── 공용 카드/프레임 배경 ────────────────────────────────────────────
+  if (has('card')) {
+    const border = Math.round(24 * plan.scale);
+    parts.push(String.raw`
+
+## ESC 메뉴 이미지 GUI — 공용 카드/프레임 배경(9-slice, 96×96 원본에 테두리 24px 기준).
+## 별도 style 없이 쓰는 frame: 전부(예: gallery_locked 가 없을 때의 갤러리 잠금 칸)에 적용된다.
+style frame:
+    background Frame("${file('card')}", ${border}, ${border})
+`);
+  }
+
+  // ── 설정 화면 라디오(디스플레이)·체크(스킵) 버튼 ──────────────────────
+  if (has('choice_idle')) {
+    const idle = file('choice_idle');
+    const hover = has('choice_hover') ? file('choice_hover') : idle;
+    const selected = has('choice_selected') ? file('choice_selected') : idle;
+    const disabled = has('choice_disabled') ? file('choice_disabled') : idle;
+    parts.push(String.raw`
+
+## ESC 메뉴 이미지 GUI — 설정 화면의 라디오(디스플레이)·체크(스킵) 버튼.
+style radio_button:
+    idle_background Frame("${idle}", 0, 0)
+    hover_background Frame("${hover}", 0, 0)
+    selected_background Frame("${selected}", 0, 0)
+    insensitive_background Frame("${disabled}", 0, 0)
+
+style check_button:
+    idle_background Frame("${idle}", 0, 0)
+    hover_background Frame("${hover}", 0, 0)
+    selected_background Frame("${selected}", 0, 0)
+    insensitive_background Frame("${disabled}", 0, 0)
+${ESC_TEXT_COLORS('radio_button_text', 'onLight')}
+${ESC_TEXT_COLORS('check_button_text', 'onLight')}
+`);
+  }
+
+  // ── 슬라이더(텍스트 속도·자동 진행·볼륨) ────────────────────────────────
+  if (has('slider_track') || has('slider_fill') || has('slider_thumb')) {
+    const lines = ['style slider:'];
+    if (has('slider_fill')) lines.push(`    left_bar Frame("${file('slider_fill')}", 0, 0)`);
+    if (has('slider_track')) lines.push(`    right_bar Frame("${file('slider_track')}", 0, 0)`);
+    if (has('slider_thumb')) lines.push(`    thumb Frame("${file('slider_thumb')}", 0, 0)`);
+    parts.push(`\n\n## ESC 메뉴 이미지 GUI — 슬라이더(텍스트 속도·자동 진행·볼륨). CRASH TRAP 비대상(위 코멘트\n## 참고) — 준 롤만 부분 교체해도 안전.\n${lines.join('\n')}\n`);
+  }
+
+  // ── 저장/불러오기 슬롯 ──────────────────────────────────────────────
+  if (has('save_idle')) {
+    const idle = file('save_idle');
+    const hover = has('save_hover') ? file('save_hover') : idle;
+    parts.push(String.raw`
+
+## ESC 메뉴 이미지 GUI — 저장/불러오기 슬롯. selected/insensitive 전용 에셋이 없어 idle 로 폴백한다
+## (원래도 slot_button 은 background/hover_background 만 명시하고 selected/insensitive 는
+## gui.button_properties 기본값에 열려 있던 자리였다 — 이미지를 얹는 김에 네 롤을 전부 닫는다).
+style slot_button:
+    idle_background Frame("${idle}", 0, 0)
+    hover_background Frame("${hover}", 0, 0)
+    selected_background Frame("${idle}", 0, 0)
+    insensitive_background Frame("${idle}", 0, 0)
+${ESC_TEXT_COLORS('slot_button_text', 'onLight')}
+`);
+  }
+
+  // 빈 저장 슬롯 — file_slots 의 유일한 화면 코드 변경(FileLoadable 분기, screensRpy() 참고)이 이
+  // 스타일을 참조한다. slot_button 을 상속해 패딩 등은 그대로 두고 배경만 4롤 전부 save_empty 로.
+  if (has('save_empty')) {
+    const empty = file('save_empty');
+    parts.push(String.raw`
+
+## ESC 메뉴 이미지 GUI — 빈 저장 슬롯(FileLoadable(slot) 이 False 일 때만 적용, file_slots 화면 참고).
+style esc_save_empty_button is slot_button:
+    idle_background Frame("${empty}", 0, 0)
+    hover_background Frame("${empty}", 0, 0)
+    selected_background Frame("${empty}", 0, 0)
+    insensitive_background Frame("${empty}", 0, 0)
+`);
+  }
+
+  // ── 갤러리(발견한 아이템/감상한 CG) 카드 ────────────────────────────────
+  if (has('gallery_idle')) {
+    const idle = file('gallery_idle');
+    parts.push(String.raw`
+
+## ESC 메뉴 이미지 GUI — 갤러리 해금 카드. 상태별 전용 에셋이 없어 네 롤 전부 같은 이미지로 채운다
+## (버튼이라 CRASH TRAP 대상은 그대로 — "is button" 상속만으론 배경이 없는 파일을 가리킨다).
+## item_gallery/cg_gallery 의 button: 에 이 스타일 태그를 붙이는 쪽은 itemScreens/cgScreens 가 한다.
+style esc_gallery_idle_button is button:
+    idle_background Frame("${idle}", 0, 0)
+    hover_background Frame("${idle}", 0, 0)
+    selected_background Frame("${idle}", 0, 0)
+    insensitive_background Frame("${idle}", 0, 0)
+`);
+  }
+  if (has('gallery_locked')) {
+    parts.push(String.raw`
+
+## ESC 메뉴 이미지 GUI — 갤러리 잠금 카드. frame: 이라 상태가 없어(버튼 아님) CRASH TRAP 대상이
+## 아니다. item_gallery/cg_gallery 의 잠금 칸이 인라인 "background Solid(...)" 대신 이 스타일을
+## 참조하도록 itemScreens/cgScreens 가 바꿔치기한다(이 에셋이 없으면 원본 인라인 그대로 — 회귀 0).
+style esc_gallery_locked_frame is frame:
+    background Frame("${file('gallery_locked')}", 0, 0)
+`);
+  }
+
+  // ── 게임 메뉴 세로 스크롤바(설정/기록/갤러리 뷰포트 공용) ────────────────
+  if (has('scroll_track') || has('scroll_thumb')) {
+    const lines = ['style vscrollbar:'];
+    if (has('scroll_track')) lines.push(`    base_bar Frame("${file('scroll_track')}", 0, 0)`);
+    if (has('scroll_thumb')) lines.push(`    thumb Frame("${file('scroll_thumb')}", 0, 0)`);
+    parts.push(`\n\n## ESC 메뉴 이미지 GUI — 게임 메뉴 세로 스크롤바. CRASH TRAP 비대상(슬라이더와 같은 이유).\n${lines.join('\n')}\n`);
+  }
+
+  // ── 종료 확인 팝업 ────────────────────────────────────────────────
+  if (has('popup_bg')) {
+    parts.push(String.raw`
+
+## ESC 메뉴 이미지 GUI — 종료 확인 팝업(confirm) 배경.
+style confirm_frame:
+    background Frame("${file('popup_bg')}", 0, 0)
+`);
+  }
+  if (has('popup_btn_idle')) {
+    const idle = file('popup_btn_idle');
+    const hover = has('popup_btn_hover') ? file('popup_btn_hover') : idle;
+    const selected = has('popup_btn_selected') ? file('popup_btn_selected') : idle;
+    parts.push(String.raw`
+
+## ESC 메뉴 이미지 GUI — 종료 확인 팝업의 예/아니오 버튼.
+style confirm_button:
+    idle_background Frame("${idle}", 0, 0)
+    hover_background Frame("${hover}", 0, 0)
+    selected_background Frame("${selected}", 0, 0)
+    insensitive_background Frame("${idle}", 0, 0)
+${ESC_TEXT_COLORS('confirm_button_text', 'onLight')}
+`);
+  }
+
+  return parts.join('');
+}
+
 /** screensRpy 옵션(위치 인자가 너무 늘어나 객체로 통합 — generateGuiFiles 의 GuiGenOptions 와 동형). */
 interface ScreensRpyOptions {
   locales?: GuiLocales;
@@ -797,10 +1076,12 @@ interface ScreensRpyOptions {
   mainMenu?: MainMenuPlan;
   /** 있으면(메뉴 토글 idle 이미지) 이미지 기반 quick_menu 를, 없으면 기존 텍스트 알약 퀵메뉴를 낸다. */
   quickMenu?: QuickMenuPlan;
+  /** 있으면(업로드된 ESC 이미지가 하나라도) 해당 화면들의 style 블록을 뒤에 이어붙인다. */
+  escMenu?: EscMenuPlan;
 }
 
 export function screensRpy(opts?: ScreensRpyOptions): string {
-  const { locales, hasItems, hasCg, mainMenu, quickMenu } = opts ?? {};
+  const { locales, hasItems, hasCg, mainMenu, quickMenu, escMenu } = opts ?? {};
   const languagePrefs = languagePrefsBlock(locales);
   // 아이템/CG 가 있을 때만 각각의 보관함 진입 버튼(내비)을 낸다.
   const galleryNav = [
@@ -809,9 +1090,12 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
   ]
     .filter(Boolean)
     .join('\n');
-  // 라이트박스는 아이템·CG 둘 중 하나라도 있으면 딱 1번만(중복 screen 정의 방지).
+  // 라이트박스는 아이템·CG 둘 중 하나라도 있으면 딱 1번만(중복 screen 정의 방지). escMenu 는
+  // gallery_idle/gallery_locked 가 있을 때만 셀에 style 태그를 끼워 넣는다(itemScreens/cgScreens 참고).
   const galleryScreens =
-    (hasItems ? ITEM_SCREENS : '') + (hasCg ? CG_SCREENS : '') + (hasItems || hasCg ? GALLERY_LIGHTBOX : '');
+    (hasItems ? itemScreens(escMenu) : '') +
+    (hasCg ? cgScreens(escMenu) : '') +
+    (hasItems || hasCg ? GALLERY_LIGHTBOX : '');
 
   // 활성화 여부는 generate.ts 의 buildMainMenuPlan 이 이미 판단해서 넘긴다(이미지/로고뿐 아니라
   // 프리셋 변경·라벨 편집·메뉴 폰트 지정도 활성화 사유 — mainMenuUi 자체가 없거나 전부 기본값이면
@@ -829,6 +1113,19 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
   // 토글 idle 이미지). 없으면 undefined 를 넘겨 기존 텍스트 알약 퀵메뉴(DEFAULT_QUICK_MENU_SCREEN)
   // 그대로 나간다(회귀 0 — mainMenuUi 와 같은 계약).
   const quickMenuScreen = quickMenu ? buildQuickMenuScreen(quickMenu) : DEFAULT_QUICK_MENU_SCREEN;
+
+  // ESC 메뉴 이미지 GUI — 기존 화면들 뒤에 이어붙일 style 오버라이드 텍스트(없으면 빈 문자열, 회귀 0).
+  const escStyles = buildEscMenuStyles(escMenu);
+  // save_empty 하나만 유일하게 허용된 "화면 코드" 변경 지점(file_slots) — 슬롯이 로드 가능한지에
+  // 따라 style 을 slot_button/esc_save_empty_button 으로 가른다. save_empty 가 없으면 원본 그대로
+  // (byte-identical) — 다른 슬롯 이미지(save_idle/hover)만 있어도 이 분기는 추가되지 않는다.
+  const fileSlotStyleBlock = escMenu?.has.has('save_empty')
+    ? `
+                        if FileLoadable(slot):
+                            style "slot_button"
+                        else:
+                            style "esc_save_empty_button"`
+    : '';
 
   const base = String.raw`################################################################################
 ## 자동 생성: 자체 GUI 화면 (zero-PNG, Solid 기반)
@@ -1415,7 +1712,7 @@ screen file_slots(title):
 
                     $ slot = i + 1
 
-                    button:
+                    button:${fileSlotStyleBlock}
                         action FileAction(slot)
 
                         has vbox
@@ -2068,7 +2365,7 @@ style slider_vbox:
 style slider_slider:
     variant "small"
     xsize gui.scale(600)
-${galleryScreens}${mmLinkStyles}${mmStyles}${galleryHubScreen}`;
+${galleryScreens}${mmLinkStyles}${mmStyles}${galleryHubScreen}${escStyles}`;
 
   return base;
 }
