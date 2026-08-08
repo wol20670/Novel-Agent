@@ -350,6 +350,15 @@ export interface Project {
     panelHeight?: number;
     layout?: QuickMenuLayout;
   };
+  /**
+   * ESC(게임 중) 메뉴 이미지 GUI(업로드 전용). 비어 있으면 기존 스타일 그대로 나간다(회귀 0).
+   * 메인/퀵메뉴와 달리 "슬롯 × 상태" 격자가 아니라 **역할마다 파일 1장**인 평평한 맵이다 —
+   * 슬라이더 트랙엔 hover 가 없고 팝업 배경엔 상태가 없어서 격자로 두면 빈칸이 절반이 된다.
+   *
+   * ⚠️ 이 에셋들엔 **글자를 굽지 않는다**(좌측 메뉴 배경 226×50 처럼 틀만). 라벨은 Ren'Py 가 그려야
+   * 자막 언어를 바꿀 때 메뉴도 같이 바뀐다 — 이 앱의 다국어가 핵심 기능이라 지켜야 하는 제약이다.
+   */
+  escMenuUi?: { images?: Partial<Record<EscImageId, string>> };
 }
 
 /** 메인 메뉴 버튼 슬롯(순서 고정 — 처음부터→이어하기→불러오기→환경설정→갤러리→게임종료). */
@@ -512,6 +521,93 @@ export function quickButtonFile(slot: QuickButtonSlot, state: QuickButtonState):
 
 /** 퀵메뉴 보조 패널(버튼 뒤에 깔리는 아이보리 판) 경로. */
 export const QUICK_PANEL_FILE = 'gui/quick/panel.png';
+
+/**
+ * ESC 게임 메뉴 이미지 역할 id. 사용자 에셋 23장과 1:1 대응한다.
+ * 이름은 "무엇을 칠하는가"가 아니라 "어느 위젯의 어느 상태인가"로 지었다 — screensRpy 가 스타일
+ * 배경으로 꽂을 때 그대로 읽히도록.
+ */
+export type EscImageId =
+  | 'bg'
+  | 'nav_idle'
+  | 'nav_hover'
+  | 'nav_selected'
+  | 'card'
+  | 'choice_idle'
+  | 'choice_hover'
+  | 'choice_selected'
+  | 'choice_disabled'
+  | 'slider_track'
+  | 'slider_fill'
+  | 'slider_thumb'
+  | 'save_idle'
+  | 'save_hover'
+  | 'save_empty'
+  | 'gallery_idle'
+  | 'gallery_locked'
+  | 'scroll_track'
+  | 'scroll_thumb'
+  | 'popup_bg'
+  | 'popup_btn_idle'
+  | 'popup_btn_hover'
+  | 'popup_btn_selected';
+
+/**
+ * ESC 메뉴 이미지 정의(업로드 UI 표시 순서 = 이 배열 순서).
+ * fileKeywords 는 일괄 업로드 파일명 자동 매칭용 — matchEscImageFile 이 `_`·공백을 지운 뒤 비교하므로
+ * 여기 키워드도 붙여 쓴다('좌측메뉴기본'). 긴 키워드가 먼저 검사되므로 '선택버튼선택'이
+ * '선택버튼'에 잡아먹히지 않는다(메뉴 쪽 '저장' vs '빠른저장'과 같은 함정).
+ */
+export const ESC_IMAGES: {
+  id: EscImageId;
+  label: string;
+  group: string;
+  hint: string;
+  fileKeywords: string[];
+}[] = [
+  { id: 'bg', label: '공통 배경', group: '공통', hint: '1920×1080 · 사이드바+카드 틀 포함', fileKeywords: ['esc공통배경', '공통배경'] },
+  { id: 'nav_idle', label: '좌측메뉴 기본', group: '공통', hint: '226×50', fileKeywords: ['좌측메뉴기본'] },
+  { id: 'nav_hover', label: '좌측메뉴 마우스오버', group: '공통', hint: '226×50', fileKeywords: ['좌측메뉴마우스오버'] },
+  { id: 'nav_selected', label: '좌측메뉴 선택', group: '공통', hint: '226×50', fileKeywords: ['좌측메뉴선택'] },
+  { id: 'card', label: '콘텐츠 카드', group: '공통', hint: '96×96 9slice · 테두리 24px', fileKeywords: ['콘텐츠카드'] },
+  { id: 'choice_idle', label: '선택버튼 기본', group: '버튼', hint: '188×48', fileKeywords: ['선택버튼기본'] },
+  { id: 'choice_hover', label: '선택버튼 마우스오버', group: '버튼', hint: '188×48', fileKeywords: ['선택버튼마우스오버'] },
+  { id: 'choice_selected', label: '선택버튼 선택', group: '버튼', hint: '188×48', fileKeywords: ['선택버튼선택'] },
+  { id: 'choice_disabled', label: '선택버튼 비활성화', group: '버튼', hint: '188×48', fileKeywords: ['선택버튼비활성화'] },
+  { id: 'slider_track', label: '슬라이더 트랙', group: '슬라이더', hint: '600×14', fileKeywords: ['슬라이더트랙'] },
+  { id: 'slider_fill', label: '슬라이더 채움', group: '슬라이더', hint: '600×14', fileKeywords: ['슬라이더채움'] },
+  { id: 'slider_thumb', label: '슬라이더 핸들', group: '슬라이더', hint: '28×28', fileKeywords: ['슬라이더핸들'] },
+  { id: 'save_idle', label: '저장슬롯 기본', group: '슬롯', hint: '320×190', fileKeywords: ['저장슬롯기본'] },
+  { id: 'save_hover', label: '저장슬롯 마우스오버', group: '슬롯', hint: '320×190', fileKeywords: ['저장슬롯마우스오버'] },
+  { id: 'save_empty', label: '저장슬롯 빈슬롯', group: '슬롯', hint: '320×190', fileKeywords: ['저장슬롯빈슬롯'] },
+  { id: 'gallery_idle', label: '갤러리슬롯 기본', group: '슬롯', hint: '300×180', fileKeywords: ['갤러리슬롯기본'] },
+  { id: 'gallery_locked', label: '갤러리슬롯 잠김', group: '슬롯', hint: '300×180', fileKeywords: ['갤러리슬롯잠김'] },
+  { id: 'scroll_track', label: '스크롤바 트랙', group: '스크롤', hint: '10×600', fileKeywords: ['스크롤바트랙'] },
+  { id: 'scroll_thumb', label: '스크롤바 핸들', group: '스크롤', hint: '10×180', fileKeywords: ['스크롤바핸들'] },
+  { id: 'popup_bg', label: '종료팝업 배경', group: '팝업', hint: '680×330', fileKeywords: ['종료팝업배경'] },
+  { id: 'popup_btn_idle', label: '종료버튼 기본', group: '팝업', hint: '200×58', fileKeywords: ['종료버튼기본'] },
+  { id: 'popup_btn_hover', label: '종료버튼 마우스오버', group: '팝업', hint: '200×58', fileKeywords: ['종료버튼마우스오버'] },
+  { id: 'popup_btn_selected', label: '종료버튼 선택', group: '팝업', hint: '200×58', fileKeywords: ['종료버튼선택'] },
+];
+
+/**
+ * Ren'Py 프로젝트 안의 ESC 메뉴 이미지 경로(game/ 기준) — screensRpy·buildZip 공용 단일 소스.
+ * ⚠️ 예외 하나: 'bg' 는 이 경로를 쓰지 않는다. 공통배경은 곧 `gui.game_menu_background` 이므로
+ * buildZip 이 기존 `gui/game_menu.png` 자리에 써서 menuArt.game 을 대체한다(파일을 둘로 안 늘린다).
+ */
+export function escImageFile(id: EscImageId): string {
+  return `gui/esc/${id}.png`;
+}
+
+/**
+ * 파일명 → ESC 이미지 역할. 메뉴 버튼 매칭과 같은 규칙에 **`_`·`-` 제거**를 더한다
+ * (`GUI_좌측메뉴_기본.png` → `좌측메뉴기본`) — 에셋 파일명이 밑줄로 낱말을 끊어놨기 때문.
+ */
+export function matchEscImageFile(filename: string): EscImageId | undefined {
+  const withoutExt = filename.replace(/\.[^.]+$/, '');
+  const norm = withoutExt.replace(/^GUI_/i, '').replace(/[\s_-]+/g, '').toLowerCase();
+  return matchLongestKeyword(norm, ESC_IMAGES);
+}
 
 /** 파일명 → 퀵메뉴 슬롯·상태. matchMenuButtonFile 과 동일한 정규화 규칙. */
 export function matchQuickButtonFile(
