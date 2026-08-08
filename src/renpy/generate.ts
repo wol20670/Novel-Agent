@@ -30,6 +30,7 @@ import {
   quickMenuLayout,
   WINDOW_ICON_FILE,
   ESC_IMAGES,
+  escColors,
 } from '../types';
 import { SlugMap } from './slug';
 import {
@@ -1080,7 +1081,9 @@ function buildEscMenuPlan(project: Project): EscMenuPlan | undefined {
     if (images[id]) has.add(id);
   }
   if (has.size === 0) return undefined;
-  return { has, scale: project.height / 1080 };
+  // 팔레트는 **이미지가 하나라도 있을 때만** 따라 나간다. 색만 바꾸는 건 이미지 GUI 를 안 쓰는
+  // 게임에도 영향을 주는 별개 기능이라 여기서 문을 열지 않는다(회귀 0 계약 유지).
+  return { has, scale: project.height / 1080, colors: escColors(project.escMenuUi?.colors) };
 }
 
 /**

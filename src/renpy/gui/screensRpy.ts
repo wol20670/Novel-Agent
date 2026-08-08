@@ -15,6 +15,7 @@ import type {
   QuickButtonState,
   QuickMenuLayout,
   EscImageId,
+  EscColors,
 } from '../../types';
 import {
   RENPY_LANG,
@@ -108,12 +109,57 @@ export interface EscMenuPlan {
   /** 실제로 업로드된 롤 집합('bg' 도 포함될 수 있지만 화면 출력엔 관여하지 않는다 — 아래 참고). */
   has: Set<EscImageId>;
   /**
-   * height / 1080. 이 파일에서 유일하게 쓰는 리터럴 계산은 card 의 9-slice 테두리(24px 기준)뿐이다
-   * — 나머지는 절대좌표가 아니라 style 교체라 스케일이 필요 없다. gui.scale()(720p 기준)은 금지
-   * (CLAUDE.md — 메인/퀵메뉴와 같은 이유, 이미 굽는 배율과 또 곱하면 이중 스케일링이 된다).
+   * height / 1080. 아래 ESC_LAYOUT 의 1920×1080 기준 px 를 이 배율로 곱해 최종 값을 굽는다(런타임
+   * 계산 없음). gui.scale()(720p 기준)은 금지 — CLAUDE.md, 메인/퀵메뉴와 같은 이유로 이미 굽는
+   * 배율과 또 곱하면 이중 스케일링이 된다.
    */
   scale: number;
+  /** ESC 메뉴 위 글자색(generate.ts 가 escColors() 로 기본값을 병합해 넘긴다 — 항상 전부 채워져 있다). */
+  colors: Required<EscColors>;
 }
+
+/**
+ * ESC 메뉴 레이아웃 좌표 — **1920×1080 기준 px, 업로드 배경 아트(공통배경)의 실제 그림 위치**를
+ * 그대로 옮긴 값이다. 기존 화면은 gui.scale()(720p 기준) 상대 좌표라 배경 아트와 무관하게 배치되어
+ * 콘텐츠가 카드 밖으로 삐져나오고 제목이 사이드바 위에 올라탔다(실기 확인 — 시안 대조로만 잡힌다).
+ *
+ * 카페테리아 에셋 기준 실측: 사이드바 0..318, 카드 362..1868 × 48..1028.
+ * 여기 값이 곧 "카드 안쪽 여백을 둔 콘텐츠 박스"다 — 다른 아트를 쓰면 이 상수만 고치면 된다.
+ */
+const ESC_LAYOUT = {
+  /** 콘텐츠 좌측 시작 x(카드 좌측 362 + 안쪽 여백 58). */
+  contentLeft: 420,
+  /** 콘텐츠 우측 끝 x(카드 우측 1868 - 안쪽 여백 58). */
+  contentRight: 1810,
+  /** 제목 baseline 영역 높이 — 이만큼 위를 비우고 그 아래부터 콘텐츠가 시작한다. */
+  contentTop: 205,
+  /** 콘텐츠 하단 끝 y(카드 하단 1028 - 안쪽 여백 8). */
+  contentBottom: 1020,
+  /**
+   * 제목(저장/설정/…) 글자 크기·세로 영역. ⚠️ titleTop 이 없으면 제목이 y=0 부터 그려져 **카드 위쪽
+   * 어두운 배경에 걸쳐 잘린 것처럼** 보인다(실기에서 확인 — 카드 상단이 y=48 이라 0..48 구간이 카드 밖).
+   */
+  titleTop: 60,
+  titleSize: 54,
+  titleBoxHeight: 118,
+  /** 제목 밑 장식 밑줄(시안의 얇은 선) — 두께·길이·y. */
+  ruleWidth: 200,
+  ruleHeight: 2,
+  ruleY: 168,
+  /** 세로 스크롤바가 콘텐츠 오른쪽에 차지하는 폭(트랙+간격). */
+  scrollbarGutter: 40,
+  /** 설정 그룹 카드 — 2열 배치. */
+  prefCardWidth: 660,
+  prefCardPadX: 34,
+  prefCardPadY: 26,
+  prefCardSpacing: 30,
+  /** 갤러리 칸(발견한 아이템 4열 / 감상한 CG 3열). */
+  itemCellWidth: 320,
+  itemCellHeight: 250,
+  cgCellWidth: 430,
+  cgCellHeight: 260,
+  gallerySpacing: 20,
+} as const;
 
 /**
  * 원본(텍스트 메뉴) screen main_menu() 정의 — base 템플릿의 `${mainMenuScreen}` 자리에 그대로
@@ -484,45 +530,62 @@ screen gallery_hub():
  * 각 목록이 2개 이상일 때만 해당 블록이 나온다. 12칸 들여쓰기(preferences 의 바깥 vbox 기준).
  */
 function languagePrefsBlock(locales?: GuiLocales): string {
-  if (!locales) return '';
-  const text = locales.text ?? [];
-  const voice = locales.voice ?? [];
-  const showText = text.length > 1;
-  const showVoice = voice.length > 1;
-  if (!showText && !showVoice) return '';
+  const groups = languagePrefGroups(locales);
+  if (groups.length === 0) return '';
 
-  const base = text[0]; // effectiveTextLocales 는 base 를 맨 앞에 둔다.
   const I = (n: number) => ' '.repeat(n);
   const lines: string[] = [];
   lines.push(`${I(12)}hbox:`);
   lines.push(`${I(16)}box_wrap True`);
   lines.push('');
 
-  if (showText) {
+  for (const group of groups) {
     lines.push(`${I(16)}vbox:`);
     lines.push(`${I(20)}style_prefix "radio"`);
-    lines.push(`${I(20)}label _("자막 언어")`);
-    for (const loc of text) {
-      // 기본 언어(대본 원문)는 번역 블록이 없어 Language(None).
-      const action = loc === base ? 'Language(None)' : `Language("${RENPY_LANG[loc]}")`;
-      lines.push(`${I(20)}textbutton _("${LOCALE_LABEL[loc]}") action ${action}`);
-    }
-    lines.push('');
-  }
-
-  if (showVoice) {
-    lines.push(`${I(16)}vbox:`);
-    lines.push(`${I(20)}style_prefix "radio"`);
-    lines.push(`${I(20)}label _("음성 언어")`);
-    for (const loc of voice as Locale[]) {
-      lines.push(
-        `${I(20)}textbutton _("${LOCALE_LABEL[loc]}") action SetField(persistent, "voice_language", "${loc}")`,
-      );
+    lines.push(`${I(20)}label _("${group.label}")`);
+    for (const item of group.items) {
+      lines.push(`${I(20)}textbutton _("${item.label}") action ${item.action}`);
     }
     lines.push('');
   }
 
   return lines.join('\n') + '\n';
+}
+
+/**
+ * 자막/음성 언어 선택 그룹(라벨 + 버튼들)의 **데이터**. languagePrefsBlock(기존 텍스트 배치)과
+ * escPreferencesBody(카드 배치)가 같은 목록을 두 번 계산하지 않도록 뽑아냈다 — 언어 목록이나
+ * action 이 한쪽에서만 바뀌면 두 배치가 조용히 어긋난다.
+ */
+function languagePrefGroups(locales?: GuiLocales): { label: string; items: { label: string; action: string }[] }[] {
+  if (!locales) return [];
+  const text = locales.text ?? [];
+  const voice = locales.voice ?? [];
+  const groups: { label: string; items: { label: string; action: string }[] }[] = [];
+
+  if (text.length > 1) {
+    const base = text[0]; // effectiveTextLocales 는 base 를 맨 앞에 둔다.
+    groups.push({
+      label: '자막 언어',
+      items: text.map((loc) => ({
+        label: LOCALE_LABEL[loc],
+        // 기본 언어(대본 원문)는 번역 블록이 없어 Language(None).
+        action: loc === base ? 'Language(None)' : `Language("${RENPY_LANG[loc]}")`,
+      })),
+    });
+  }
+
+  if (voice.length > 1) {
+    groups.push({
+      label: '음성 언어',
+      items: (voice as Locale[]).map((loc) => ({
+        label: LOCALE_LABEL[loc],
+        action: `SetField(persistent, "voice_language", "${loc}")`,
+      })),
+    });
+  }
+
+  return groups;
 }
 
 /**
@@ -556,21 +619,28 @@ screen gallery_lightbox(img, caption):
 
 /**
  * 아이템(소품) 팝업(인게임) + 발견한 아이템 보관함 화면(hasItems 일 때만 방출).
- * escMenu 가 gallery_idle/gallery_locked 를 갖고 있을 때만 셀에 style 태그를 끼워 넣는다 — 그 외엔
- * 원본과 바이트 단위로 동일(회귀 0). 이 두 줄이 이 함수에서 유일하게 "화면 코드"를 건드리는
- * 지점이다: 잠금 칸의 `background Solid(...)` 는 인라인 프로퍼티라 나중에 오는 `style frame:` 로도
- * 덮어쓸 수 없고(인라인이 항상 이긴다), 해금 칸의 `button:` 은 원래 스타일 이름이 없어(default
- * "button" 스타일) 뒤에서 style 블록만 추가해선 대상을 지정할 수 없다 — 그래서 이름 있는 스타일을
- * 붙이는 쪽으로 대신한다(buildEscMenuStyles 가 정의하는 esc_gallery_idle_button/
- * esc_gallery_locked_frame). file_slots 의 save_empty 분기와 같은 종류의 예외.
+ * 보관함 격자는 galleryGrid 가 만든다 — escMenu 가 없으면 기존 출력 그대로(회귀 0).
+ *
+ * 격자가 "화면 코드"를 건드려야 하는 이유(style 블록만으론 안 되는 자리): 잠금 칸의
+ * `background Solid(...)` 는 인라인 프로퍼티라 나중에 오는 `style frame:` 로도 덮어쓸 수 없고
+ * (인라인이 항상 이긴다), 해금 칸의 `button:` 은 원래 스타일 이름이 없어(default "button" 스타일)
+ * 뒤에서 style 블록만 추가해선 대상을 지정할 수 없다 — 그래서 이름 있는 스타일을 붙이는 쪽으로
+ * 대신한다(buildEscMenuStyles 의 esc_gallery_idle_button/esc_gallery_locked_frame).
+ * file_slots 의 save_empty 분기와 같은 종류의 예외.
  */
 function itemScreens(escMenu?: EscMenuPlan): string {
-  const idleStyleLine = escMenu?.has.has('gallery_idle')
-    ? '\n                            style "esc_gallery_idle_button"'
-    : '';
-  const lockedBackground = escMenu?.has.has('gallery_locked')
-    ? 'style "esc_gallery_locked_frame"'
-    : 'background Solid(gui.frame_bg_color)';
+  const grid = galleryGrid(escMenu, {
+    cols: 4,
+    seenExpr: 'persistent.item_found.get(it_tag, False)',
+    listExpr: 'gui.items_all',
+    loopVars: 'it_tag, it_name',
+    tagVar: 'it_tag',
+    nameVar: 'it_name',
+    legacyCell: 200,
+    legacyImage: 184,
+    cellWidth: ESC_LAYOUT.itemCellWidth,
+    cellHeight: ESC_LAYOUT.itemCellHeight,
+  });
   return String.raw`
 
 ################################################################################
@@ -601,29 +671,7 @@ screen item_popup(img, caption):
 screen item_gallery():
     tag menu
     use game_menu(_("발견한 아이템"), scroll="viewport"):
-        vpgrid:
-            cols 4
-            spacing gui.scale(18)
-            for it_tag, it_name in gui.items_all:
-                vbox:
-                    spacing gui.scale(4)
-                    xsize gui.scale(200)
-                    if persistent.item_found.get(it_tag, False):
-                        button:${idleStyleLine}
-                            xysize (gui.scale(200), gui.scale(200))
-                            action Show("gallery_lightbox", img=it_tag, caption=it_name)
-                            add it_tag:
-                                fit "contain"
-                                xysize (gui.scale(184), gui.scale(184))
-                                align (0.5, 0.5)
-                        text it_name xalign 0.5 size gui.scale(16)
-                    else:
-                        frame:
-                            xysize (gui.scale(200), gui.scale(200))
-                            ${lockedBackground}
-                            text "???" align (0.5, 0.5) size gui.scale(34) color gui.insensitive_color
-                        text _("???") xalign 0.5 size gui.scale(16) color gui.insensitive_color
-`;
+${grid}`;
 }
 
 /**
@@ -633,12 +681,20 @@ screen item_gallery():
  * 태그 번호를 재사용해 계산).
  */
 function cgScreens(escMenu?: EscMenuPlan): string {
-  const idleStyleLine = escMenu?.has.has('gallery_idle')
-    ? '\n                            style "esc_gallery_idle_button"'
-    : '';
-  const lockedBackground = escMenu?.has.has('gallery_locked')
-    ? 'style "esc_gallery_locked_frame"'
-    : 'background Solid(gui.frame_bg_color)';
+  const grid = galleryGrid(escMenu, {
+    cols: 3,
+    seenExpr: 'persistent.cg_seen.get(cg_tag, False)',
+    listExpr: 'gui.cgs_all',
+    loopVars: 'cg_tag, cg_name',
+    tagVar: 'cg_tag',
+    nameVar: 'cg_name',
+    legacyCell: 300,
+    legacyCellHeight: 190,
+    legacyImage: 288,
+    legacyImageHeight: 162,
+    cellWidth: ESC_LAYOUT.cgCellWidth,
+    cellHeight: ESC_LAYOUT.cgCellHeight,
+  });
   return String.raw`
 
 ################################################################################
@@ -648,29 +704,300 @@ function cgScreens(escMenu?: EscMenuPlan): string {
 screen cg_gallery():
     tag menu
     use game_menu(_("감상한 CG"), scroll="viewport"):
-        vpgrid:
-            cols 3
+${grid}`;
+}
+
+/** galleryGrid 인자 — 아이템(정사각 4열)·CG(와이드 3열) 두 갤러리의 차이를 전부 값으로 뽑았다. */
+interface GalleryGridSpec {
+  cols: number;
+  /** 해금 여부 파이썬 식. */
+  seenExpr: string;
+  /** 목록 파이썬 식(gui.items_all / gui.cgs_all). */
+  listExpr: string;
+  /** for 루프 변수 선언(`it_tag, it_name`). */
+  loopVars: string;
+  tagVar: string;
+  nameVar: string;
+  /** 기존(텍스트 GUI) 칸 치수 — gui.scale() 기준. 높이 생략 시 정사각. */
+  legacyCell: number;
+  legacyCellHeight?: number;
+  legacyImage: number;
+  legacyImageHeight?: number;
+  /** ESC 이미지 GUI 칸 치수 — 1920 기준 px(ESC_LAYOUT). */
+  cellWidth: number;
+  cellHeight: number;
+}
+
+/**
+ * 갤러리 vpgrid 본문. escMenu 가 없으면 **기존 출력과 바이트 단위로 동일**하고(회귀 0), 있으면
+ * 시안 배치로 바꾼다 — 캡션이 칸 **밖 아래 가운데**가 아니라 **칸 안 좌하단**으로 들어가고(업로드한
+ * 갤러리슬롯 아트가 하단에 캡션 띠를 그려둔 구조다), 칸이 카드 폭에 맞게 커진다.
+ *
+ * escMenu 가 있을 때 캡션 색을 인라인으로 박는 이유: 이 텍스트들은 이름 있는 스타일이 없는 기본
+ * `text` 라 뒤에 style 블록을 붙여선 골라 잡을 수 없고, `style text:` 를 통째로 덮으면 대사창까지
+ * 딸려간다(팔레트는 ESC 메뉴에만 적용돼야 한다).
+ */
+function galleryGrid(escMenu: EscMenuPlan | undefined, spec: GalleryGridSpec): string {
+  const cellH = spec.legacyCellHeight ?? spec.legacyCell;
+  const imgH = spec.legacyImageHeight ?? spec.legacyImage;
+  if (!escMenu) {
+    return `        vpgrid:
+            cols ${spec.cols}
             spacing gui.scale(18)
-            for cg_tag, cg_name in gui.cgs_all:
+            for ${spec.loopVars} in ${spec.listExpr}:
                 vbox:
                     spacing gui.scale(4)
-                    xsize gui.scale(300)
-                    if persistent.cg_seen.get(cg_tag, False):
-                        button:${idleStyleLine}
-                            xysize (gui.scale(300), gui.scale(190))
-                            action Show("gallery_lightbox", img=cg_tag, caption=cg_name)
-                            add cg_tag:
+                    xsize gui.scale(${spec.legacyCell})
+                    if ${spec.seenExpr}:
+                        button:
+                            xysize (gui.scale(${spec.legacyCell}), gui.scale(${cellH}))
+                            action Show("gallery_lightbox", img=${spec.tagVar}, caption=${spec.nameVar})
+                            add ${spec.tagVar}:
                                 fit "contain"
-                                xysize (gui.scale(288), gui.scale(162))
+                                xysize (gui.scale(${spec.legacyImage}), gui.scale(${imgH}))
                                 align (0.5, 0.5)
-                        text cg_name xalign 0.5 size gui.scale(16)
+                        text ${spec.nameVar} xalign 0.5 size gui.scale(16)
                     else:
                         frame:
-                            xysize (gui.scale(300), gui.scale(190))
-                            ${lockedBackground}
+                            xysize (gui.scale(${spec.legacyCell}), gui.scale(${cellH}))
+                            background Solid(gui.frame_bg_color)
                             text "???" align (0.5, 0.5) size gui.scale(34) color gui.insensitive_color
                         text _("???") xalign 0.5 size gui.scale(16) color gui.insensitive_color
 `;
+  }
+
+  const s = (v: number) => px(escMenu, v);
+  const { colors } = escMenu;
+  // 캡션 띠(칸 아래쪽)를 뺀 나머지가 그림 영역. 좌우 14px, 위 14px 여백.
+  // ⚠️ 그림은 반드시 안쪽 fixed 안에서 align (0.5, 0.5) 로 가운데 놓는다 — `add x: fit "contain"
+  //    xysize(...)` 는 축소 후 크기가 xysize 보다 작아지므로, pos 로 직접 놓으면 세로 사진이 칸
+  //    왼쪽에 쏠려 붙는다(실기 확인).
+  const capBand = 48;
+  const imgW = spec.cellWidth - 28;
+  // 캡션 폭을 칸 안으로 묶는다 — 안 묶으면 긴 CG 이름이 칸을 뚫고 옆 칸·카드 밖까지 흘러나간다.
+  const capW = spec.cellWidth - 36;
+  const imgHeight = spec.cellHeight - capBand - 28;
+  const idleStyleLine = escMenu.has.has('gallery_idle') ? '\n                        style "esc_gallery_idle_button"' : '';
+  const lockedBackground = escMenu.has.has('gallery_locked')
+    ? 'style "esc_gallery_locked_frame"'
+    : 'background Solid(gui.frame_bg_color)';
+  return `        vpgrid:
+            cols ${spec.cols}
+            spacing ${s(ESC_LAYOUT.gallerySpacing)}
+            for ${spec.loopVars} in ${spec.listExpr}:
+                if ${spec.seenExpr}:
+                    button:${idleStyleLine}
+                        xysize (${s(spec.cellWidth)}, ${s(spec.cellHeight)})
+                        action Show("gallery_lightbox", img=${spec.tagVar}, caption=${spec.nameVar})
+                        has fixed
+                        fixed:
+                            pos (${s(14)}, ${s(14)})
+                            xysize (${s(imgW)}, ${s(imgHeight)})
+                            add ${spec.tagVar}:
+                                fit "contain"
+                                xysize (${s(imgW)}, ${s(imgHeight)})
+                                align (0.5, 0.5)
+                        text ${spec.nameVar}:
+                            pos (${s(18)}, ${s(spec.cellHeight - capBand + 8)})
+                            xsize ${s(capW)}
+                            size ${s(17)}
+                            color "${colors.body}"
+                else:
+                    frame:
+                        xysize (${s(spec.cellWidth)}, ${s(spec.cellHeight)})
+                        ${lockedBackground}
+                        has fixed
+                        text "???":
+                            pos (${s(Math.round(spec.cellWidth / 2))}, ${s(Math.round((spec.cellHeight - capBand) / 2))})
+                            anchor (0.5, 0.5)
+                            size ${s(34)}
+                            color "${colors.muted}"
+                        text _("???"):
+                            pos (${s(18)}, ${s(spec.cellHeight - capBand + 8)})
+                            xsize ${s(capW)}
+                            size ${s(17)}
+                            color "${colors.muted}"
+`;
+}
+
+/** 1920×1080 기준 px 를 프로젝트 해상도로 굽는다(ESC 계획 공용 — gui.scale() 금지, CLAUDE.md). */
+function px(plan: EscMenuPlan, value1080: number): number {
+  return Math.round(value1080 * plan.scale);
+}
+
+/**
+ * screen preferences() 의 본문. escMenu 가 없으면 **기존 출력과 바이트 단위로 동일**(회귀 0),
+ * 있으면 시안대로 **그룹마다 카드 한 장**인 2열 배치로 바꾼다.
+ *
+ * 왜 style 만으론 안 되는가: 업로드한 콘텐츠카드는 `style frame` 배경으로 꽂히는데, 설정 그룹은
+ * frame 이 아니라 **vbox** 라 배경 프로퍼티 자체가 없다(vbox 는 window 가 아니다). 카드를 씌우려면
+ * 그룹을 frame 으로 감싸는 화면 코드 변경이 불가피하다 — 실기에서 카드 에셋이 어디에도 안 보이던
+ * 원인이 이것이다.
+ *
+ * ⚠️ 카드 배치에선 `style_prefix` 를 쓰지 않고 위젯마다 스타일을 명시한다. frame 에 style_prefix 를
+ * 걸면 프레임 자신이 `<prefix>_frame` 으로 바뀌어 카드 배경이 날아가고, 안쪽 vbox 에 걸면
+ * `radio_hbox` 처럼 **정의된 적 없는 스타일**을 Ren'Py 가 찾다 죽는다.
+ */
+function preferencesBody(escMenu: EscMenuPlan | undefined, locales: GuiLocales | undefined, languagePrefs: string): string {
+  if (!escMenu) {
+    return `        vbox:
+
+            hbox:
+                box_wrap True
+
+                if renpy.variant("pc") or renpy.variant("web"):
+
+                    vbox:
+                        style_prefix "radio"
+                        label _("디스플레이")
+                        textbutton _("창 모드") action Preference("display", "window")
+                        textbutton _("전체 화면") action Preference("display", "fullscreen")
+
+                vbox:
+                    style_prefix "check"
+                    label _("스킵")
+                    textbutton _("읽지 않은 대사") action Preference("skip", "toggle")
+                    textbutton _("선택 후에도") action Preference("after choices", "toggle")
+                    textbutton _("전환 효과") action InvertSelected(Preference("transitions", "toggle"))
+
+            null height (4 * gui.pref_spacing)
+
+${languagePrefs}            hbox:
+                style_prefix "slider"
+                box_wrap True
+
+                vbox:
+
+                    label _("텍스트 속도")
+                    bar value Preference("text speed")
+
+                    label _("자동 진행 시간")
+                    bar value Preference("auto-forward time")
+
+                vbox:
+
+                    if config.has_music:
+                        label _("음악 볼륨")
+
+                        hbox:
+                            bar value Preference("music volume")
+
+                    if config.has_sound:
+
+                        label _("효과음 볼륨")
+
+                        hbox:
+                            bar value Preference("sound volume")
+
+                            if config.sample_sound:
+                                textbutton _("테스트") action Play("sound", config.sample_sound)
+
+                    if config.has_voice:
+                        label _("음성 볼륨")
+
+                        hbox:
+                            bar value Preference("voice volume")
+
+                            if config.sample_voice:
+                                textbutton _("테스트") action Play("voice", config.sample_voice)
+
+                    if config.has_music or config.has_sound or config.has_voice:
+                        null height gui.pref_spacing
+
+                        textbutton _("전체 음소거"):
+                            action Preference("all mute", "toggle")
+                            style "mute_all_button"
+`;
+  }
+
+  const s = (v: number) => px(escMenu, v);
+  const I = (n: number) => ' '.repeat(n);
+  const out: string[] = [];
+  // box_wrap 이 660+30+660=1350(=뷰포트 폭)에서 정확히 2열로 접힌다.
+  out.push(`${I(8)}hbox:`);
+  out.push(`${I(12)}box_wrap True`);
+  out.push(`${I(12)}spacing ${s(ESC_LAYOUT.prefCardSpacing)}`);
+  out.push(`${I(12)}box_wrap_spacing ${s(ESC_LAYOUT.prefCardSpacing)}`);
+
+  /** 카드 한 장 = 제목 + 자식 블록. condition 이 있으면 `if` 로 감싼다. */
+  const card = (title: string, body: string[], condition?: string) => {
+    const base = condition ? 12 + 4 : 12;
+    out.push('');
+    if (condition) out.push(`${I(12)}if ${condition}:`);
+    out.push(`${I(base)}frame:`);
+    out.push(`${I(base + 4)}style "esc_pref_card"`);
+    out.push('');
+    out.push(`${I(base + 4)}vbox:`);
+    out.push(`${I(base + 8)}spacing ${s(14)}`);
+    out.push(`${I(base + 8)}text _("${title}") style "esc_pref_title"`);
+    for (const line of body) out.push(line === '' ? '' : `${I(base + 8)}${line}`);
+  };
+
+  /** 알약 버튼 가로 줄(시안은 선택지가 옆으로 늘어선다 — 기존은 세로 나열이었다). */
+  const pillRow = (buttons: { label: string; action: string }[], style: string) => {
+    const lines = [`hbox:`, `    spacing ${s(12)}`, `    box_wrap True`, `    box_wrap_spacing ${s(10)}`];
+    for (const b of buttons) lines.push(`    textbutton _("${b.label}") action ${b.action} style "${style}"`);
+    return lines;
+  };
+
+  card(
+    '디스플레이',
+    pillRow(
+      [
+        { label: '창 모드', action: 'Preference("display", "window")' },
+        { label: '전체 화면', action: 'Preference("display", "fullscreen")' },
+      ],
+      'radio_button',
+    ),
+    'renpy.variant("pc") or renpy.variant("web")',
+  );
+
+  card(
+    '스킵',
+    pillRow(
+      [
+        { label: '읽지 않은 대사', action: 'Preference("skip", "toggle")' },
+        { label: '선택 후에도', action: 'Preference("after choices", "toggle")' },
+        { label: '전환 효과', action: 'InvertSelected(Preference("transitions", "toggle"))' },
+      ],
+      'check_button',
+    ),
+  );
+
+  for (const group of languagePrefGroups(locales)) {
+    card(group.label, pillRow(group.items, 'radio_button'));
+  }
+
+  card('텍스트 진행', [
+    `text _("텍스트 속도") style "esc_pref_sub"`,
+    `bar value Preference("text speed") style "slider_slider"`,
+    `text _("자동 진행 시간") style "esc_pref_sub"`,
+    `bar value Preference("auto-forward time") style "slider_slider"`,
+  ]);
+
+  const audio: string[] = [];
+  for (const [flag, label, pref, sample] of [
+    ['config.has_music', '음악 볼륨', 'music volume', null],
+    ['config.has_sound', '효과음 볼륨', 'sound volume', 'sound'],
+    ['config.has_voice', '음성 볼륨', 'voice volume', 'voice'],
+  ] as const) {
+    audio.push(`if ${flag}:`);
+    audio.push(`    text _("${label}") style "esc_pref_sub"`);
+    audio.push(`    bar value Preference("${pref}") style "slider_slider"`);
+    // 샘플 재생 버튼은 기존 배치에 있던 기능이라 카드 배치에서도 유지한다(config.sample_* 가
+    // 있을 때만 나오므로 대개 안 보이지만, 이미지 GUI 를 켰다고 기능이 사라지면 안 된다).
+    if (sample) {
+      audio.push(`    if config.sample_${sample}:`);
+      audio.push(`        textbutton _("테스트") action Play("${sample}", config.sample_${sample}) style "check_button"`);
+    }
+  }
+  audio.push('if config.has_music or config.has_sound or config.has_voice:');
+  audio.push('    textbutton _("전체 음소거"):');
+  audio.push('        action Preference("all mute", "toggle")');
+  audio.push('        style "mute_all_button"');
+  card('음향', audio);
+
+  return out.join('\n') + '\n';
 }
 
 /**
@@ -871,20 +1198,20 @@ function buildEscMenuStyles(plan: EscMenuPlan | undefined): string {
    *    → 평상시 어두운 글자, 선택 시 밝은 글자.
    *  · 'onDark' — 좌측 내비게이션. 평상시엔 **어두운 사이드바** 위에 맨몸으로 놓이고(nav_idle 이
    *    거의 투명) 선택됐을 때만 밝은 알약이 깔린다 → 정확히 반대.
+   *
+   * 팔레트(plan.colors)는 **카드 표면 위 글자**를 규정한다. 내비의 평상시/마우스오버 색만 리터럴로
+   * 남아 있는데, 그건 카드가 아니라 배경 아트의 사이드바 위 색이라 팔레트가 답을 갖고 있지 않기
+   * 때문이다(사이드바가 밝은 아트를 쓰게 되면 그때 롤을 하나 더 판다).
    */
+  const c = plan.colors;
   const ESC_TEXT_COLORS = (styleName: string, on: 'onLight' | 'onDark') =>
     on === 'onLight'
-      ? `
-style ${styleName}:
-    idle_color "#4a3a2f"
-    hover_color "#2e241d"
-    selected_color "#fdf6ec"
-    insensitive_color "#a89684"`
+      ? ESC_TEXT_COLORS_FOR(plan, styleName)
       : `
 style ${styleName}:
     idle_color "#e8dcc8"
     hover_color "#fdf6ec"
-    selected_color "#4a3a2f"
+    selected_color "${c.body}"
     insensitive_color "#7a6a58"`;
 
   // ── 공통 배경을 가리는 어두운 스크림 제거 ────────────────────────────────
@@ -1043,9 +1370,13 @@ style esc_gallery_locked_frame is frame:
   if (has('popup_bg')) {
     parts.push(String.raw`
 
-## ESC 메뉴 이미지 GUI — 종료 확인 팝업(confirm) 배경.
+## ESC 메뉴 이미지 GUI — 종료 확인 팝업(confirm) 배경. 최소 크기를 에셋 규격(680×330)으로 잡는다 —
+## 안 잡으면 Frame 이 짧은 문구 폭으로 쪼그라들어 아트의 장식(모서리·좌상단 선)이 뭉개진다.
+## xysize 가 아니라 최소값인 이유: 저장 덮어쓰기 확인처럼 긴 문구가 오면 넘쳐야 하는 게 아니라 늘어나야 한다.
 style confirm_frame:
     background Frame("${file('popup_bg')}", 0, 0)
+    xminimum ${px(plan, 680)}
+    yminimum ${px(plan, 330)}
 `);
   }
   if (has('popup_btn_idle')) {
@@ -1054,17 +1385,242 @@ style confirm_frame:
     const selected = has('popup_btn_selected') ? file('popup_btn_selected') : idle;
     parts.push(String.raw`
 
-## ESC 메뉴 이미지 GUI — 종료 확인 팝업의 예/아니오 버튼.
+## ESC 메뉴 이미지 GUI — 종료 확인 팝업의 예/아니오 버튼. 최소 크기를 에셋 규격(200×58)으로 잡는다 —
+## 버튼은 기본적으로 글자 폭에 딱 붙어서, 안 잡으면 "예" 가 글자 두 배 크기의 알약이 아니라 글자에
+## 테두리만 두른 꼴이 된다(실기 확인 — 시안의 넓은 알약과 가장 크게 어긋났던 지점).
 style confirm_button:
     idle_background Frame("${idle}", 0, 0)
     hover_background Frame("${hover}", 0, 0)
     selected_background Frame("${selected}", 0, 0)
     insensitive_background Frame("${idle}", 0, 0)
+    xminimum ${px(plan, 200)}
+    yminimum ${px(plan, 58)}
+    padding (0, 0)
 ${ESC_TEXT_COLORS('confirm_button_text', 'onLight')}
+    xalign 0.5
+    yalign 0.5
 `);
   }
 
+  parts.push(escLayoutStyles(plan));
+  parts.push(escPaletteStyles(plan));
   return parts.join('');
+}
+
+/**
+ * 콘텐츠 박스를 배경 아트의 카드 안으로 밀어 넣는 style 블록.
+ *
+ * 기존 값들은 전부 gui.scale()(720p 기준) 상대 좌표라 **배경 아트가 어디에 카드를 그렸는지 모른다**.
+ * 그래서 실기에선 제목이 사이드바 위 "카페테리아" 자리를 덮고, 격자가 카드 아래 여백까지 흘러내렸다
+ * (시안 대조로만 잡히는 종류 — lint·테스트 전부 통과했다). ESC_LAYOUT 이 좌표 단일 소스.
+ *
+ * navigation_frame 은 hbox 안의 **빈 자리채기**일 뿐이다(실제 내비 버튼은 `use navigation` 이
+ * 화면 최상위에 절대좌표로 그린다) — 그래서 폭만 줄여 콘텐츠 시작 x 를 옮기는 데 써도 안전하다.
+ */
+function escLayoutStyles(plan: EscMenuPlan): string {
+  const s = (v: number) => px(plan, v);
+  const L = ESC_LAYOUT;
+  // 자리채기 프레임 폭 + 콘텐츠 프레임 왼쪽 여백 = 콘텐츠 시작 x. 여백 60 을 남겨 두 값을 가른다.
+  const navSpacer = L.contentLeft - 60;
+  return String.raw`
+
+## ESC 메뉴 이미지 GUI — 콘텐츠 박스를 배경 아트의 카드 안쪽(${L.contentLeft}..${L.contentRight} × ${L.contentTop}..${L.contentBottom},
+## 1920×1080 기준)으로 맞춘다. 좌표를 gui 헬퍼가 아니라 구운 px 로 내는 이유는 CLAUDE.md 참고.
+style game_menu_outer_frame:
+    top_padding ${s(L.contentTop)}
+    bottom_padding ${s(1080 - L.contentBottom)}
+
+style game_menu_navigation_frame:
+    xsize ${s(navSpacer)}
+
+style game_menu_content_frame:
+    left_margin ${s(L.contentLeft - navSpacer)}
+    right_margin ${s(1920 - L.contentRight)}
+    top_margin 0
+
+style game_menu_viewport:
+    xsize ${s(L.contentRight - L.contentLeft - L.scrollbarGutter)}
+
+## 화면 제목(저장/설정/기록…) — 원래 xpos 가 사이드바 위라 배경 아트의 게임 타이틀을 덮고 있었다.
+style game_menu_label:
+    xpos ${s(L.contentLeft)}
+    ypos ${s(L.titleTop)}
+    ysize ${s(L.titleBoxHeight)}
+
+style game_menu_label_text:
+    size ${s(L.titleSize)}
+    color "${plan.colors.title}"
+
+## 설정 그룹 카드(preferencesBody 가 이 스타일로 그룹을 감싼다). 카드 에셋이 없으면 배경은
+## 기본 frame 배경을 따라가고 여백만 적용된다.
+style esc_pref_card is frame:
+    xsize ${s(ESC_LAYOUT.prefCardWidth)}
+    xpadding ${s(ESC_LAYOUT.prefCardPadX)}
+    ypadding ${s(ESC_LAYOUT.prefCardPadY)}
+
+style esc_pref_title is gui_label_text:
+    size ${s(28)}
+    color "${plan.colors.accent}"
+
+style esc_pref_sub is gui_text:
+    size ${s(21)}
+    color "${plan.colors.body}"
+
+style slider_slider:
+    xsize ${s(ESC_LAYOUT.prefCardWidth - ESC_LAYOUT.prefCardPadX * 2)}
+
+## 설정 그룹이 카드로 바뀌면서 라벨 위아래 여백은 카드 패딩이 대신한다.
+style pref_label:
+    top_margin 0
+    bottom_margin 0
+`;
+}
+
+/**
+ * ESC 메뉴 위 **텍스트 색** 일괄 교체. 여기 있는 스타일들은 전부 `gui.accent_color`(테마 강조색 —
+ * 기본 프리셋에선 분홍)나 `gui.text_color`(어두운 배경 전제의 밝은 색)를 쓰고 있어서, 밝은 아이보리
+ * 카드 위에 얹으면 각각 "형광 분홍"과 "거의 안 보임"이 된다. 둘 다 실기에서만 드러난다.
+ *
+ * 색 값은 plan.colors(=project.escMenuUi.colors, 앱에서 조절) — 어두운 아트를 쓰는 게임은 그 값만
+ * 바꾸면 코드 변경 없이 뒤집힌다.
+ */
+function escPaletteStyles(plan: EscMenuPlan): string {
+  const c = plan.colors;
+  const selInk = inkOn(c.selectedBg);
+  return String.raw`
+
+## ESC 메뉴 이미지 GUI — 텍스트 팔레트(카드 표면 위 글자). 위 버튼류 색과 같은 소스에서 나온다.
+style about_text:
+    color "${c.body}"
+
+style about_label_text:
+    color "${c.title}"
+
+style help_text:
+    color "${c.body}"
+
+## 시안은 키 이름이 왼쪽 정렬이다(기본은 오른쪽 정렬이라 설명과 사이가 벌어져 보인다).
+style help_label_text:
+    color "${c.accent}"
+    xalign 0.0
+    textalign 0.0
+
+style history_text:
+    color "${c.body}"
+
+style history_name_text:
+    color "${c.accent}"
+
+style history_label_text:
+    color "${c.muted}"
+
+style pref_label_text:
+    color "${c.accent}"
+
+style page_label_text:
+    color "${c.accent}"
+    idle_color "${c.accent}"
+    hover_color "${c.title}"
+
+## 저장 슬롯 캡션 — 시안은 칸 안 좌하단(기본은 가운데 정렬).
+style slot_time_text:
+    color "${c.body}"
+    xalign 0.0
+
+style slot_name_text:
+    color "${c.muted}"
+    xalign 0.0
+
+style confirm_prompt_text:
+    color "${c.body}"
+
+## 페이지 번호 — gui.button_properties 가 심어둔 배경(테마 강조색 알약)을 통째로 걷는다. 시안은
+## 번호를 맨 글자로 늘어놓고 현재 페이지만 진하게 표시한다(사각형 색칠은 시안에 없다).
+## ⚠️ CRASH TRAP(위 주석) 대상이라 네 롤을 전부 닫는다 — 하나라도 열어두면 없는 PNG 를 찾다 죽는다.
+style page_button:
+    idle_background None
+    hover_background None
+    selected_background None
+    insensitive_background None
+
+style page_button_text:
+    idle_color "${c.muted}"
+    hover_color "${c.body}"
+    selected_color "${c.title}"
+    insensitive_color "${c.muted}"
+${helpTabStyles(plan, selInk)}
+## 정보/크레딧·도움말 본문의 {a=...} 링크 — 테마 강조색(분홍)이 그대로 나와 카드 위에서 튄다.
+## color 까지 같이 주는 이유: 링크가 포커스를 못 받는 문맥에선 idle_color 가 아니라 color 를 쓴다.
+style hyperlink_text:
+    color "${c.accent}"
+    idle_color "${c.accent}"
+    hover_color "${c.title}"
+    insensitive_color "${c.muted}"
+`;
+}
+
+/**
+ * 도움말 상단 장치 탭(키보드/마우스/게임패드). 선택 상태를 Solid 로 칠하면 각진 색 블록이 되어
+ * 아트와 겉돌기 때문에, 업로드한 선택버튼 알약이 있으면 그걸 쓰고 없을 때만 Solid 로 떨어진다.
+ * 어느 쪽이든 CRASH TRAP 대응으로 네 롤을 전부 채운다.
+ */
+function helpTabStyles(plan: EscMenuPlan, selInk: string): string {
+  const c = plan.colors;
+  const has = (id: EscImageId) => plan.has.has(id);
+  if (!has('choice_idle')) {
+    return `
+## 도움말 장치 탭 — 선택버튼 에셋이 없어 팔레트 색으로만 구분한다.
+style help_button:
+    idle_background None
+    hover_background None
+    selected_background Solid("${c.selectedBg}")
+    insensitive_background None
+
+style help_button_text:
+    idle_color "${c.muted}"
+    hover_color "${c.body}"
+    selected_color "${selInk}"
+    insensitive_color "${c.muted}"
+`;
+  }
+  const idle = escImageFile('choice_idle');
+  const hover = has('choice_hover') ? escImageFile('choice_hover') : idle;
+  const selected = has('choice_selected') ? escImageFile('choice_selected') : idle;
+  const disabled = has('choice_disabled') ? escImageFile('choice_disabled') : idle;
+  return `
+## 도움말 장치 탭 — 설정 화면과 같은 선택버튼 알약을 쓴다(시안의 언어 선택과 같은 생김새).
+style help_button:
+    idle_background Frame("${idle}", 0, 0)
+    hover_background Frame("${hover}", 0, 0)
+    selected_background Frame("${selected}", 0, 0)
+    insensitive_background Frame("${disabled}", 0, 0)
+    padding (${px(plan, 20)}, ${px(plan, 8)})
+${ESC_TEXT_COLORS_FOR(plan, 'help_button_text')}
+`;
+}
+
+/** buildEscMenuStyles 의 onLight 규칙과 같은 색표(그 안의 클로저를 밖에서도 쓰려고 뺐다). */
+function ESC_TEXT_COLORS_FOR(plan: EscMenuPlan, styleName: string): string {
+  const c = plan.colors;
+  return `
+style ${styleName}:
+    idle_color "${c.body}"
+    hover_color "${c.title}"
+    selected_color "${inkOn(c.selectedBg)}"
+    insensitive_color "${c.muted}"`;
+}
+
+/**
+ * 배경색 위에 얹을 글자색(밝기 대비로 고른다). 선택된 버튼의 배경만은 사용자가 색으로 직접 주는
+ * 자리라, 그 위 글자를 팔레트에 또 받으면 "둘 다 어두운 색"으로 맞춰 놓고 안 보인다고 하기 쉽다.
+ */
+function inkOn(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return '#fdf6ec';
+  const n = parseInt(m[1], 16);
+  // ITU-R BT.601 휘도 근사 — 정확한 sRGB 감마 보정까지 갈 이유가 없다(밝다/어둡다 이진 판정).
+  const luma = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  return luma > 0.6 ? '#3b2f26' : '#fdf6ec';
 }
 
 /** screensRpy 옵션(위치 인자가 너무 늘어나 객체로 통합 — generateGuiFiles 의 GuiGenOptions 와 동형). */
@@ -1125,6 +1681,16 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
                             style "slot_button"
                         else:
                             style "esc_save_empty_button"`
+    : '';
+  // 설정 화면은 그룹을 카드로 감싸야 해서 본문 전체를 분기한다(escMenu 없으면 기존 텍스트 그대로).
+  const prefsBody = preferencesBody(escMenu, locales, languagePrefs);
+  // 제목 밑 장식 밑줄 — 시안에 있는 얇은 선. 화면 최상위 `label title` 바로 뒤에 절대좌표로 얹는다.
+  const escTitleRule = escMenu
+    ? `
+
+    add Solid("${escMenu.colors.accent}"):
+        xysize (${px(escMenu, ESC_LAYOUT.ruleWidth)}, ${px(escMenu, ESC_LAYOUT.ruleHeight)})
+        pos (${px(escMenu, ESC_LAYOUT.contentLeft)}, ${px(escMenu, ESC_LAYOUT.ruleY)})`
     : '';
 
   const base = String.raw`################################################################################
@@ -1550,7 +2116,7 @@ screen game_menu(title, scroll=None, yinitial=0.0, spacing=0):
         style "return_button"
         action Return()
 
-    label title
+    label title${escTitleRule}
 
     if main_menu:
         key "game_menu" action ShowMenu("main_menu")
@@ -1797,74 +2363,7 @@ screen preferences():
 
     use game_menu(_("설정"), scroll="viewport"):
 
-        vbox:
-
-            hbox:
-                box_wrap True
-
-                if renpy.variant("pc") or renpy.variant("web"):
-
-                    vbox:
-                        style_prefix "radio"
-                        label _("디스플레이")
-                        textbutton _("창 모드") action Preference("display", "window")
-                        textbutton _("전체 화면") action Preference("display", "fullscreen")
-
-                vbox:
-                    style_prefix "check"
-                    label _("스킵")
-                    textbutton _("읽지 않은 대사") action Preference("skip", "toggle")
-                    textbutton _("선택 후에도") action Preference("after choices", "toggle")
-                    textbutton _("전환 효과") action InvertSelected(Preference("transitions", "toggle"))
-
-            null height (4 * gui.pref_spacing)
-
-${languagePrefs}            hbox:
-                style_prefix "slider"
-                box_wrap True
-
-                vbox:
-
-                    label _("텍스트 속도")
-                    bar value Preference("text speed")
-
-                    label _("자동 진행 시간")
-                    bar value Preference("auto-forward time")
-
-                vbox:
-
-                    if config.has_music:
-                        label _("음악 볼륨")
-
-                        hbox:
-                            bar value Preference("music volume")
-
-                    if config.has_sound:
-
-                        label _("효과음 볼륨")
-
-                        hbox:
-                            bar value Preference("sound volume")
-
-                            if config.sample_sound:
-                                textbutton _("테스트") action Play("sound", config.sample_sound)
-
-                    if config.has_voice:
-                        label _("음성 볼륨")
-
-                        hbox:
-                            bar value Preference("voice volume")
-
-                            if config.sample_voice:
-                                textbutton _("테스트") action Play("voice", config.sample_voice)
-
-                    if config.has_music or config.has_sound or config.has_voice:
-                        null height gui.pref_spacing
-
-                        textbutton _("전체 음소거"):
-                            action Preference("all mute", "toggle")
-                            style "mute_all_button"
-
+${prefsBody}
 
 style pref_label is gui_label
 style pref_label_text is gui_label_text

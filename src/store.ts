@@ -16,6 +16,7 @@ import type {
   QuickButtonState,
   QuickMenuLayout,
   EscImageId,
+  EscColors,
 } from './types';
 import {
   emptyProject,
@@ -382,6 +383,8 @@ interface State {
   clearEscImage: (id: EscImageId) => Promise<void>;
   /** 파일명 자동 매칭 일괄 업로드(예: GUI_좌측메뉴_기본.png). 매칭 실패 파일은 토스트로 안내. */
   importEscImages: (files: File[]) => Promise<void>;
+  /** ESC 메뉴 글자색(본문/제목/강조/보조/선택배경). 빈 값을 주면 그 롤은 기본값(밝은 아트 기준)으로. */
+  setEscColors: (patch: Partial<EscColors>) => void;
 
   // 설정/저장
   /**
@@ -2398,6 +2401,17 @@ export const useStore = create<State>((set, get) => {
       }, prev ? [prev] : []);
       const label = ESC_IMAGES.find((x) => x.id === id)?.label ?? id;
       flash(`${label} 이미지를 해제했습니다.`);
+    },
+
+    // ESC 메뉴 글자색. 이미지가 아니라 Ren'Py 가 그리는 텍스트라 팔레트로만 맞출 수 있다(세이브
+    // 날짜·대사 기록·페이지 번호처럼 동적인 글자가 대부분). 빈 문자열을 주면 그 롤은 기본값으로.
+    setEscColors: (patch) => {
+      const { project } = get();
+      const colors = { ...project.escMenuUi?.colors, ...patch };
+      for (const k of Object.keys(colors) as (keyof typeof colors)[]) {
+        if (!colors[k]) delete colors[k];
+      }
+      get().updateProjectMeta({ escMenuUi: { ...project.escMenuUi, colors } });
     },
 
     // 파일명 자동 매칭 일괄 업로드(matchEscImageFile) — importQuickButtons 와 동일 패턴이지만

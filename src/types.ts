@@ -358,7 +358,55 @@ export interface Project {
    * ⚠️ 이 에셋들엔 **글자를 굽지 않는다**(좌측 메뉴 배경 226×50 처럼 틀만). 라벨은 Ren'Py 가 그려야
    * 자막 언어를 바꿀 때 메뉴도 같이 바뀐다 — 이 앱의 다국어가 핵심 기능이라 지켜야 하는 제약이다.
    */
-  escMenuUi?: { images?: Partial<Record<EscImageId, string>> };
+  escMenuUi?: {
+    images?: Partial<Record<EscImageId, string>>;
+    /**
+     * ESC 메뉴 위 **글자색**. 이미지가 아니라 Ren'Py 가 그리는 텍스트(세이브 날짜·대사 기록·페이지
+     * 번호·버전 문자열 등 동적 텍스트)라 이미지 버튼으로는 대체할 수 없어 색으로만 맞춘다.
+     *
+     * 미지정이면 DEFAULT_ESC_COLORS(밝은 아이보리 카드 아트 기준). **어두운 아트를 쓰는 게임은 여기만
+     * 바꾸면 된다** — 이 값을 코드에 하드코딩하면 다음 게임에서 정확히 반대로 안 읽힌다(좌측 내비만은
+     * 어두운 사이드바 위라 애초에 규칙이 반대다 — screensRpy 의 ESC_TEXT_COLORS 주석 참고).
+     */
+    colors?: EscColors;
+  };
+}
+
+/**
+ * ESC 메뉴 텍스트 팔레트. 롤은 다섯뿐이고 각각이 여러 Ren'Py 스타일에 퍼진다(어느 스타일에
+ * 꽂히는지는 screensRpy 의 buildEscMenuStyles 가 단일 소스).
+ */
+export interface EscColors {
+  /** 본문·설명·대사 기록·슬롯 캡션 — 카드 위에서 가장 많이 읽히는 색. */
+  body?: string;
+  /** 화면 제목(저장/설정/기록…). */
+  title?: string;
+  /** 그룹 라벨·도움말 키 이름·페이지 라벨 등 강조 텍스트. */
+  accent?: string;
+  /** 날짜·페이지 번호·잠긴 항목 같은 보조 텍스트. */
+  muted?: string;
+  /** 선택된 항목의 배경(페이지 번호·도움말 탭). 그 위 글자는 자동으로 밝은 색이 된다. */
+  selectedBg?: string;
+}
+
+/** 밝은 아이보리 카드 아트 기준 기본 팔레트(카페테리아 에셋에 맞춰 실기에서 조정). */
+export const DEFAULT_ESC_COLORS: Required<EscColors> = {
+  body: '#4a3a2f',
+  title: '#4a3730',
+  accent: '#8a6a4f',
+  muted: '#9b8977',
+  selectedBg: '#6b4f3a',
+};
+
+/** escMenuUi.colors + 기본값 병합(부분 지정·빈 문자열 모두 기본값으로 떨어진다). */
+export function escColors(colors?: EscColors): Required<EscColors> {
+  return {
+    body: colors?.body || DEFAULT_ESC_COLORS.body,
+    title: colors?.title || DEFAULT_ESC_COLORS.title,
+    accent: colors?.accent || DEFAULT_ESC_COLORS.accent,
+    muted: colors?.muted || DEFAULT_ESC_COLORS.muted,
+    selectedBg: colors?.selectedBg || DEFAULT_ESC_COLORS.selectedBg,
+  };
 }
 
 /** 메인 메뉴 버튼 슬롯(순서 고정 — 처음부터→이어하기→불러오기→환경설정→갤러리→게임종료). */

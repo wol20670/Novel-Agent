@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store';
-import { ESC_IMAGES, type EscImageId } from '../types';
+import { ESC_IMAGES, DEFAULT_ESC_COLORS, type EscImageId, type EscColors } from '../types';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
 
@@ -39,8 +39,84 @@ export default function EscMenuGui() {
         {GROUPED.map(({ group, items }) => (
           <GroupBlock key={group} group={group} items={items} />
         ))}
+        <ColorBlock />
       </div>
     </section>
+  );
+}
+
+/** 팔레트 롤 5종의 UI 정의(순서 = 화면에 보이는 순서). types.ts 의 EscColors 와 1:1. */
+const COLOR_ROLES: { key: keyof EscColors; label: string; hint: string }[] = [
+  { key: 'body', label: '본문', hint: '대사 기록·설명·슬롯 날짜' },
+  { key: 'title', label: '제목', hint: '저장/설정/기록 같은 화면 이름' },
+  { key: 'accent', label: '강조', hint: '그룹 라벨·도움말 키 이름' },
+  { key: 'muted', label: '보조', hint: '페이지 번호·잠긴 항목' },
+  { key: 'selectedBg', label: '선택 배경', hint: '현재 선택된 항목 바탕' },
+];
+
+/**
+ * ESC 메뉴 글자색. 이미지가 아니라 Ren'Py 가 그리는 텍스트라(세이브 날짜·대사 기록·페이지 번호 등
+ * 동적 텍스트가 대부분) 이미지 버튼으로는 못 바꾸고 색으로만 맞춘다. 기본값은 **밝은 아이보리 카드
+ * 아트 기준** — 어두운 아트를 쓰면 여기서 뒤집어야 한다.
+ */
+function ColorBlock() {
+  const colors = useStore((s) => s.project.escMenuUi?.colors);
+  const setEscColors = useStore((s) => s.setEscColors);
+  const custom = COLOR_ROLES.some((r) => colors?.[r.key]);
+  return (
+    <div className="card border-edge p-3">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs text-gray-400 font-medium">글자색</p>
+        {custom && (
+          <button
+            className="text-[10px] text-gray-500 hover:text-accent"
+            onClick={() => setEscColors(Object.fromEntries(COLOR_ROLES.map((r) => [r.key, ''])))}
+          >
+            기본값으로 되돌리기
+          </button>
+        )}
+      </div>
+      <p className="text-[11px] text-gray-500 mb-2">
+        기본값은 <b>밝은 아이보리 카드 아트</b> 기준입니다. 배경·카드가 <b>어두운 계열</b>이면 본문·제목·강조를 밝은
+        색으로 바꾸세요 — 안 그러면 글자가 배경에 묻혀 안 보입니다.
+      </p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {COLOR_ROLES.map((role) => (
+          <ColorCell key={role.key} role={role} value={colors?.[role.key]} onChange={setEscColors} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ColorCell({
+  role,
+  value,
+  onChange,
+}: {
+  role: { key: keyof EscColors; label: string; hint: string };
+  value?: string;
+  onChange: (patch: Partial<EscColors>) => void;
+}) {
+  const effective = value || DEFAULT_ESC_COLORS[role.key];
+  return (
+    <label className="flex items-center gap-2 rounded-lg border border-edge p-2 bg-panel2/30 cursor-pointer">
+      <input
+        type="color"
+        value={effective}
+        onChange={(e) => onChange({ [role.key]: e.target.value })}
+        className="w-8 h-8 rounded border border-edge bg-transparent shrink-0 cursor-pointer"
+      />
+      <div className="min-w-0">
+        <p className="text-[11px] text-gray-300 truncate">
+          {role.label}
+          {!value && <span className="text-gray-600"> · 기본</span>}
+        </p>
+        <p className="text-[9px] text-gray-500 truncate" title={role.hint}>
+          {role.hint}
+        </p>
+      </div>
+    </label>
   );
 }
 
