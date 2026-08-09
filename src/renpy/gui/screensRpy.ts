@@ -161,6 +161,26 @@ const ESC_LAYOUT = {
   cgCellWidth: 430,
   cgCellHeight: 260,
   gallerySpacing: 20,
+  /**
+   * 화면 제목("저장" 등) 오른쪽 옆에 붙는 작은 "페이지 N" 라벨의 절대 위치·글자 크기. 시안에서
+   * 실측한 값 — 실기 대조 후 어긋나면 이 상수만 고친다(escLayoutStyles 의 page_label 오버라이드).
+   */
+  pageLabelX: 648,
+  pageLabelY: 112,
+  pageLabelSize: 24,
+  /** 저장 슬롯 썸네일 칸 안 "빈 슬롯" 글자, 칸 아래 "슬롯 N"/날짜 캡션 글자 크기(fileSlotsBody). */
+  slotEmptySize: 26,
+  slotCaptionSize: 20,
+  /**
+   * 좌측 내비게이션 pill 최소 크기 + 선택 시 점 자리만큼 밀 여백. xysize 가 아니라 최소값인 이유는
+   * confirm_button 함정(CLAUDE.md)과 같다 — 긴 라벨("발견한 아이템")이 넘치면 안 된다. navDotGutter
+   * 는 selected 아트에 박힌 점 오른쪽까지의 거리로, selected_left_padding 에만 쓴다(점은 selected
+   * 상태 그림에만 있어 평상시엔 밀 이유가 없다 — 사용자가 확정한 "선택된 항목만 밀림" 정렬).
+   */
+  navButtonWidth: 227,
+  navButtonHeight: 50,
+  navTextSize: 28,
+  navDotGutter: 62,
 } as const;
 
 /**
@@ -1009,6 +1029,77 @@ ${languagePrefs}            hbox:
 }
 
 /**
+ * screen file_slots(title) 의 grid 안 슬롯 button: 본문. `escMenu` 가 없으면 지금 출력을 **글자
+ * 하나 안 바꾸고** 그대로 반환한다(회귀 0 — preferencesBody 와 같은 계약).
+ *
+ * 있으면 시안대로 썸네일 칸(`config.thumbnail_width/height` — 스크린샷 실제 픽셀 크기와 어긋나면
+ * 안 되는 값이라 새 상수를 만들지 않고 그대로 쓴다) 안에 스크린샷을 가운데 놓고, 비어 있으면 같은
+ * 칸 가운데에 "빈 슬롯"을 겹쳐 놓는다(칸 아래 캡션은 "슬롯 N"/날짜로 분리 — slot_time_text/
+ * slot_name_text, escPaletteStyles 의 xalign 0.0 좌하단 정렬 참고). `fixed:` + `align (0.5, 0.5)`
+ * 인 이유는 CLAUDE.md 의 `fit "contain"` + `pos` 함정과 같다 — 직접 `pos` 로 놓으면 세로 스크린샷이
+ * 칸 한쪽으로 쏠려 붙는다.
+ *
+ * 배경 이미지 선택(esc_save_empty_button 스타일 분기 — 기존 `fileSlotStyleBlock` 을 이 함수가
+ * 흡수했다)과 이 레이아웃은 서로 독립적인 문제라 게이트 조건이 다르다: 배경 분기는 `save_empty`
+ * 에셋 유무(buildEscMenuStyles 가 `esc_save_empty_button` 을 정의하는 조건과 반드시 같아야
+ * "정의된 적 없는 스타일" 크래시가 안 난다 — CLAUDE.md), 레이아웃 자체는 다른 ESC 그룹들처럼
+ * `escMenu` 존재 하나로만 갈린다(퀵메뉴처럼 특정 토글 이미지를 앵커로 요구하지 않는다 — "일부만
+ * 이미지" 워크플로가 file_slots 에도 그대로 적용된다).
+ */
+function fileSlotsBody(escMenu: EscMenuPlan | undefined): string {
+  const styleBranch = escMenu?.has.has('save_empty')
+    ? `
+                        if FileLoadable(slot):
+                            style "slot_button"
+                        else:
+                            style "esc_save_empty_button"`
+    : '';
+
+  if (!escMenu) {
+    return `                    button:${styleBranch}
+                        action FileAction(slot)
+
+                        has vbox
+
+                        add FileScreenshot(slot) xalign 0.5
+
+                        text FileTime(slot, format=_("{#file_time}%Y.%m.%d (%A) %H:%M"), empty=_("빈 슬롯")):
+                            style "slot_time_text"
+
+                        text FileSaveName(slot):
+                            style "slot_name_text"
+
+                        key "save_delete" action FileDelete(slot)`;
+  }
+
+  // empty=_("슬롯 [slot]") 의 [slot] 은 화면 스코프 변수(screen file_slots 의 for 루프)를 Ren'Py
+  // 가 text 보간 시점에 치환한다 — lint 로는 확인 불가, 실기에서 "슬롯 2" 로 나오는지 확인 필요.
+  const I = (n: number) => ' '.repeat(n);
+  return [
+    `${I(20)}button:${styleBranch}`,
+    `${I(24)}action FileAction(slot)`,
+    '',
+    `${I(24)}has vbox`,
+    '',
+    `${I(24)}fixed:`,
+    `${I(28)}xysize (config.thumbnail_width, config.thumbnail_height)`,
+    '',
+    `${I(28)}add FileScreenshot(slot) align (0.5, 0.5)`,
+    '',
+    `${I(28)}if not FileLoadable(slot):`,
+    `${I(32)}text _("빈 슬롯") align (0.5, 0.5) style "esc_slot_empty_text"`,
+    '',
+    `${I(24)}text FileTime(slot, format=_("{#file_time}%Y.%m.%d · %H:%M"), empty=_("슬롯 [slot]")):`,
+    `${I(28)}style "slot_time_text"`,
+    '',
+    `${I(24)}text FileSaveName(slot):`,
+    `${I(28)}style "slot_name_text"`,
+    '',
+    `${I(24)}key "save_delete" action FileDelete(slot)`,
+  ].join('\n');
+}
+
+/**
  * 원본(텍스트 알약 메뉴) screen quick_menu() 정의(데스크톱) — base 템플릿의 `${quickMenuScreen}` 자리에
  * 그대로 보간되는 "기본값"(quickMenuUi 미지정일 때). mainMenuUi 와 같은 회귀 0 계약 — 원본 텍스트가
  * 여기 단 한 곳에만 존재한다(DEFAULT_MAIN_MENU_SCREEN 과 동일 패턴). 터치 variant(별도
@@ -1243,11 +1334,18 @@ style game_menu_outer_frame:
     parts.push(String.raw`
 
 ## ESC 메뉴 이미지 GUI — 좌측 내비게이션 버튼(기록/저장/불러오기/설정/정보/크레딧/도움말/종료 공용).
+## xminimum/yminimum 인 이유는 confirm_button 함정(CLAUDE.md)과 같다 — 버튼 배경만 이미지로
+## 갈아끼우고 최소 크기를 안 주면 pill 이 글자 폭으로 쪼그라들어(긴 라벨 "발견한 아이템"에서 특히)
+## 점이 찌그러지고 글자가 그 위를 덮는다(실기 확인). selected_left_padding 은 점이 selected 아트
+## 에만 박혀 있어 **선택된 항목만** 오른쪽으로 미는 용도 — 사용자가 확정한 정렬이다.
 style navigation_button:
     idle_background Frame("${idle}", 0, 0)
     hover_background Frame("${hover}", 0, 0)
     selected_background Frame("${selected}", 0, 0)
     insensitive_background Frame("${idle}", 0, 0)
+    xminimum ${px(plan, ESC_LAYOUT.navButtonWidth)}
+    yminimum ${px(plan, ESC_LAYOUT.navButtonHeight)}
+    selected_left_padding ${px(plan, ESC_LAYOUT.navDotGutter)}
 
 ## return_button 은 "style return_button is navigation_button" 이지만, 상속 체인에 기대지 않고
 ## art 를 확실히 물려받도록 여기서도 명시적으로 선언한다.
@@ -1256,8 +1354,19 @@ style return_button:
     hover_background Frame("${hover}", 0, 0)
     selected_background Frame("${selected}", 0, 0)
     insensitive_background Frame("${idle}", 0, 0)
+    xminimum ${px(plan, ESC_LAYOUT.navButtonWidth)}
+    yminimum ${px(plan, ESC_LAYOUT.navButtonHeight)}
+    selected_left_padding ${px(plan, ESC_LAYOUT.navDotGutter)}
 ${ESC_TEXT_COLORS('navigation_button_text', 'onDark')}
+    size ${px(plan, ESC_LAYOUT.navTextSize)}
 ${ESC_TEXT_COLORS('return_button_text', 'onDark')}
+    size ${px(plan, ESC_LAYOUT.navTextSize)}
+
+## ⚠️ "style mm_link_button is navigation_button"(MM_LINK_STYLES, 파일 상단) — 정보/크레딧/도움말
+## 타이틀 링크가 위 xminimum/yminimum/selected_left_padding 을 그대로 물려받는다(부모 스타일 값이
+## 바뀌면 자식도 같이 바뀌는 살아있는 참조라, 여기서 새로 연 프로퍼티가 자동으로 새어 들어간다).
+## 이번 범위에서는 MM_LINK_STYLES 를 건드리지 않는다 — 사용자가 그 링크를 끌 수 있어(showInfoLinks)
+## 실질 영향이 적고, 건드리면 메인메뉴 구성의 회귀 0 증명이 흐려진다.
 `);
   }
 
@@ -1459,6 +1568,30 @@ style game_menu_label_text:
     size ${s(L.titleSize)}
     color "${plan.colors.title}"
 
+## "페이지 N" — 원래 xalign 0.5 라 콘텐츠 상단 한가운데 크게 놓였다(기본값은 720p 기준 상대
+## 좌표라 배경 아트와 무관). 시안은 제목 옆에 작게 붙는다. page_label 은 game_menu_content_frame(원점이
+## (contentLeft, contentTop)) 의 자식이라 여기서 ypos 가 음수(제목 띠 위로) 가 된다 — fixed/frame
+## 은 둘 다 자식을 자르지 않으니 잘리지 않을 것으로 보이나, lint 로는 확인 불가하니 실기 스크린샷
+## 대조가 필요하다(잘리면 ESC_LAYOUT.contentTop 을 낮추고 격자를 ypos 로 되미는 게 대안). 글자
+## 크기·정렬(size/textalign)은 색과 한 블록에 몰아야 해서 escPaletteStyles 의 page_label_text 에
+## 같이 둔다 — 이름당 style 블록을 두 곳에 쪼개면 escStylesBlock() 테스트 헬퍼(첫 등장~다음
+## "\nstyle " 직전까지만 자른다)가 뒤 블록을 못 보고, 사람이 읽을 때도 같은 스타일 설정이 파일
+## 두 군데에 흩어져 헷갈린다.
+style page_label:
+    xalign 0.0
+    xpos ${s(L.pageLabelX - L.contentLeft)}
+    ypos ${s(L.pageLabelY - L.contentTop)}
+    xpadding 0
+    ypadding 0
+
+## 저장 슬롯 썸네일 칸 안 "빈 슬롯" — fileSlotsBody(screensRpy() 참고, escMenu 가 있을 때만 화면
+## 코드가 이 스타일 태그를 낸다)와 **반드시 같은 조건**(escMenu 존재)에서만 정의해야 한다. 짝이
+## 어긋나면 "정의된 적 없는 스타일" 런타임 크래시(CLAUDE.md).
+style esc_slot_empty_text is slot_button_text:
+    size ${s(L.slotEmptySize)}
+    color "${plan.colors.muted}"
+    xalign 0.5
+
 ## 설정 그룹 카드(preferencesBody 가 이 스타일로 그룹을 감싼다). 카드 에셋이 없으면 배경은
 ## 기본 frame 배경을 따라가고 여백만 적용된다.
 style esc_pref_card is frame:
@@ -1494,6 +1627,8 @@ style pref_label:
  */
 function escPaletteStyles(plan: EscMenuPlan): string {
   const c = plan.colors;
+  const s = (v: number) => px(plan, v);
+  const L = ESC_LAYOUT;
   const selInk = inkOn(c.selectedBg);
   return String.raw`
 
@@ -1525,19 +1660,25 @@ style history_label_text:
 style pref_label_text:
     color "${c.accent}"
 
+## size/textalign(레이아웃)과 color(팔레트)를 한 블록에 몰아 둔다 — escLayoutStyles 의 page_label
+## 코멘트 참고(이름당 style 블록을 두 곳에 쪼개면 escStylesBlock() 테스트 헬퍼가 뒤 블록을 놓친다).
 style page_label_text:
     color "${c.accent}"
     idle_color "${c.accent}"
     hover_color "${c.title}"
+    size ${s(L.pageLabelSize)}
+    textalign 0.0
 
-## 저장 슬롯 캡션 — 시안은 칸 안 좌하단(기본은 가운데 정렬).
+## 저장 슬롯 캡션 — 시안은 칸 안 좌하단(기본은 가운데 정렬), 글자 크기도 시안 실측치로 줄인다.
 style slot_time_text:
     color "${c.body}"
     xalign 0.0
+    size ${s(L.slotCaptionSize)}
 
 style slot_name_text:
     color "${c.muted}"
     xalign 0.0
+    size ${s(L.slotCaptionSize)}
 
 style confirm_prompt_text:
     color "${c.body}"
@@ -1682,16 +1823,9 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
 
   // ESC 메뉴 이미지 GUI — 기존 화면들 뒤에 이어붙일 style 오버라이드 텍스트(없으면 빈 문자열, 회귀 0).
   const escStyles = buildEscMenuStyles(escMenu);
-  // save_empty 하나만 유일하게 허용된 "화면 코드" 변경 지점(file_slots) — 슬롯이 로드 가능한지에
-  // 따라 style 을 slot_button/esc_save_empty_button 으로 가른다. save_empty 가 없으면 원본 그대로
-  // (byte-identical) — 다른 슬롯 이미지(save_idle/hover)만 있어도 이 분기는 추가되지 않는다.
-  const fileSlotStyleBlock = escMenu?.has.has('save_empty')
-    ? `
-                        if FileLoadable(slot):
-                            style "slot_button"
-                        else:
-                            style "esc_save_empty_button"`
-    : '';
+  // 저장/불러오기 슬롯 grid 의 button: 본문 — escMenu 없으면 원본 그대로(byte-identical), 있으면
+  // 썸네일 칸+캡션 분리 배치로 바뀐다(fileSlotsBody 참고, 배경 style 분기도 이 함수가 흡수했다).
+  const fileSlotsBodyText = fileSlotsBody(escMenu);
   // 설정 화면은 그룹을 카드로 감싸야 해서 본문 전체를 분기한다(escMenu 없으면 기존 텍스트 그대로).
   const prefsBody = preferencesBody(escMenu, locales, languagePrefs);
   // 제목 밑 장식 밑줄 — 시안에 있는 얇은 선. 화면 최상위 `label title` 바로 뒤에 절대좌표로 얹는다.
@@ -2288,20 +2422,7 @@ screen file_slots(title):
 
                     $ slot = i + 1
 
-                    button:${fileSlotStyleBlock}
-                        action FileAction(slot)
-
-                        has vbox
-
-                        add FileScreenshot(slot) xalign 0.5
-
-                        text FileTime(slot, format=_("{#file_time}%Y.%m.%d (%A) %H:%M"), empty=_("빈 슬롯")):
-                            style "slot_time_text"
-
-                        text FileSaveName(slot):
-                            style "slot_name_text"
-
-                        key "save_delete" action FileDelete(slot)
+${fileSlotsBodyText}
 
             vbox:
                 style_prefix "page"

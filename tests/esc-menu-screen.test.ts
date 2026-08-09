@@ -244,13 +244,19 @@ describe('generateRenpyFiles: escMenuUi 전체 업로드 — 이미지화된 버
   });
 });
 
-describe('generateRenpyFiles: escMenuUi 에 save_empty 가 없으면 file_slots 는 원본 그대로', () => {
-  it('save_idle/save_hover 만 있어도(save_empty 없음) FileLoadable 분기는 생기지 않는다', () => {
+describe('generateRenpyFiles: escMenuUi 에 save_empty 가 없어도 file_slots 레이아웃은 ESC 배치를 따른다', () => {
+  // 배경 이미지 선택(esc_save_empty_button 스타일 분기)과 썸네일/캡션 레이아웃은 서로 다른 조건으로
+  // 갈린다(fileSlotsBody 주석 참고) — save_empty 가 없으면 전자만 빠지고, escMenu 가 있는 한
+  // 후자(fixed 썸네일 칸 + "빈 슬롯" 오버레이)는 다른 ESC 그룹들과 똑같이 나온다.
+  it('save_idle/save_hover 만 있어도(save_empty 없음) 배경 style 분기는 안 생기지만 썸네일 레이아웃은 그대로 적용된다', () => {
     const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['save_idle', 'save_hover']) } });
     const { files } = generateRenpyFiles(p);
     const sc = contentOf(files, 'game/screens.rpy');
-    expect(sc).not.toContain('FileLoadable');
+    expect(sc).not.toContain('style "esc_save_empty_button"');
+    expect(sc).not.toContain('if FileLoadable(slot):\n                            style "slot_button"');
     expect(sc).toContain('button:\n                        action FileAction(slot)');
+    expect(sc).toContain('fixed:\n                            xysize (config.thumbnail_width, config.thumbnail_height)');
+    expect(sc).toContain('if not FileLoadable(slot):\n                                text _("빈 슬롯") align (0.5, 0.5) style "esc_slot_empty_text"');
   });
 });
 
@@ -395,5 +401,55 @@ describe('generateRenpyFiles: 해상도 배율(height/1080) — 1280x720', () =>
     const border = Math.round(24 * (720 / 1080));
     expect(tail).toContain(`Frame("gui/esc/card.png", ${border}, ${border})`);
     expect(tail).not.toContain('gui.scale(');
+  });
+});
+
+// 배치시안 대조로 나온 세 가지 마무리(저장 슬롯 본문/페이지 라벨 위치/좌측 내비 기하) — 전부
+// escMenu 존재 자체로 갈리고(퀵메뉴처럼 특정 앵커 이미지를 요구하지 않는다), 안 켠 프로젝트는
+// screens.rpy 가 바이트 단위로 그대로여야 한다(회귀 0 가드는 마지막 describe).
+describe('generateRenpyFiles: ESC 저장 화면·좌측 내비 — 배치시안 마무리 3건', () => {
+  it('슬롯 본문 — 썸네일 칸 안에 스크린샷+빈 슬롯 오버레이, 캡션은 "슬롯 [slot]"/%Y.%m.%d · %H:%M', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
+    expect(sc).toContain('fixed:\n                            xysize (config.thumbnail_width, config.thumbnail_height)');
+    expect(sc).toContain('add FileScreenshot(slot) align (0.5, 0.5)');
+    expect(sc).toContain('text _("빈 슬롯") align (0.5, 0.5) style "esc_slot_empty_text"');
+    expect(sc).toContain('format=_("{#file_time}%Y.%m.%d · %H:%M"), empty=_("슬롯 [slot]"))');
+  });
+
+  it('page_label — 제목 옆 절대 위치(xalign 0.0, 음수 ypos)로 덮이고 xalign 0.5 는 안 남는다', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const tail = escStylesBlock(contentOf(generateRenpyFiles(p).files, 'game/screens.rpy'));
+    const block = styleBlock(tail, 'page_label');
+    expect(block).toContain('xalign 0.0');
+    expect(block).not.toContain('xalign 0.5');
+    expect(/ypos -\d+/.test(block)).toBe(true);
+
+    const textBlock = styleBlock(tail, 'page_label_text');
+    expect(textBlock).toContain(`size ${24}`);
+  });
+
+  it('navigation_button/return_button — xminimum/yminimum/selected_left_padding, 글자 크기 축소', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['nav_idle']) } });
+    const tail = escStylesBlock(contentOf(generateRenpyFiles(p).files, 'game/screens.rpy'));
+    for (const name of ['navigation_button', 'return_button']) {
+      const block = styleBlock(tail, name);
+      expect(block).toContain('xminimum 227');
+      expect(block).toContain('yminimum 50');
+      expect(block).toContain('selected_left_padding 62');
+    }
+    for (const name of ['navigation_button_text', 'return_button_text']) {
+      expect(styleBlock(tail, name)).toContain('size 28');
+    }
+  });
+
+  it('ESC 미사용(escMenuUi 없음)이면 위 세 변경 모두 나오지 않고 기존 문구가 그대로다(회귀 0)', () => {
+    const { files } = generateRenpyFiles(projectWith([plainScene()]));
+    const sc = contentOf(files, 'game/screens.rpy');
+    expect(sc).not.toContain('esc_slot_empty_text');
+    expect(sc).not.toContain('fixed:\n                            xysize (config.thumbnail_width');
+    expect(sc).not.toContain('슬롯 [slot]');
+    expect(sc).toContain('empty=_("빈 슬롯")');
+    expect(sc).not.toContain('selected_left_padding');
   });
 });
