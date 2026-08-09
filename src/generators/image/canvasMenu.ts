@@ -124,6 +124,33 @@ export function roundedPillPng(fill: string, border: string, w = 64, h = 48, rad
 }
 
 /**
+ * 둥근 사각형 알파 마스크 PNG — `roundedPillPng` 과 같은 Canvas 라운드 사각형 그리기(테두리는
+ * 뺐다)지만 용도가 다르다: 이건 색을 보여주는 게 아니라 Ren'Py `AlphaMask()` 에 물려 다른 이미지의
+ * 모서리를 잘라내는 스텐실이다 — 칠하는 색은 뭐든 상관없고(흰색 관례) 오직 알파 채널(사각형
+ * 안=불투명, 밖=완전 투명)만 쓰인다. 저장 슬롯 썸네일(16:9 스크린샷)을 아트의 둥근 회색 칸 모양으로
+ * 잘라내는 데 쓴다 — 크기는 escSlotThumbMetrics(renpy/gui) 가 단일 소스(screensRpy 의 AlphaMask
+ * xysize 와 반드시 같은 값이어야 마스크가 늘어나 모서리가 뭉개지지 않는다, CLAUDE.md).
+ */
+export function roundedMaskPng(w: number, h: number, radius: number): Promise<Blob> {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, w, h);
+  const r = Math.min(radius, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.arcTo(w, 0, w, h, r);
+  ctx.arcTo(w, h, 0, h, r);
+  ctx.arcTo(0, h, 0, 0, r);
+  ctx.arcTo(0, 0, w, 0, r);
+  ctx.closePath();
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  return new Promise((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
+}
+
+/**
  * 퀵메뉴 알약 PNG 2종(idle/hover)의 색 — 테마 강조색을 살짝 섞은 밝은 톤이라 어떤 장면
  * 배경 위에서도 항상 밝고, 진한 텍스트(quick_button_text)와 대비가 확보된다.
  * idle: 거의 흰색(테마 강조색 아주 옅게 섞음) / hover·selected: 강조색을 더 섞어 살짝 진해짐.

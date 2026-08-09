@@ -32,6 +32,7 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 - **`game_menu_label`엔 `ypos`가 필요** — 없으면 제목이 y=0부터 그려져 카드 위쪽(어두운 배경)에 걸쳐 잘린 것처럼 보인다.
 - **버튼 배경만 이미지로 갈아끼우면 크기는 글자 폭 그대로** — `xminimum`/`yminimum`을 에셋 규격으로 안 주면 "예" 버튼이 시안의 넓은 알약이 아니라 글자에 테두리만 두른 꼴이 된다(`confirm_button` 200×58, `confirm_frame` 680×330). `xysize`가 아니라 최소값이어야 긴 문구에서 넘치지 않는다.
 - **`add x: fit "contain" xysize(...)`는 축소 후 크기가 xysize보다 작다** — `pos`로 직접 놓으면 세로 사진이 칸 왼쪽에 쏠려 붙는다. 안쪽 `fixed`를 두고 `align (0.5, 0.5)`로 가운데 놓을 것.
+- **저장 슬롯 아트 안쪽 칸은 16:9가 아니다**(298×132 = 2.26:1). `config.thumbnail_*`을 칸 비율로 바꾸면 Ren'Py가 저장 시점에 화면을 비균등 축소해 썸네일이 찌그러진다 — 캡처는 16:9로 두고 표시할 때 `fit="cover"`로 자를 것(둥근 모서리는 `AlphaMask` + 생성 마스크 PNG, 크기는 `escSlotThumbMetrics` 단일 소스 — `screensRpy.ts`/`buildZip.ts` 양쪽이 같은 값을 써야 마스크가 안 뭉개진다).
 - **`style_prefix`로 정의된 적 없는 스타일을 부르면 죽는다**(`radio_hbox` 등) — ESC 설정 카드 배치가 위젯마다 스타일을 명시하는 이유. frame에 `style_prefix`를 걸면 프레임 자신이 `<prefix>_frame`이 돼 카드 배경도 날아간다.
 - **`hyperlink_text`는 `color`까지 줘야 한다** — 포커스를 못 받는 문맥에선 `idle_color`가 아니라 `color`를 쓴다(정보·크레딧·도움말의 `{a=}` 링크가 테마 분홍으로 남던 원인).
 - **▶ 등 기호는 이모지 치환 주의** — Ren'Py는 `TwemojiCOLRv0.ttf`를 번들하고 기본 스타일이 `prefer_emoji True`라, U+25B6(이모지 등급 UNQUALIFIED) 같은 문자가 **파란 재생버튼 이모지로 치환**된다. UI 기호엔 스타일에 `emoji_font None`을 줄 것(엔진 자체도 `00director.rpy`에서 같은 관용구 사용). 나눔고딕엔 `▶▷◆★•●`는 있고 `U+25B8·U+2023·U+27A4·✦`는 **없다**(두부).

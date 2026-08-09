@@ -637,9 +637,9 @@ export const ESC_IMAGES: {
   { id: 'slider_track', label: '슬라이더 트랙', group: '슬라이더', hint: '600×14', fileKeywords: ['슬라이더트랙'] },
   { id: 'slider_fill', label: '슬라이더 채움', group: '슬라이더', hint: '600×14', fileKeywords: ['슬라이더채움'] },
   { id: 'slider_thumb', label: '슬라이더 핸들', group: '슬라이더', hint: '28×28', fileKeywords: ['슬라이더핸들'] },
-  { id: 'save_idle', label: '저장슬롯 기본', group: '슬롯', hint: '320×190', fileKeywords: ['저장슬롯기본'] },
-  { id: 'save_hover', label: '저장슬롯 마우스오버', group: '슬롯', hint: '320×190', fileKeywords: ['저장슬롯마우스오버'] },
-  { id: 'save_empty', label: '저장슬롯 빈슬롯', group: '슬롯', hint: '320×190', fileKeywords: ['저장슬롯빈슬롯'] },
+  { id: 'save_idle', label: '저장슬롯 기본', group: '슬롯', hint: '320×190 · 안쪽 칸 298×132(여백 좌우상 11, 하 47)', fileKeywords: ['저장슬롯기본'] },
+  { id: 'save_hover', label: '저장슬롯 마우스오버', group: '슬롯', hint: '320×190 · 안쪽 칸 298×132(여백 좌우상 11, 하 47)', fileKeywords: ['저장슬롯마우스오버'] },
+  { id: 'save_empty', label: '저장슬롯 빈슬롯', group: '슬롯', hint: '320×190 · 안쪽 칸 298×132(여백 좌우상 11, 하 47)', fileKeywords: ['저장슬롯빈슬롯'] },
   { id: 'gallery_idle', label: '갤러리슬롯 기본', group: '슬롯', hint: '300×180', fileKeywords: ['갤러리슬롯기본'] },
   { id: 'gallery_locked', label: '갤러리슬롯 잠김', group: '슬롯', hint: '300×180', fileKeywords: ['갤러리슬롯잠김'] },
   { id: 'scroll_track', label: '스크롤바 트랙', group: '스크롤', hint: '10×600', fileKeywords: ['스크롤바트랙'] },
@@ -658,6 +658,14 @@ export const ESC_IMAGES: {
 export function escImageFile(id: EscImageId): string {
   return `gui/esc/${id}.png`;
 }
+
+/**
+ * 저장 슬롯 썸네일 둥근 마스크 PNG 경로(game/ 기준) — 업로드 에셋이 아니라 앱이 직접 굽는 생성물
+ * (roundedMaskPng, escSlotThumbMetrics 가 크기 단일 소스)이라 escImageFile 의 `gui/esc/<id>.png`
+ * 패턴 밖에 별도 상수로 둔다. screensRpy(AlphaMask 참조)와 buildZip(실제 PNG 배치) 양쪽이 이
+ * 상수 하나만 봐야 경로가 어긋나지 않는다.
+ */
+export const ESC_SAVE_THUMB_MASK_FILE = 'gui/esc/save_thumb_mask.png';
 
 /**
  * 파일명 → ESC 이미지 역할. 메뉴 버튼 매칭과 같은 규칙에 **`_`·`-` 제거**를 더한다

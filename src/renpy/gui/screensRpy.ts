@@ -27,6 +27,7 @@ import {
   quickButtonFile,
   QUICK_PANEL_FILE,
   escImageFile,
+  ESC_SAVE_THUMB_MASK_FILE,
 } from '../../types';
 import type { GuiLocales } from './index';
 // '../generate' 가 아니라 '../escape' 에서 직접 가져온다 — generate.ts → gui/index.ts →
@@ -116,6 +117,13 @@ export interface EscMenuPlan {
    * 배율과 또 곱하면 이중 스케일링이 된다.
    */
   scale: number;
+  /**
+   * 원본 project.height(px) — scale 과 동시에 들고 다니는 이유는 escSlotThumbMetrics(height) 를
+   * buildZip 과 **정확히 같은 인자**로 불러야 저장 슬롯 마스크 크기가 한 치도 안 어긋나기 때문
+   * (scale 만으로 height 를 역산(scale*1080)하면 부동소수 오차가 낄 여지가 생긴다 — 굳이 감수할
+   * 이유가 없어 원본값을 그대로 들고 온다).
+   */
+  height: number;
   /** ESC 메뉴 위 글자색(generate.ts 가 escColors() 로 기본값을 병합해 넘긴다 — 항상 전부 채워져 있다). */
   colors: Required<EscColors>;
 }
@@ -181,7 +189,45 @@ const ESC_LAYOUT = {
   navButtonHeight: 50,
   navTextSize: 28,
   navDotGutter: 62,
+  /**
+   * 저장 슬롯 썸네일 칸 — 실측 아트(카페테리아 저장슬롯 PNG, 320×190) 를 1.2배로 구운 값.
+   * 1.2배인 이유: 기존 셀 폭(≈396, gui.scale(256)+여백)과 거의 같아 3열 격자가 그대로 들어맞고,
+   * 320·190 둘 다 정수로 떨어진다.
+   *   전체 320×190 → 슬롯 셀 384×228(slotCellWidth/Height)
+   *   안쪽 회색 칸(x11..308,y11..142=298×132, 여백 좌·우·상 11/하 47) → 358×158, 좌상단 (13,13)
+   *   칸 모서리 반지름 ≈6 → 8
+   * ⚠️ 칸 비율(298:132 ≈ 2.26:1)은 16:9(1.78:1, 게임 스크린샷 비율)가 **아니다** — 게임 화면을
+   * 그대로 썸네일 칸에 넣으면 반드시 남거나 잘린다. config.thumbnail_width/height 는 절대 이
+   * 비율로 바꾸지 말 것(CLAUDE.md) — Ren'Py 가 저장 시점에 화면을 비균등 축소해 썸네일 자체가
+   * 찌그러진 채로 저장된다. 대신 캡처는 16:9 그대로 두고 표시할 때 `fit="cover"` 로 채워 잘라낸다
+   * (fileSlotsBody, AlphaMask 로 칸 모양대로 마스킹).
+   */
+  slotCellWidth: 384,
+  slotCellHeight: 228,
+  slotThumbLeft: 13,
+  slotThumbTop: 13,
+  slotThumbWidth: 358,
+  slotThumbHeight: 158,
+  slotThumbRadius: 8,
+  /** 칸 아래 여백(172..228) 안에서 세로 가운데 — "슬롯 N"/날짜 캡션이 시작하는 y. */
+  slotCaptionTop: 186,
 } as const;
+
+/**
+ * 저장 슬롯 썸네일 둥근 마스크의 실제 픽셀 크기(폭/높이/반지름) — ESC_LAYOUT.slotThumb* 를
+ * height/1080 배율로 굽는다. **크기 단일 소스**: screensRpy(아래 fileSlotsBody 가 AlphaMask 의
+ * xysize 로 씀)와 buildZip(마스크 PNG 를 실제 이 픽셀 크기로 그림) 이 반드시 같은 값을 써야 한다
+ * (dialogueGradientMetrics 와 같은 이유, CLAUDE.md) — 둘이 어긋나면 AlphaMask/Frame 이 마스크를
+ * 늘리거나 줄여 애써 만든 둥근 모서리가 뭉개진다.
+ */
+export function escSlotThumbMetrics(height: number): { width: number; height: number; radius: number } {
+  const scale = height / 1080;
+  return {
+    width: Math.round(ESC_LAYOUT.slotThumbWidth * scale),
+    height: Math.round(ESC_LAYOUT.slotThumbHeight * scale),
+    radius: Math.round(ESC_LAYOUT.slotThumbRadius * scale),
+  };
+}
 
 /**
  * 원본(텍스트 메뉴) screen main_menu() 정의 — base 템플릿의 `${mainMenuScreen}` 자리에 그대로
@@ -1032,12 +1078,20 @@ ${languagePrefs}            hbox:
  * screen file_slots(title) 의 grid 안 슬롯 button: 본문. `escMenu` 가 없으면 지금 출력을 **글자
  * 하나 안 바꾸고** 그대로 반환한다(회귀 0 — preferencesBody 와 같은 계약).
  *
- * 있으면 시안대로 썸네일 칸(`config.thumbnail_width/height` — 스크린샷 실제 픽셀 크기와 어긋나면
- * 안 되는 값이라 새 상수를 만들지 않고 그대로 쓴다) 안에 스크린샷을 가운데 놓고, 비어 있으면 같은
- * 칸 가운데에 "빈 슬롯"을 겹쳐 놓는다(칸 아래 캡션은 "슬롯 N"/날짜로 분리 — slot_time_text/
- * slot_name_text, escPaletteStyles 의 xalign 0.0 좌하단 정렬 참고). `fixed:` + `align (0.5, 0.5)`
- * 인 이유는 CLAUDE.md 의 `fit "contain"` + `pos` 함정과 같다 — 직접 `pos` 로 놓으면 세로 스크린샷이
- * 칸 한쪽으로 쏠려 붙는다.
+ * 있으면 실측 아트 규격(ESC_LAYOUT 의 slotCell·slotThumb 계열)대로 **절대 배치**로 바꾼다 — 예전엔
+ * `has vbox` 로 스크린샷·캡션이 순서대로 쌓이기만 해서, 셀 크기가 아트의 안쪽 회색 칸(298×132,
+ * 16:9 가 아니다)과 안 맞으면 썸네일이 칸보다 작게 위로 치우쳐 그려지고 "슬롯 N" 캡션이 칸을
+ * 침범했다(실기 스크린샷으로 발견 — lint 로는 안 잡힌다). 지금은:
+ *   - `button: xysize (slotCellWidth, slotCellHeight)` 로 셀 자체를 아트 비율(384×228)에 고정.
+ *   - 안쪽 `fixed: pos(slotThumbLeft, slotThumbTop) xysize(slotThumbWidth, slotThumbHeight)` 가
+ *     칸 자리. `config.thumbnail_*` 는 16:9 캡처 그대로 두고(칸 비율로 바꾸면 저장 시점에 Ren'Py 가
+ *     화면을 비균등 축소해 썸네일 자체가 찌그러진다 — CLAUDE.md) `fit="cover"` 로 채워 자른 뒤,
+ *     `AlphaMask` 로 둥근 모서리 마스크(escSlotThumbMetrics 가 크기 단일 소스, buildZip 이 같은
+ *     크기로 PNG 를 굽는다)를 씌워 칸 모양대로 잘라낸다.
+ *   - 캡션(슬롯 N/날짜·세이브명)은 칸 밖 `slotCaptionTop` 에 `pos` 로 직접 놓는다 — 이제 fixed
+ *     안의 자식이라 `escPaletteStyles` 쪽 `slot_time_text`/`slot_name_text` 의 `xalign` 은
+ *     제거해야 한다(앵커가 pos 와 xalign 을 동시에 두고 싸운다). 세이브명은 칸 우측 끝
+ *     (slotThumbLeft+slotThumbWidth)에 `xanchor 1.0` 으로 오른쪽 정렬한다(시안 배치).
  *
  * 배경 이미지 선택(esc_save_empty_button 스타일 분기 — 기존 `fileSlotStyleBlock` 을 이 함수가
  * 흡수했다)과 이 레이아웃은 서로 독립적인 문제라 게이트 조건이 다르다: 배경 분기는 `save_empty`
@@ -1072,28 +1126,41 @@ function fileSlotsBody(escMenu: EscMenuPlan | undefined): string {
                         key "save_delete" action FileDelete(slot)`;
   }
 
+  const cellW = px(escMenu, ESC_LAYOUT.slotCellWidth);
+  const cellH = px(escMenu, ESC_LAYOUT.slotCellHeight);
+  const thumbLeft = px(escMenu, ESC_LAYOUT.slotThumbLeft);
+  const thumbTop = px(escMenu, ESC_LAYOUT.slotThumbTop);
+  const thumb = escSlotThumbMetrics(escMenu.height); // buildZip 의 마스크 PNG 픽셀 크기와 같은 함수(단일 소스).
+  const captionTop = px(escMenu, ESC_LAYOUT.slotCaptionTop);
+  const captionRight = thumbLeft + thumb.width; // 칸 우측 끝 — 세이브명 오른쪽 정렬 기준점.
+
   // empty=_("슬롯 [slot]") 의 [slot] 은 화면 스코프 변수(screen file_slots 의 for 루프)를 Ren'Py
   // 가 text 보간 시점에 치환한다 — lint 로는 확인 불가, 실기에서 "슬롯 2" 로 나오는지 확인 필요.
   const I = (n: number) => ' '.repeat(n);
   return [
     `${I(20)}button:${styleBranch}`,
     `${I(24)}action FileAction(slot)`,
+    `${I(24)}xysize (${cellW}, ${cellH})`,
     '',
-    `${I(24)}has vbox`,
+    `${I(24)}has fixed`,
     '',
     `${I(24)}fixed:`,
-    `${I(28)}xysize (config.thumbnail_width, config.thumbnail_height)`,
+    `${I(28)}pos (${thumbLeft}, ${thumbTop})`,
+    `${I(28)}xysize (${thumb.width}, ${thumb.height})`,
     '',
-    `${I(28)}add FileScreenshot(slot) align (0.5, 0.5)`,
+    `${I(28)}add AlphaMask(Transform(FileScreenshot(slot), fit="cover", xysize=(${thumb.width}, ${thumb.height})), "${ESC_SAVE_THUMB_MASK_FILE}")`,
     '',
     `${I(28)}if not FileLoadable(slot):`,
     `${I(32)}text _("빈 슬롯") align (0.5, 0.5) style "esc_slot_empty_text"`,
     '',
     `${I(24)}text FileTime(slot, format=_("{#file_time}%Y.%m.%d · %H:%M"), empty=_("슬롯 [slot]")):`,
     `${I(28)}style "slot_time_text"`,
+    `${I(28)}pos (${thumbLeft}, ${captionTop})`,
     '',
     `${I(24)}text FileSaveName(slot):`,
     `${I(28)}style "slot_name_text"`,
+    `${I(28)}pos (${captionRight}, ${captionTop})`,
+    `${I(28)}xanchor 1.0`,
     '',
     `${I(24)}key "save_delete" action FileDelete(slot)`,
   ].join('\n');
@@ -1669,15 +1736,15 @@ style page_label_text:
     size ${s(L.pageLabelSize)}
     textalign 0.0
 
-## 저장 슬롯 캡션 — 시안은 칸 안 좌하단(기본은 가운데 정렬), 글자 크기도 시안 실측치로 줄인다.
+## 저장 슬롯 캡션 — 색·크기만 여기서 정한다(위치는 fileSlotsBody 가 fixed 안에서 pos 로 직접
+## 놓는다). ⚠️ xalign 을 같이 주지 말 것 — fixed 의 자식은 pos 가 절대좌표 앵커라 xalign 과 함께
+## 주면 둘이 앵커를 두고 싸운다(실기에서 캡션이 튀는 원인 — 배치시안 대조로 발견).
 style slot_time_text:
     color "${c.body}"
-    xalign 0.0
     size ${s(L.slotCaptionSize)}
 
 style slot_name_text:
     color "${c.muted}"
-    xalign 0.0
     size ${s(L.slotCaptionSize)}
 
 style confirm_prompt_text:

@@ -254,8 +254,8 @@ describe('generateRenpyFiles: escMenuUi 에 save_empty 가 없어도 file_slots 
     const sc = contentOf(files, 'game/screens.rpy');
     expect(sc).not.toContain('style "esc_save_empty_button"');
     expect(sc).not.toContain('if FileLoadable(slot):\n                            style "slot_button"');
-    expect(sc).toContain('button:\n                        action FileAction(slot)');
-    expect(sc).toContain('fixed:\n                            xysize (config.thumbnail_width, config.thumbnail_height)');
+    expect(sc).toContain('button:\n                        action FileAction(slot)\n                        xysize (384, 228)');
+    expect(sc).toContain('fixed:\n                            pos (13, 13)\n                            xysize (358, 158)');
     expect(sc).toContain('if not FileLoadable(slot):\n                                text _("빈 슬롯") align (0.5, 0.5) style "esc_slot_empty_text"');
   });
 });
@@ -408,13 +408,27 @@ describe('generateRenpyFiles: 해상도 배율(height/1080) — 1280x720', () =>
 // escMenu 존재 자체로 갈리고(퀵메뉴처럼 특정 앵커 이미지를 요구하지 않는다), 안 켠 프로젝트는
 // screens.rpy 가 바이트 단위로 그대로여야 한다(회귀 0 가드는 마지막 describe).
 describe('generateRenpyFiles: ESC 저장 화면·좌측 내비 — 배치시안 마무리 3건', () => {
-  it('슬롯 본문 — 썸네일 칸 안에 스크린샷+빈 슬롯 오버레이, 캡션은 "슬롯 [slot]"/%Y.%m.%d · %H:%M', () => {
+  it('슬롯 본문 — 실측 아트 규격(320×190) 을 1.2배 구운 절대 배치, 썸네일은 둥근 마스크로 잘라낸다', () => {
     const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
     const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
-    expect(sc).toContain('fixed:\n                            xysize (config.thumbnail_width, config.thumbnail_height)');
-    expect(sc).toContain('add FileScreenshot(slot) align (0.5, 0.5)');
+    // 셀 자체가 아트 비율(384×228)로 고정 — 예전엔 has vbox 라 셀 크기를 못 정했다.
+    expect(sc).toContain('button:\n                        action FileAction(slot)\n                        xysize (384, 228)');
+    // 안쪽 회색 칸(298×132 를 1.2배 구운 358×158, 좌상단 13,13) — 16:9 스크린샷을 fit=cover 로
+    // 채워 자른 뒤 AlphaMask 로 칸 모양(둥근 모서리)대로 마스킹한다.
+    expect(sc).toContain('fixed:\n                            pos (13, 13)\n                            xysize (358, 158)');
+    expect(sc).toContain('add AlphaMask(Transform(FileScreenshot(slot), fit="cover", xysize=(358, 158)), "gui/esc/save_thumb_mask.png")');
     expect(sc).toContain('text _("빈 슬롯") align (0.5, 0.5) style "esc_slot_empty_text"');
-    expect(sc).toContain('format=_("{#file_time}%Y.%m.%d · %H:%M"), empty=_("슬롯 [slot]"))');
+    // 캡션은 칸 아래 여백(slotCaptionTop=186)에 절대좌표로 — 날짜는 칸 좌측, 세이브명은 칸 우측
+    // 끝(371=13+358)에 xanchor 1.0 으로 오른쪽 정렬(시안 배치).
+    expect(sc).toContain('text FileTime(slot, format=_("{#file_time}%Y.%m.%d · %H:%M"), empty=_("슬롯 [slot]")):\n                            style "slot_time_text"\n                            pos (13, 186)');
+    expect(sc).toContain('text FileSaveName(slot):\n                            style "slot_name_text"\n                            pos (371, 186)\n                            xanchor 1.0');
+  });
+
+  it('slot_time_text/slot_name_text 스타일엔 xalign 이 없다(fixed 안에서 pos 와 앵커가 안 싸우게)', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const tail = escStylesBlock(contentOf(generateRenpyFiles(p).files, 'game/screens.rpy'));
+    expect(styleBlock(tail, 'slot_time_text')).not.toContain('xalign');
+    expect(styleBlock(tail, 'slot_name_text')).not.toContain('xalign');
   });
 
   it('page_label — 제목 옆 절대 위치(xalign 0.0, 음수 ypos)로 덮이고 xalign 0.5 는 안 남는다', () => {
@@ -447,9 +461,13 @@ describe('generateRenpyFiles: ESC 저장 화면·좌측 내비 — 배치시안 
     const { files } = generateRenpyFiles(projectWith([plainScene()]));
     const sc = contentOf(files, 'game/screens.rpy');
     expect(sc).not.toContain('esc_slot_empty_text');
-    expect(sc).not.toContain('fixed:\n                            xysize (config.thumbnail_width');
+    expect(sc).not.toContain('AlphaMask(');
+    expect(sc).not.toContain('gui/esc/save_thumb_mask.png');
+    expect(sc).not.toContain('xysize (384, 228)');
     expect(sc).not.toContain('슬롯 [slot]');
     expect(sc).toContain('empty=_("빈 슬롯")');
     expect(sc).not.toContain('selected_left_padding');
+    // 기존(회귀 0) 경로는 원래 has vbox + config.thumbnail_* 그대로.
+    expect(sc).toContain('has vbox\n\n                        add FileScreenshot(slot) xalign 0.5');
   });
 });

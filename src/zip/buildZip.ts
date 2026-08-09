@@ -18,19 +18,21 @@ import {
   WINDOW_ICON_FILE,
   ESC_IMAGES,
   escImageFile,
+  ESC_SAVE_THUMB_MASK_FILE,
 } from '../types';
 import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName, extFromMime } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
 import { sanitizeAscii } from '../project/safeName';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { canvasSprite } from '../generators/image/canvasSprite';
-import { menuBackdropPng, solidPng, buttonBgAssets, textboxGradientPng, roundedPillPng, quickPillAssets } from '../generators/image/canvasMenu';
+import { menuBackdropPng, solidPng, buttonBgAssets, textboxGradientPng, roundedPillPng, roundedMaskPng, quickPillAssets } from '../generators/image/canvasMenu';
 import {
   resolveTheme,
   dialogueGradientMetrics,
   dialogueGradientColor,
   DEFAULT_GRADIENT_OPACITY,
   DEFAULT_GRADIENT_HEIGHT,
+  escSlotThumbMetrics,
 } from '../renpy/gui';
 import { loadFontCatalog, fontById, DEFAULT_FONT } from '../fonts/fontCatalog';
 import { ensureFontBlob, ensureFontLicense } from '../fonts/fontCache';
@@ -360,6 +362,18 @@ export async function collectProjectFiles(
     const blob = escArtBlobs.get(assetId);
     if (!blob) continue; // 방어적(resolveEscMenuArt 를 거쳤으면 항상 있어야 함).
     out.push({ path: `game/${escImageFile(img.id)}`, data: blob });
+  }
+
+  // 저장 슬롯 둥근 마스크(업로드 에셋이 아니라 앱이 직접 굽는 생성물) — screensRpy 의 fileSlotsBody 는
+  // escMenu 활성(어떤 ESC 롤이든 하나라도 업로드 — buildEscMenuPlan, generate.ts 의 게이트와 정확히
+  // 같은 조건)일 때만 AlphaMask 로 이 경로를 참조하므로, 여기서도 같은 조건을 다시 계산해 짝을
+  // 맞춘다(어긋나면 반대쪽은 참조하는데 파일이 없는 zip 불변식 위반, 이쪽만 켜지면 안 쓰는 파일을
+  // 매 빌드마다 굽는 낭비). 크기는 escSlotThumbMetrics 단일 소스 — screensRpy 의 AlphaMask xysize 와
+  // 반드시 같은 값이어야 마스크가 늘어나 모서리가 뭉개지지 않는다(CLAUDE.md).
+  const escMenuActive = ESC_IMAGES.some((img) => !!effectiveEscMenuUi?.images?.[img.id]);
+  if (escMenuActive) {
+    const { width, height, radius } = escSlotThumbMetrics(project.height);
+    out.push({ path: `game/${ESC_SAVE_THUMB_MASK_FILE}`, data: await roundedMaskPng(width, height, radius) });
   }
 
   // 게임 아이콘 — ico 는 **game/ 밖 프로젝트 루트**로 나간다(Ren'Py 런처가 거기만 본다).

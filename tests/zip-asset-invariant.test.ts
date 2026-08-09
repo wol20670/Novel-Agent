@@ -54,8 +54,8 @@ vi.mock('../src/generators/image/canvasSprite', () => ({
 }));
 
 // canvasMenu 는 buttonBgAssets/quickPillAssets 처럼 Canvas 를 전혀 안 쓰는 순수 함수(색상 목록
-// 반환)도 내보낸다 — 이 둘은 실제 구현을 그대로 쓰고, Canvas 를 쓰는 4개(menuBackdropPng/solidPng/
-// textboxGradientPng/roundedPillPng)만 Blob 을 즉시 반환하도록 바꾼다.
+// 반환)도 내보낸다 — 이 둘은 실제 구현을 그대로 쓰고, Canvas 를 쓰는 5개(menuBackdropPng/solidPng/
+// textboxGradientPng/roundedPillPng/roundedMaskPng)만 Blob 을 즉시 반환하도록 바꾼다.
 vi.mock('../src/generators/image/canvasMenu', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/generators/image/canvasMenu')>();
   return {
@@ -64,6 +64,7 @@ vi.mock('../src/generators/image/canvasMenu', async (importOriginal) => {
     solidPng: vi.fn(async () => new Blob(['stub:solid'], { type: 'image/png' })),
     textboxGradientPng: vi.fn(async () => new Blob(['stub:textbox-gradient'], { type: 'image/png' })),
     roundedPillPng: vi.fn(async () => new Blob(['stub:pill'], { type: 'image/png' })),
+    roundedMaskPng: vi.fn(async () => new Blob(['stub:mask'], { type: 'image/png' })),
   };
 });
 
@@ -280,11 +281,36 @@ describe('zip 에셋 불변식 매트릭스', () => {
   });
 
   it('9) ESC 메뉴 23종 역할 전부 업로드(bg 포함 — game/gui/game_menu.png 로 옮겨 씀)', async () => {
-    await expectNoDangling(kitchenSinkProject({ escMenuUi: allEscImages() }));
+    const project = kitchenSinkProject({ escMenuUi: allEscImages() });
+    await expectNoDangling(project);
+    // 저장 슬롯 둥근 마스크(업로드 에셋이 아니라 생성물) — fileSlotsBody 가 AlphaMask 로 참조하는
+    // ESC_SAVE_THUMB_MASK_FILE 경로가 실제 파일 목록에도 있어야 한다(danglingRefs 는 참조만 보고
+    // 자동 교차검증하지만, "생성물이라 애초에 안 만들어졌다" 케이스는 참조 자체가 없으면 못 잡으므로
+    // 여기서 파일 존재를 직접 확인한다).
+    const { files } = await collectProjectFiles(project);
+    expect(files.some((f) => f.path === 'game/gui/esc/save_thumb_mask.png')).toBe(true);
   });
 });
 
 // ── 타겟 회귀 3건 ────────────────────────────────────────────────────────────
+
+describe("회귀 (g): 저장 슬롯 마스크(gui/esc/save_thumb_mask.png)는 escMenu 활성일 때만 만들어진다", () => {
+  it('escMenuUi 자체가 없으면 마스크 파일도 안 만든다(회귀 0 — 안 쓰는 파일을 매 빌드마다 굽지 않는다)', async () => {
+    const { files } = await collectProjectFiles(plainProject());
+    expect(files.some((f) => f.path === 'game/gui/esc/save_thumb_mask.png')).toBe(false);
+  });
+
+  it('ESC 롤 하나만(save 그룹과 무관한 card) 업로드해도 escMenu 활성 조건과 같아서 마스크가 만들어진다', async () => {
+    // buildEscMenuPlan(generate.ts) 의 게이트가 "어떤 롤이든 하나" 이므로, buildZip 의 마스크
+    // push 조건도 짝을 맞춰 같은 기준이어야 한다 — save_idle 류만 트리거하는 걸로 오판하면
+    // save 슬롯 없이 다른 그룹만 켠 프로젝트에서 참조(AlphaMask)는 없지만 스타일 활성화 자체는
+    // 되므로(escMenu 존재 하나로 fileSlotsBody 전체가 갈린다) 파일이 빠지는 게 오히려 문제다.
+    const project = kitchenSinkProject({ escMenuUi: { images: { card: 'asset-esc-card' } } });
+    const { files } = await collectProjectFiles(project);
+    expect(files.some((f) => f.path === 'game/gui/esc/save_thumb_mask.png')).toBe(true);
+    await expectNoDangling(project);
+  });
+});
 
 describe('회귀 (a): 메뉴 버튼 assetId 는 있지만 실제 blob 이 사라진 경우(고아 참조)', () => {
   it('screens.rpy 는 blob 이 사라진 상태를 아예 참조하지 않는다(gui.rpy 생성 전에 미리 가지치기)', async () => {
