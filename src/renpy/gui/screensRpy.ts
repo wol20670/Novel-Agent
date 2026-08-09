@@ -726,14 +726,16 @@ function languagePrefGroups(locales?: GuiLocales): { label: string; items: { lab
 }
 
 /**
- * 보관함(아이템·CG 갤러리) 공용 다시보기 라이트박스 — 모달(닫기/Esc 로 종료), tag 없음이라
- * 어느 갤러리 위에 겹쳐 떠도 상관없다. hasItems 또는 hasCg 둘 중 하나라도 있으면 딱 1번만 방출된다
- * (둘 다 있다고 두 번 내면 Ren'Py 의 "화면 중복 정의" 에러가 난다).
+ * 보관함(아이템·CG 갤러리) 공용 다시보기 라이트박스 — 모달(아무 곳이나 클릭 / Esc 로 종료),
+ * tag 없음이라 어느 갤러리 위에 겹쳐 떠도 상관없다. hasItems 또는 hasCg 둘 중 하나라도 있으면
+ * 딱 1번만 방출된다(둘 다 있다고 두 번 내면 Ren'Py 의 "화면 중복 정의" 에러가 난다).
  */
 const GALLERY_LIGHTBOX = String.raw`
 
-## 보관함에서 다시보기 — 모달 라이트박스(닫기/Esc 로 종료). tag 없음 = 갤러리 위에 겹쳐 뜬다.
-screen gallery_lightbox(img, caption):
+## 보관함에서 다시보기 — 모달 라이트박스(아무 곳이나 클릭 / Esc 로 종료). tag 없음 = 갤러리 위에
+## 겹쳐 뜬다. 이름 캡션·닫기 버튼은 두지 않는다 — item_popup 과 같은 이유(딤 배경 위 텍스트버튼
+## 기본색이 대비가 약해 거의 안 보였음, CLAUDE.md) 로 dismiss 한 방으로 통일했다.
+screen gallery_lightbox(img):
     modal True
     zorder 100
     add Solid("#000000cc")
@@ -741,17 +743,9 @@ screen gallery_lightbox(img, caption):
         fit "contain"
         ysize int(config.screen_height * 0.6)
         anchor (0.5, 0.5)
-        pos (0.5, 0.45)
-    text caption:
-        xalign 0.5
-        ypos 0.82
-        size gui.name_text_size
-        color gui.accent_color
-    textbutton _("닫기"):
-        xalign 0.5
-        ypos 0.9
-        action Hide("gallery_lightbox")
+        pos (0.5, 0.5)
     key "game_menu" action Hide("gallery_lightbox")
+    dismiss action Hide("gallery_lightbox")
 `;
 
 /**
@@ -908,7 +902,7 @@ function galleryGrid(escMenu: EscMenuPlan | undefined, spec: GalleryGridSpec): s
                     if ${spec.seenExpr}:
                         button:
                             xysize (gui.scale(${spec.legacyCell}), gui.scale(${cellH}))
-                            action Show("gallery_lightbox", img=${spec.tagVar}, caption=${spec.nameVar})
+                            action Show("gallery_lightbox", img=${spec.tagVar})
                             add ${spec.tagVar}:
                                 fit "contain"
                                 xysize (gui.scale(${spec.legacyImage}), gui.scale(${imgH}))
@@ -950,7 +944,7 @@ function galleryGrid(escMenu: EscMenuPlan | undefined, spec: GalleryGridSpec): s
                 if ${spec.seenExpr}:
                     button:${idleStyleLine}
                         xysize (${s(spec.cellWidth)}, ${s(spec.cellHeight)})
-                        action Show("gallery_lightbox", img=${spec.tagVar}, caption=${spec.nameVar})
+                        action Show("gallery_lightbox", img=${spec.tagVar})
                         has fixed
                         fixed:
                             pos (${s(thumb.left)}, ${s(thumb.top)})

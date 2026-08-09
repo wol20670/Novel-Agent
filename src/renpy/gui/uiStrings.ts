@@ -54,7 +54,6 @@ export const UI_STRINGS: UiTr[] = [
   { ko: '정보', en: 'About', ja: 'アバウト' },
   { ko: '도움말', en: 'Help', ja: 'ヘルプ' },
   { ko: '돌아가기', en: 'Return', ja: '戻る' },
-  { ko: '닫기', en: 'Close', ja: '閉じる' },
   { ko: '버전 [config.version!t]\n', en: 'Version [config.version!t]\n', ja: 'バージョン [config.version!t]\n' },
   // 갤러리(발견한 아이템 · 감상한 CG)
   { ko: '발견한 아이템', en: 'Items Found', ja: '発見したアイテム' },

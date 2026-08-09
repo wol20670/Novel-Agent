@@ -43,7 +43,7 @@ describe('generateRenpyFiles: CG 갤러리 출력', () => {
   it('screens.rpy 에 갤러리 화면·라이트박스·내비 버튼이 들어간다', () => {
     const sc = contentOf(files, 'game/screens.rpy');
     expect(sc).toContain('screen cg_gallery():');
-    expect(sc).toContain('screen gallery_lightbox(img, caption):');
+    expect(sc).toContain('screen gallery_lightbox(img):');
     expect(sc).toContain('textbutton _("감상한 CG") action ShowMenu("cg_gallery")');
   });
 });
@@ -78,6 +78,58 @@ describe('generateRenpyFiles: 아이템·CG 갤러리가 함께 있어도 galler
     expect(sc).toContain('screen cg_gallery():');
     expect(sc).toContain('textbutton _("발견한 아이템") action ShowMenu("item_gallery")');
     expect(sc).toContain('textbutton _("감상한 CG") action ShowMenu("cg_gallery")');
+  });
+});
+
+describe('generateRenpyFiles: gallery_lightbox 는 이름 캡션·닫기 버튼 없이 dismiss 로 닫힌다', () => {
+  const lines: Line[] = [
+    { kind: 'item', name: '편지' },
+    { kind: 'cg', desc: '노을 아래 재회' },
+  ];
+  const p = projectWith([scene({ cg: ['노을 아래 재회'], lines })]);
+  const { files } = generateRenpyFiles(p);
+  const sc = contentOf(files, 'game/screens.rpy');
+  // gallery_lightbox 정의만 잘라낸다(다음 screen 정의 직전까지) — item_popup 등 다른 화면의
+  // 비슷한 문구(예: 주석 속 "닫기")와 안 섞이게.
+  const start = sc.indexOf('screen gallery_lightbox(img):');
+  const end = sc.indexOf('\nscreen ', start + 1);
+  const block = sc.slice(start, end);
+
+  it('caption 텍스트·닫기 버튼 블록이 없다', () => {
+    expect(block).not.toContain('text caption:');
+    expect(block).not.toContain('textbutton _("닫기")');
+  });
+
+  it('dismiss 로 화면 아무 곳이나 클릭하면 닫힌다(item_popup 과 같은 패턴)', () => {
+    expect(block).toContain('dismiss action Hide("gallery_lightbox")');
+  });
+
+  it('Show("gallery_lightbox", ...) 호출 2곳(아이템·CG) 모두 caption= 을 안 넘긴다', () => {
+    expect(sc).not.toContain('caption=');
+    expect(sc).toContain('action Show("gallery_lightbox", img=it_tag)');
+    expect(sc).toContain('action Show("gallery_lightbox", img=cg_tag)');
+  });
+
+  it('갤러리 목록 칸 아래 이름 캡션은 그대로 남아 있다(라이트박스 안의 이름만 지운 것)', () => {
+    expect(sc).toContain('text it_name xalign 0.5 size gui.scale(16)');
+    expect(sc).toContain('text cg_name xalign 0.5 size gui.scale(16)');
+  });
+});
+
+describe('generateRenpyFiles: ESC 이미지 GUI 켠 구성에서도 gallery_lightbox Show 호출에 caption 없음', () => {
+  it('escMenuUi 가 있어도(비-회귀 대상인 galleryGrid ESC 분기) caption= 이 안 붙는다', () => {
+    const lines: Line[] = [
+      { kind: 'item', name: '편지' },
+      { kind: 'cg', desc: '노을 아래 재회' },
+    ];
+    const p = projectWith([scene({ cg: ['노을 아래 재회'], lines })], {
+      escMenuUi: { images: { card: 'card_asset' } },
+    });
+    const { files } = generateRenpyFiles(p);
+    const sc = contentOf(files, 'game/screens.rpy');
+    expect(sc).not.toContain('caption=');
+    expect(sc).toContain('action Show("gallery_lightbox", img=it_tag)');
+    expect(sc).toContain('action Show("gallery_lightbox", img=cg_tag)');
   });
 });
 
