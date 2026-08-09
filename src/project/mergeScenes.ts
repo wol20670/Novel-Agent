@@ -49,13 +49,14 @@ export interface MergePreview {
 }
 
 /**
- * 라인의 "내용 동일성" 키 — kind/화자/본문(또는 아이템 이름·CG 설명)이 전부 같아야 같은 라인으로 본다.
- * item/cg 라인은 이 필드들만으로 완전한 동일성 판정이 된다(추가 메타 없음).
+ * 라인의 "내용 동일성" 키 — kind/화자/본문(또는 아이템 이름·CG 설명·BGM 곡명)이 전부 같아야 같은
+ * 라인으로 본다. item/cg/bgm 라인은 이 필드들만으로 완전한 동일성 판정이 된다(추가 메타 없음).
  */
 function lineKey(line: Line): string {
   if (line.kind === 'dialogue') return `dialogue|${line.speaker}|${line.text}`;
   if (line.kind === 'narration') return `narration||${line.text}`;
   if (line.kind === 'item') return `item|${line.name}|`;
+  if (line.kind === 'bgm') return `bgm|${line.name}|`;
   return `cg||${line.desc}`;
 }
 
@@ -101,11 +102,11 @@ function carryLineMeta(next: Line, prev: Line): Line {
 
 /**
  * 발음이 같은 줄로 볼 수 있는 느슨한 키 — kind·화자는 그대로 두고 본문에서 공백·문장부호만 제거한다.
- * item/cg 는 이름·설명이 곧 판정 기준이라 느슨화할 게 없어 lineKey 를 그대로 재사용한다.
+ * item/cg/bgm 은 이름·설명이 곧 판정 기준이라 느슨화할 게 없어 lineKey 를 그대로 재사용한다.
  * 정규식은 보수적으로(한글·영문·숫자는 항상 보존) 흔한 문장부호·공백류만 걸러낸다.
  */
 function loosePronKey(line: Line): string {
-  if (line.kind === 'item' || line.kind === 'cg') return lineKey(line);
+  if (line.kind === 'item' || line.kind === 'cg' || line.kind === 'bgm') return lineKey(line);
   const strip = (s: string) =>
     s.replace(/[\s.,!?…‥~·:;"'“”‘’「」『』()[\]{}<>《》〈〉ㆍ―—\-–．，！？：；（）]/g, '');
   if (line.kind === 'dialogue') return `dialogue|${line.speaker}|${strip(line.text)}`;

@@ -321,6 +321,15 @@ function LineRow({
       </div>
     );
   }
+  // BGM 시작 위치 마커 — 이 지점부터 곡이 재생된다(편집/번역/표정 없이 칩으로만 표시).
+  if (line.kind === 'bgm') {
+    return (
+      <div className="flex items-center gap-1.5 py-0.5 text-xs">
+        <span className="rounded px-1.5 py-0.5 border border-amber-500/40 text-amber-500 bg-amber-500/5 shrink-0">🎵 BGM 시작</span>
+        <span className="text-gray-300">{line.name}</span>
+      </div>
+    );
+  }
   const isDlg = line.kind === 'dialogue';
 
   return (

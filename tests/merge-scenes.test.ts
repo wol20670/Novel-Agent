@@ -158,6 +158,53 @@ describe('mergeScenes: 재분석(엑셀/텍스트) 시 기존 에셋·번역·�
     expect(line.emotionAuto).toBe('기쁨');
   });
 
+  it('merge: BGM 위치 마커(kind:bgm) 라인이 재분석 병합에서도 그대로 보존된다(CG로 오인되지 않음)', () => {
+    const lines: Line[] = [
+      { kind: 'dialogue', speaker: '민주', text: '안녕' },
+      { kind: 'bgm', name: '테마곡' },
+      { kind: 'dialogue', speaker: '민주', text: '잘 가' },
+    ];
+    const prev: Scene[] = [
+      scene('s1', '장면1', { bgm: '테마곡', bgmAssetId: 'bgmA', lines: [...lines] }),
+    ];
+    const next: Scene[] = [scene('n1', '장면1', { bgm: '테마곡', lines: [...lines] })];
+
+    const result = mergeScenes(prev, next, 'merge');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('s1'); // 이름 매칭 — 기존 장면으로 승계
+    expect(result[0].bgmAssetId).toBe('bgmA'); // 장면 수준 에셋 재연결
+    expect(result[0].lines.map((l) => l.kind)).toEqual(['dialogue', 'bgm', 'dialogue']);
+    // mergeScenes.ts:58 lineKey() 에 bgm 케이스가 없으면 마지막 return 이 무조건 `cg||${desc}` 폴백이라
+    // (desc 는 bgm 라인에 없는 필드라 undefined) 라인 내용이 CG 취급된다 — kind·name 이 그대로인지 확인.
+    expect(result[0].lines[1]).toEqual({ kind: 'bgm', name: '테마곡' });
+  });
+
+  it('merge: 곡명이 다른 BGM 마커는 같은 줄로 오인되지 않고 "바뀐 줄"로 잡힌다(lineKey 가 name 을 반영)', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '안녕' },
+          { kind: 'bgm', name: '아침곡' },
+        ],
+      }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '안녕' },
+          { kind: 'bgm', name: '밤곡' }, // 곡명만 다름
+        ],
+      }),
+    ];
+
+    const diff = diffMatchedScene(prev[0], next[0]);
+    // bgm 라인의 name 이 lineKey 에 안 실리면(예: 옛 cg 폴백) 서로 다른 곡인데도 "같은 줄"로 잡혀
+    // linesCarried 에 들어간다 — 실제로는 "바뀐 줄"(linesChanged)이어야 한다.
+    expect(diff.linesCarried).toBe(1); // "안녕" 대사만 승계
+    expect(diff.linesChanged).toBe(1); // bgm 마커는 곡명이 달라 새 줄로 잡힘
+  });
+
   it('merge: 장면 내용(라인·배경·BGM·CG)이 완전히 같으면 status가 승계되고, 대사가 바뀌면 review로 리셋된다', () => {
     const linesSame: Line[] = [{ kind: 'dialogue', speaker: '민주', text: '안녕' }];
     const prev: Scene[] = [

@@ -197,6 +197,12 @@ export class SceneBuilder {
       this.splitBeat(sc.background || v, sc.background);
       this.current!.bgm = v;
     } else {
+      // 장면의 "첫" BGM 지정이면서 이미 나온 대사/지문이 있으면 태그가 나온 그 자리에 위치
+      // 마커를 남긴다(generate.ts 가 거기서부터 play music 을 낸다). 장면 맨 앞(lines 0개)이면
+      // 마커 없이 sc.bgm 만 채운다 — 기존과 완전히 같은 출력(장면 시작 재생, 회귀 0).
+      if (!sc.bgm && sc.lines.length > 0) {
+        sc.lines.push({ kind: 'bgm', name: v });
+      }
       sc.bgm = v;
     }
   }

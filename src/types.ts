@@ -91,7 +91,13 @@ export type Line =
    * CG 배경 전환 인라인 이벤트. 이 지점부터 장면 배경을 CG로 바꾸고 스프라이트를 모두 숨긴다
    * (장면 끝까지 유지, 대사창·TTS 는 계속). desc 는 Scene.cg 항목과 트림 기준으로 매칭된다.
    */
-  | { kind: 'cg'; desc: string };
+  | { kind: 'cg'; desc: string }
+  /**
+   * BGM 시작 위치 마커. 곡 자체는 Scene.bgm/bgmAssetId(장면당 1곡)에 있고 이 라인은
+   * 대본에서 `#BGM` 태그가 나온 "그 자리"만 담는다 — 장면 맨 앞에서 지정되면(대사 이전) 굳이
+   * 마커를 남기지 않고 장면 시작 시 play music 으로 폴백한다(기존 동작·회귀 0).
+   */
+  | { kind: 'bgm'; name: string };
 
 export interface Choice {
   text: string;
@@ -975,7 +981,7 @@ export function effectiveTextLocales(p: Pick<Project, 'baseLocale' | 'textLocale
   for (const sc of p.scenes) {
     // ② 번역(i18n)이 실제로 들어 있는 언어를 자동 포함
     for (const line of sc.lines) {
-      if (line.kind === 'item' || line.kind === 'cg' || !line.i18n) continue; // 아이템·CG 라인은 번역 대상 아님
+      if (line.kind === 'item' || line.kind === 'cg' || line.kind === 'bgm' || !line.i18n) continue; // 아이템·CG·BGM 라인은 번역 대상 아님
       for (const [loc, v] of Object.entries(line.i18n) as [Locale, string | undefined][]) {
         if (v && v.trim()) set.add(loc);
       }

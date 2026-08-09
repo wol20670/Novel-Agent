@@ -51,3 +51,44 @@ describe('parser: 콜론 오인식 방지', () => {
     expect(characters.some((c) => c.name === '민주')).toBe(true);
   });
 });
+
+describe('parser: #BGM 위치 마커 (#CG 와 같은 패턴)', () => {
+  it('장면 맨 앞 #BGM 은 위치 마커를 남기지 않는다(장면 시작 재생 폴백, 회귀)', () => {
+    const text = ['#S 카페', '#BGM busy_city', '민주: 안녕'].join('\n');
+    const { scenes } = parseText(text);
+    expect(scenes[0].bgm).toBe('busy_city');
+    expect(scenes[0].lines.map((l) => l.kind)).toEqual(['dialogue']); // bgm 마커 없음
+  });
+
+  it('대사 뒤 #BGM 은 Scene.bgm 을 설정하면서 그 위치에 kind:bgm 마커를 남긴다', () => {
+    const text = ['#S 카페', '민주: 안녕', '#BGM busy_city', '민주: 잘 가'].join('\n');
+    const { scenes } = parseText(text);
+    expect(scenes[0].bgm).toBe('busy_city');
+    // 마커가 대사 사이 "그 위치"에 그대로 꽂혀야 한다 — 순서까지 확인.
+    expect(scenes[0].lines).toEqual([
+      { kind: 'dialogue', speaker: '민주', text: '안녕', emotion: undefined, i18n: undefined },
+      { kind: 'bgm', name: 'busy_city' },
+      { kind: 'dialogue', speaker: '민주', text: '잘 가', emotion: undefined, i18n: undefined },
+    ]);
+  });
+
+  it('장면 도중 곡이 다른 곡으로 바뀌면 지금처럼 장면이 분할된다(splitBeat 유지, 회귀)', () => {
+    const text = [
+      '#S 카페',
+      '민주: 안녕',
+      '#BGM morning',
+      '민주: 그리고',
+      '#BGM busy_city',
+      '민주: 끝',
+    ].join('\n');
+    const { scenes } = parseText(text);
+    expect(scenes).toHaveLength(2);
+    // 첫 비트: 첫 BGM 지정은 대사 뒤라 마커가 남는다.
+    expect(scenes[0].bgm).toBe('morning');
+    expect(scenes[0].lines.map((l) => l.kind)).toEqual(['dialogue', 'bgm', 'dialogue']);
+    // 분할된 둘째 비트: 새 장면 맨 앞에서 곡이 바로 지정되므로 마커 없음(장면 시작 재생 폴백과 동일 취급).
+    expect(scenes[1].bgm).toBe('busy_city');
+    expect(scenes[1].lines.map((l) => l.kind)).toEqual(['dialogue']);
+    expect(scenes[1].title).toContain('busy_city');
+  });
+});

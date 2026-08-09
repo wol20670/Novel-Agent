@@ -558,7 +558,12 @@ function scriptBody(
     out.push(`# ── ${commentSafe(s.title)} ──`);
     out.push(`label ${r.label}:`);
     out.push(`${indent(1)}scene ${r.bgTag} at vn_bg with ${transition}`);
-    if (r.bgmFile) out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
+    // BGM 재생: kind:'bgm' 라인 위치에서 발동(대본에서 #BGM 태그가 나온 그 자리) — 그전까지는 무음.
+    // 위치 마커가 없는 기존 저장 데이터(재파싱 전)나 장면 맨 앞에서 지정된 곡은 지금처럼 장면 시작
+    // 에서 바로 재생(폴백, 회귀 0). r.bgmFile 은 업로드본이 있을 때만 채워지므로 없으면 아무것도 안 낸다.
+    if (r.bgmFile && !s.lines.some((l) => l.kind === 'bgm')) {
+      out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
+    }
     // CG 배경 전환: kind:'cg' 라인 위치에서 발동 — 그 지점부터 배경=CG, 스프라이트 숨김(장면 끝까지),
     // 대사창·TTS 는 계속. 위치 마커가 없는 기존 저장 데이터(재파싱 전)는 첫 CG 를 장면 시작부터 배경으로 폴백.
     let cgActive = false;
@@ -598,6 +603,12 @@ function scriptBody(
           out.push(`${indent(1)}scene ${r.cgTags[cgIdx]}_scene with dissolve`);
           cgActive = true;
         }
+        continue;
+      }
+      if (line.kind === 'bgm') {
+        // 대본에서 #BGM 태그가 나온 그 위치에서 재생 시작(장면 시작 아님). r.bgmFile 이 없으면
+        // (업로드본 미등록) 없는 파일을 참조하지 않도록 아무것도 내지 않는다 — 장면 시작 게이트와 동일 규칙.
+        if (r.bgmFile) out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
         continue;
       }
       if (line.kind === 'dialogue') {
@@ -909,7 +920,7 @@ function translationFiles(project: Project, refs: SceneAssetRef[]): RenpyFile[] 
     const body: string[] = [];
     for (const r of refs) {
       for (const line of r.scene.lines) {
-        if (line.kind === 'item' || line.kind === 'cg') continue; // 아이템·CG 라인은 자막 없음
+        if (line.kind === 'item' || line.kind === 'cg' || line.kind === 'bgm') continue; // 아이템·CG·BGM 라인은 자막 없음
         const tr = line.i18n?.[loc];
         if (!tr) continue;
         const key = esc(line.text);

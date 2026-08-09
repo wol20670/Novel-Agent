@@ -33,7 +33,7 @@ export function buildSynopsis(project: Project, maxLen = 700): string {
     parts.push(`# ${s.title}`);
     if (s.background) parts.push(`(배경: ${s.background})`);
     for (const line of s.lines.slice(0, 3)) {
-      if (line.kind === 'item' || line.kind === 'cg') continue; // 아이템·CG 라인은 시놉시스에 넣지 않음
+      if (line.kind === 'item' || line.kind === 'cg' || line.kind === 'bgm') continue; // 아이템·CG·BGM 라인은 시놉시스에 넣지 않음
       parts.push(line.kind === 'dialogue' ? `${line.speaker}: ${line.text}` : line.text);
     }
     if (parts.join('\n').length > maxLen) break;

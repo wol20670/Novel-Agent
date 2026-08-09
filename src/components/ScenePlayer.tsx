@@ -234,7 +234,9 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
         : '🎁 아이템 닫기'
       : cur.kind === 'cg'
         ? `🖼 CG 배경 전환: ${cur.desc || '(설명 없음)'}`
-        : cur.text;
+        : cur.kind === 'bgm'
+          ? `🎵 BGM: ${cur.name}` // 미리보기는 오디오를 재생하지 않으므로 표시만(실제 재생은 generate.ts)
+          : cur.text;
 
   return (
     <div>
