@@ -336,6 +336,12 @@ export interface Project {
      * 어두워 외곽선이 오히려 거슬리는 게임은 꺼도 된다.
      */
     textOutline?: boolean;
+    /**
+     * 타이틀의 정보/크레딧/도움말 링크 표시(기본 true). 이 셋은 MAIN_MENU_SLOTS 에 없어 이미지 버튼
+     * 슬롯 자체가 없다 — 이미지 GUI를 쓰면 혼자 맨 텍스트로 남아 겉돈다(실기 확인). 꺼도 게임 중
+     * ESC 메뉴(screen navigation)에는 그대로 남아 있어 접근성 손실은 없다.
+     */
+    showInfoLinks?: boolean;
   };
   /**
    * 인게임 우측 퀵메뉴 이미지 GUI(업로드 전용). 비어 있으면 기존 텍스트 알약 메뉴 그대로 나간다

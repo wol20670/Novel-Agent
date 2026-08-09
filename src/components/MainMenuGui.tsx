@@ -46,6 +46,7 @@ export default function MainMenuGui() {
       <LabelEditor />
       <MenuFontControls />
       <OutlineToggle />
+      <InfoLinksToggle />
       <LayoutControls />
       <LayoutPreview />
     </section>
@@ -572,6 +573,39 @@ function OutlineToggle() {
           🖍 글자 외곽선
           <span className="block text-[10px] text-gray-500 mt-0.5">
             배경 그림이 밝아도 메뉴 글자가 읽히게 검은 외곽선을 넣습니다. 어두운 아트라 거슬리면 끄세요.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
+/**
+ * ℹ️ 정보·크레딧·도움말 링크 토글 — 기본 켜짐. 이 셋은 MAIN_MENU_SLOTS 에 없어 이미지 버튼 슬롯이
+ * 아예 없다(이미지 메뉴를 쓰면 혼자 맨 텍스트로 남아 겉돈다 — 실기 확인). 게임 중 ESC 메뉴 좌측
+ * 내비(screen navigation)에는 그대로 있으므로 타이틀에서만 꺼도 접근성 손실이 없다.
+ */
+function InfoLinksToggle() {
+  const showInfoLinks = useStore((s) => s.project.mainMenuUi?.showInfoLinks ?? true);
+  const updateProjectMeta = useStore((s) => s.updateProjectMeta);
+  return (
+    <div className="card border-edge p-3 mb-3">
+      <label className="flex items-start gap-2 text-xs text-gray-300 cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={showInfoLinks}
+          onChange={(e) => {
+            // OutlineToggle 과 같은 이유로 getState() 비반응 읽기 — 구독하면 mainMenuUi 가 바뀔
+            // 때마다(버튼 업로드 등) 이 토글도 매번 리렌더된다.
+            const prev = useStore.getState().project.mainMenuUi;
+            updateProjectMeta({ mainMenuUi: { ...prev, showInfoLinks: e.target.checked } });
+          }}
+        />
+        <span>
+          ℹ️ 정보·크레딧·도움말 링크
+          <span className="block text-[10px] text-gray-500 mt-0.5">
+            타이틀 화면에만 적용됩니다. 끄면 게임 중 ESC 메뉴에서만 볼 수 있어요.
           </span>
         </span>
       </label>

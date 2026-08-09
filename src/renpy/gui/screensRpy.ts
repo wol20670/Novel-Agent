@@ -75,6 +75,8 @@ export interface MainMenuPlan {
    * 없앤 탓에 텍스트 프리셋은 배경 아트 위에 맨몸으로 놓인다 — 외곽선으로 자체 대비를 만든다.
    */
   textOutline: boolean;
+  /** 타이틀 정보/크레딧/도움말 링크 표시(기본 true) — types.ts mainMenuUi.showInfoLinks 주석 참고. */
+  showInfoLinks: boolean;
 }
 
 /**
@@ -366,38 +368,44 @@ function buildImageMainMenuScreen(plan: MainMenuPlan): MainMenuScreenResult {
     }
   }
 
-  if (isHorizontal) {
-    // 가로 배치(hbox)에서는 정보/크레딧/도움말을 같은 hbox 에 이어붙이면 6번째 항목처럼 메뉴 행
-    // 오른쪽 끝에 붙거나(칸이 남으면) 화면 밖으로 밀려난다(실기 확인 — bottom-row 스크린샷에서
-    // "정보"가 메뉴 행에 끼어들고 크레딧·도움말은 아예 안 보였다). 세로 배치의 "같은 컨테이너에
-    // 이어붙이기"(다른 높이의 버튼과도 자연스럽게 붙는 장점)는 가로에선 성립하지 않으므로,
-    // 메뉴 행 아래 별도 hbox 로 뺀다(메뉴 행 y + 150px, 가운데 정렬).
-    const linkY = Math.round((L.y + 150) * s);
-    lines.push('');
-    lines.push(`${I(4)}hbox:`);
-    lines.push(`${I(8)}xalign 0.5`);
-    lines.push(`${I(8)}ypos ${linkY}`);
-    lines.push(`${I(8)}spacing ${linkGap}`);
-    lines.push('');
-    lines.push(`${I(8)}textbutton _("정보") action ShowMenu("about") style_prefix "mm_link"`);
-    lines.push(`${I(8)}textbutton _("크레딧") action ShowMenu("credits") style_prefix "mm_link"`);
-    lines.push('');
-    lines.push(`${I(8)}if renpy.variant("pc") or (renpy.variant("web") and not renpy.variant("mobile")):`);
-    lines.push('');
-    lines.push(`${I(12)}textbutton _("도움말") action ShowMenu("help") style_prefix "mm_link"`);
-    lines.push('');
-  } else {
-    // 세로 배치(vbox)는 기존 그대로 — 이미지 버튼 6개와 같은 vbox 안에 null 스페이서로 간격만
-    // 벌려 이어붙인다(사용자가 다른 높이의 버튼 PNG 를 올려도 자연스럽게 바로 아래 붙는다).
-    lines.push(`${I(8)}null height ${linkGap}`);
-    lines.push('');
-    lines.push(`${I(8)}textbutton _("정보") action ShowMenu("about") style_prefix "mm_link"`);
-    lines.push(`${I(8)}textbutton _("크레딧") action ShowMenu("credits") style_prefix "mm_link"`);
-    lines.push('');
-    lines.push(`${I(8)}if renpy.variant("pc") or (renpy.variant("web") and not renpy.variant("mobile")):`);
-    lines.push('');
-    lines.push(`${I(12)}textbutton _("도움말") action ShowMenu("help") style_prefix "mm_link"`);
-    lines.push('');
+  // showInfoLinks=false 면 정보/크레딧/도움말 자체를 안 낸다 — 이 셋은 MAIN_MENU_SLOTS 에 없어
+  // 이미지 버튼 슬롯이 없고, 이미지 GUI 를 쓰면 혼자 맨 텍스트로 겉돌기 때문(types.ts 주석 참고).
+  // 세로 분기의 `null height` 스페이서도 이 조건 안에 있어야 한다 — 밖에 두면 링크는 없는데
+  // 그 자리만큼 빈 여백이 버튼 아래 남는다.
+  if (plan.showInfoLinks) {
+    if (isHorizontal) {
+      // 가로 배치(hbox)에서는 정보/크레딧/도움말을 같은 hbox 에 이어붙이면 6번째 항목처럼 메뉴 행
+      // 오른쪽 끝에 붙거나(칸이 남으면) 화면 밖으로 밀려난다(실기 확인 — bottom-row 스크린샷에서
+      // "정보"가 메뉴 행에 끼어들고 크레딧·도움말은 아예 안 보였다). 세로 배치의 "같은 컨테이너에
+      // 이어붙이기"(다른 높이의 버튼과도 자연스럽게 붙는 장점)는 가로에선 성립하지 않으므로,
+      // 메뉴 행 아래 별도 hbox 로 뺀다(메뉴 행 y + 150px, 가운데 정렬).
+      const linkY = Math.round((L.y + 150) * s);
+      lines.push('');
+      lines.push(`${I(4)}hbox:`);
+      lines.push(`${I(8)}xalign 0.5`);
+      lines.push(`${I(8)}ypos ${linkY}`);
+      lines.push(`${I(8)}spacing ${linkGap}`);
+      lines.push('');
+      lines.push(`${I(8)}textbutton _("정보") action ShowMenu("about") style_prefix "mm_link"`);
+      lines.push(`${I(8)}textbutton _("크레딧") action ShowMenu("credits") style_prefix "mm_link"`);
+      lines.push('');
+      lines.push(`${I(8)}if renpy.variant("pc") or (renpy.variant("web") and not renpy.variant("mobile")):`);
+      lines.push('');
+      lines.push(`${I(12)}textbutton _("도움말") action ShowMenu("help") style_prefix "mm_link"`);
+      lines.push('');
+    } else {
+      // 세로 배치(vbox)는 기존 그대로 — 이미지 버튼 6개와 같은 vbox 안에 null 스페이서로 간격만
+      // 벌려 이어붙인다(사용자가 다른 높이의 버튼 PNG 를 올려도 자연스럽게 바로 아래 붙는다).
+      lines.push(`${I(8)}null height ${linkGap}`);
+      lines.push('');
+      lines.push(`${I(8)}textbutton _("정보") action ShowMenu("about") style_prefix "mm_link"`);
+      lines.push(`${I(8)}textbutton _("크레딧") action ShowMenu("credits") style_prefix "mm_link"`);
+      lines.push('');
+      lines.push(`${I(8)}if renpy.variant("pc") or (renpy.variant("web") and not renpy.variant("mobile")):`);
+      lines.push('');
+      lines.push(`${I(12)}textbutton _("도움말") action ShowMenu("help") style_prefix "mm_link"`);
+      lines.push('');
+    }
   }
 
   if (plan.hasLogo) {
@@ -1659,7 +1667,9 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
   const active = !!mainMenu;
   const built = mainMenu ? buildImageMainMenuScreen(mainMenu) : undefined;
   const mainMenuScreen = built ? built.text : DEFAULT_MAIN_MENU_SCREEN;
-  const mmLinkStyles = active ? MM_LINK_STYLES : '';
+  // showInfoLinks=false 면 링크 자체를 안 내므로(위 buildImageMainMenuScreen) mm_link 스타일도
+  // 같이 뺀다 — 안 쓰는 스타일 정의만 남는 걸 막는다(usesMmStyles 와 같은 취지).
+  const mmLinkStyles = active && mainMenu?.showInfoLinks ? MM_LINK_STYLES : '';
   // mm_* 스타일은 실제로 텍스트/마커 렌더가 한 번이라도 쓰였을 때만(회귀 0 — 전 슬롯 이미지 조합은
   // usesMmStyles 가 끝까지 false 라 이 블록 자체가 안 나온다).
   const mmStyles = built?.usesMmStyles ? buildMmStyles(mainMenu!) : '';

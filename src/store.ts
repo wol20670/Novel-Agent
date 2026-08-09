@@ -2580,8 +2580,9 @@ export const useStore = create<State>((set, get) => {
             // mainMenuUi.logo/buttons 의 blob 도 위 ids 에 포함돼 아래에서 IndexedDB 에서 실제로
             // 지워진다 — 여기서 같이 비우지 않으면 프로젝트가 방금 삭제한 파일을 계속 참조해
             // (buildZip 이 없는 파일을 배치하거나 screensRpy 가 없는 파일을 참조) 런타임에 깨진다.
-            // preset/layout/labels/menuFontId/menuSubFontId/textOutline 은 "배치 설정"이라 이미지가
-            // 아니므로 보존 — 이 액션의 안내 문구("대본·캐릭터 설정은 유지됩니다")와 일치시킨다.
+            // preset/layout/labels/menuFontId/menuSubFontId/textOutline/showInfoLinks 는 "배치 설정"
+            // 이라 이미지가 아니므로 보존 — 이 액션의 안내 문구("대본·캐릭터 설정은 유지됩니다")와
+            // 일치시킨다.
             mainMenuUi: s.project.mainMenuUi
               ? {
                   preset: s.project.mainMenuUi.preset,
@@ -2590,6 +2591,7 @@ export const useStore = create<State>((set, get) => {
                   menuFontId: s.project.mainMenuUi.menuFontId,
                   menuSubFontId: s.project.mainMenuUi.menuSubFontId,
                   textOutline: s.project.mainMenuUi.textOutline,
+                  showInfoLinks: s.project.mainMenuUi.showInfoLinks,
                 }
               : undefined,
           },

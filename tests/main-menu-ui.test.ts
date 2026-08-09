@@ -430,6 +430,51 @@ describe('generateRenpyFiles: 가로 배치(hbox) — 정보/크레딧/도움말
   });
 });
 
+describe('generateRenpyFiles: 정보·크레딧·도움말 링크 토글(showInfoLinks, 기본 true)', () => {
+  it('showInfoLinks: false + 세로 프리셋(right-marker) — 링크·스페이서·mm_link 스타일이 전부 안 나온다', () => {
+    const p = projectWith([plainScene()], {
+      mainMenuUi: { preset: 'right-marker', showInfoLinks: false },
+    });
+    const { files } = generateRenpyFiles(p);
+    const sc = fileOf(files, 'game/screens.rpy')!.content;
+    const block = mainMenuBlock(sc);
+    expect(block).not.toContain('ShowMenu("about")');
+    expect(block).not.toContain('ShowMenu("credits")');
+    expect(block).not.toContain('ShowMenu("help")');
+    // 링크가 없으면 버튼 아래 간격용 null 스페이서도 같이 빠져야 빈 공간이 안 남는다.
+    expect(block).not.toContain('null height');
+    // 안 쓰는 mm_link 스타일 정의(MM_LINK_STYLES)도 같이 빠진다 — mainMenuBlock 범위 밖(파일 끝
+    // 쪽)에 실리므로 전체 sc 로 검사한다.
+    expect(sc).not.toContain('mm_link');
+  });
+
+  it('showInfoLinks: false + 가로 프리셋(bottom-row) — 링크 전용 hbox(ypos 980) 자체가 없다', () => {
+    const p = projectWith([plainScene()], {
+      mainMenuUi: { preset: 'bottom-row', showInfoLinks: false },
+    });
+    const { files } = generateRenpyFiles(p);
+    const sc = fileOf(files, 'game/screens.rpy')!.content;
+    const block = mainMenuBlock(sc);
+    expect(block).not.toContain('ypos 980');
+    expect(block).not.toContain('ShowMenu("about")');
+    expect(sc).not.toContain('mm_link');
+  });
+
+  it('회귀 가드: showInfoLinks: false 여도 screen navigation(ESC 메뉴)의 정보/크레딧/도움말은 그대로 남는다', () => {
+    const p = projectWith([plainScene()], {
+      mainMenuUi: { preset: 'right-marker', showInfoLinks: false },
+    });
+    const { files } = generateRenpyFiles(p);
+    const sc = fileOf(files, 'game/screens.rpy')!.content;
+    // mm_link 가 전혀 없는 상태에서 이 substring 이 남아 있다면 출처는 screen navigation 뿐이다
+    // (mm_link 버전은 뒤에 ` style_prefix "mm_link"` 가 붙어 있어 서로 구분된다).
+    expect(sc).toContain('textbutton _("정보") action ShowMenu("about")');
+    expect(sc).toContain('textbutton _("크레딧") action ShowMenu("credits")');
+    expect(sc).toContain('textbutton _("도움말") action ShowMenu("help")');
+    expect(sc).toContain('screen navigation():');
+  });
+});
+
 describe('generateRenpyFiles: 텍스트 프리셋 글자 외곽선(textOutline, 기본 true)', () => {
   it('미지정(기본 true) — mm_button_text/mm_main_text/mm_sub_text 에 2px 검정 외곽선', () => {
     const p = projectWith([plainScene()], { mainMenuUi: { preset: 'renpy-classic' } });

@@ -1010,6 +1010,10 @@ function buildMainMenuPlan(project: Project, hasItems: boolean, hasCg: boolean):
   const hasLabelOverride = !!src.labels && Object.values(src.labels).some((l) => l?.main || l?.sub);
   const hasCustomFont = !!src.menuFontId || !!src.menuSubFontId;
   const hasPresetChange = preset.id !== DEFAULT_MAIN_MENU_PRESET;
+  // showInfoLinks 는 이 활성화 조건에 넣지 않는다 — 넣으면 이미지도 프리셋도 라벨도 안 건드린
+  // 프로젝트가 이 체크박스 하나만 꺼도 이미지 경로 레이아웃 전체(DEFAULT_MAIN_MENU_SCREEN 대신
+  // buildImageMainMenuScreen)로 넘어가는 회귀가 된다. 기본값 true 라 "일단 켜져 있는 걸 껐다"는
+  // 이미지/프리셋/라벨/폰트 중 뭔가 이미 손댄 프로젝트에서만 의미가 있다.
   if (!hasIdleImage && !src.logo && !hasPresetChange && !hasLabelOverride && !hasCustomFont) return undefined;
   // 아이템·CG 둘 다 있으면 갤러리 허브(둘 다 보여주는 중간 화면), 하나면 그걸로 바로, 없으면 비활성화.
   let galleryTarget: MainMenuPlan['galleryTarget'];
@@ -1031,6 +1035,9 @@ function buildMainMenuPlan(project: Project, hasItems: boolean, hasCg: boolean):
     // 미지정 = true(켜짐) — 배경 아트 위에 맨몸으로 놓이는 텍스트 프리셋의 기본 대비책(screensRpy.ts
     // buildMmStyles 참고). 아트가 이미 어두운 게임만 명시적으로 꺼서 없앤다.
     textOutline: project.mainMenuUi?.textOutline ?? true,
+    // 미지정 = true(켜짐) — 정보/크레딧/도움말은 이미지 버튼 슬롯이 없어 이미지 GUI 에서 혼자 맨
+    // 텍스트로 겉돈다(types.ts mainMenuUi.showInfoLinks 주석 참고). 끄면 타이틀에서만 사라진다.
+    showInfoLinks: project.mainMenuUi?.showInfoLinks ?? true,
   };
 }
 
