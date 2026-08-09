@@ -163,7 +163,13 @@ const ESC_LAYOUT = {
   prefCardPadX: 34,
   prefCardPadY: 26,
   prefCardSpacing: 30,
-  /** 갤러리 칸(발견한 아이템 4열 / 감상한 CG 3열). */
+  /**
+   * 갤러리 칸(발견한 아이템 4열 / 감상한 CG 3열). ⚠️ 기록만 — 저장 슬롯과 같은 종류의 미정렬이
+   * 남아 있다: gallery_idle/gallery_locked 실측 규격은 300×180(안쪽 칸 278×126, ESC_IMAGES 의
+   * hint 참고)인데 아래 칸 크기는 320×250/430×260 이라 비율이 안 맞아 아트가 늘어나 그려진다
+   * (galleryGrid). 저장 슬롯은 이번에 slotThumb* 상수로 실측값을 맞췄지만, 갤러리는 사용자가
+   * 아직 지적하지 않았고 화면도 별도라 이번 범위에서는 건드리지 않는다.
+   */
   itemCellWidth: 320,
   itemCellHeight: 250,
   cgCellWidth: 430,
@@ -1156,6 +1162,12 @@ function fileSlotsBody(escMenu: EscMenuPlan | undefined): string {
     `${I(24)}text FileTime(slot, format=_("{#file_time}%Y.%m.%d · %H:%M"), empty=_("슬롯 [slot]")):`,
     `${I(28)}style "slot_time_text"`,
     `${I(28)}pos (${thumbLeft}, ${captionTop})`,
+    // 앵커는 화면에서 명시하고 스타일엔 xalign 을 두지 않는다 — 테마 기본값
+    // gui.slot_button_text_xalign(=0.5, guiRpy.ts)이 xanchor 로 남아 있으면, 위 pos 는
+    // xpos 만 덮어써서 글자가 자기 폭의 절반만큼 왼쪽으로 밀린다(직전 커밋에서 slot_time_text
+    // 의 xalign 을 뺐다가 실기에서 캡션이 왼쪽으로 튄 원인). FileSaveName 의 xanchor 1.0(아래)
+    // 과 짝을 이룬다.
+    `${I(28)}xanchor 0.0`,
     '',
     `${I(24)}text FileSaveName(slot):`,
     `${I(28)}style "slot_name_text"`,
@@ -1681,6 +1693,17 @@ style slider_slider:
 style pref_label:
     top_margin 0
     bottom_margin 0
+
+## 저장 슬롯 패딩 제거 — 기본 style slot_button 은 gui.scale 함수로 구한 6,6(1080p 기준
+## 9px) padding 을 갖고 있는데, ESC 모드에선 fileSlotsBody 가 썸네일·캡션을 전부 버튼
+## 안쪽 fixed 의 절대좌표(pos)로 배치한다. "has fixed" 자식의 좌표 원점은 버튼의 padding 만큼
+## 안쪽으로 밀린 지점이라, 패딩이 남아 있으면 pos (13,13) 로 놓은 썸네일이 실제로는 (22,22)
+## 에 찍혀 회색 칸과 어긋난다(실기 스크린샷으로 발견). 다른 escLayoutStyles 블록들과 마찬가지로
+## 특정 에셋 유무가 아니라 escMenu 존재 자체로만 갈린다(레이아웃 자체가 어긋나는 문제라 배경
+## 이미지를 아직 안 올렸어도 패딩은 걷어내야 한다). esc_save_empty_button 은 "is slot_button"
+## 으로 이 스타일을 상속하므로 빈 슬롯도 함께 보정된다.
+style slot_button:
+    padding (0, 0)
 `;
 }
 

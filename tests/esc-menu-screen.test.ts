@@ -112,7 +112,13 @@ describe('generateRenpyFiles: escMenuUi 그룹별 부분 업로드 — 있는 �
     const tail = escStylesBlock(contentOf(files, 'game/screens.rpy'));
     expect(tail).toContain('style frame:');
     expect(tail).toContain('gui/esc/card.png');
-    for (const name of ['navigation_button', 'radio_button', 'check_button', 'slot_button', 'confirm_button', 'confirm_frame', 'slider', 'vscrollbar']) {
+    // slot_button 은 예외 — escLayoutStyles 의 padding (0,0) 재정의는 특정 에셋 게이트가 아니라
+    // escMenu 존재 자체로 항상 나온다(레이아웃이 절대좌표라 배경 이미지 유무와 무관하게 필요).
+    // 배경 이미지가 실제로 얹히는 idle_background 등은 save_idle 을 안 올렸으니 여전히 없어야 한다.
+    const slotBlock = styleBlock(tail, 'slot_button');
+    expect(slotBlock).toContain('padding (0, 0)');
+    expect(slotBlock).not.toContain('idle_background');
+    for (const name of ['navigation_button', 'radio_button', 'check_button', 'confirm_button', 'confirm_frame', 'slider', 'vscrollbar']) {
       expect(tail).not.toContain(`style ${name}:`);
     }
   });
@@ -424,6 +430,24 @@ describe('generateRenpyFiles: ESC 저장 화면·좌측 내비 — 배치시안 
     expect(sc).toContain('text FileSaveName(slot):\n                            style "slot_name_text"\n                            pos (371, 186)\n                            xanchor 1.0');
   });
 
+  it('FileTime 에 xanchor 0.0, FileSaveName 에 xanchor 1.0 — 스타일 xalign(0.5) 이 pos 위에 xanchor 로 남아 캡션이 왼쪽으로 밀리지 않게', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
+    const fileTimeIdx = sc.indexOf('text FileTime(');
+    const fileSaveNameIdx = sc.indexOf('text FileSaveName(');
+    expect(fileTimeIdx).toBeGreaterThan(-1);
+    expect(fileSaveNameIdx).toBeGreaterThan(fileTimeIdx);
+    // FileTime 의 xanchor 는 FileSaveName 정의가 시작되기 전(같은 위젯 블록 안)에 나와야 한다.
+    expect(sc.slice(fileTimeIdx, fileSaveNameIdx)).toContain('xanchor 0.0');
+    expect(sc.slice(fileSaveNameIdx)).toContain('xanchor 1.0');
+  });
+
+  it('slot_button 스타일 — padding (0, 0) 으로 재정의(has fixed 자식의 절대좌표 원점이 카드 모서리가 되도록)', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const tail = escStylesBlock(contentOf(generateRenpyFiles(p).files, 'game/screens.rpy'));
+    expect(styleBlock(tail, 'slot_button')).toContain('padding (0, 0)');
+  });
+
   it('slot_time_text/slot_name_text 스타일엔 xalign 이 없다(fixed 안에서 pos 와 앵커가 안 싸우게)', () => {
     const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
     const tail = escStylesBlock(contentOf(generateRenpyFiles(p).files, 'game/screens.rpy'));
@@ -469,5 +493,12 @@ describe('generateRenpyFiles: ESC 저장 화면·좌측 내비 — 배치시안 
     expect(sc).not.toContain('selected_left_padding');
     // 기존(회귀 0) 경로는 원래 has vbox + config.thumbnail_* 그대로.
     expect(sc).toContain('has vbox\n\n                        add FileScreenshot(slot) xalign 0.5');
+    // 슬롯 패딩 제거(padding (0, 0))·캡션 xanchor 보정은 escLayoutStyles/fileSlotsBody 의 ESC
+    // 분기에서만 나온다. 주의: "xanchor" 자체는 base 템플릿(이름표·기록 화면의 name_xalign 등)에
+    // 이미 항상 나오므로 블랭킷 금지는 오검출 — file_slots 캡션에서만 쓰는 "xanchor 0.0"(FileTime)
+    // 과 padding (0, 0) 만 콕 집어 없음을 확인한다. xanchor 1.0(FileSaveName)은 이미 위에서
+    // "has vbox…" 문구 자체가 회귀 0 임을 보장하므로 별도로 안 짚어도 된다.
+    expect(sc).not.toContain('padding (0, 0)');
+    expect(sc).not.toContain('xanchor 0.0');
   });
 });
