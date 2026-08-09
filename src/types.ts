@@ -640,8 +640,8 @@ export const ESC_IMAGES: {
   { id: 'save_idle', label: '저장슬롯 기본', group: '슬롯', hint: '320×190 · 안쪽 칸 298×132(여백 좌우상 11, 하 47) · 모서리 15', fileKeywords: ['저장슬롯기본'] },
   { id: 'save_hover', label: '저장슬롯 마우스오버', group: '슬롯', hint: '320×190 · 안쪽 칸 298×132(여백 좌우상 11, 하 47) · 모서리 15', fileKeywords: ['저장슬롯마우스오버'] },
   { id: 'save_empty', label: '저장슬롯 빈슬롯', group: '슬롯', hint: '320×190 · 안쪽 칸 298×132(여백 좌우상 11, 하 47) · 모서리 15', fileKeywords: ['저장슬롯빈슬롯'] },
-  { id: 'gallery_idle', label: '갤러리슬롯 기본', group: '슬롯', hint: '300×180 · 안쪽 칸 278×126(여백 좌우상 11, 하 43) · 모서리 15', fileKeywords: ['갤러리슬롯기본'] },
-  { id: 'gallery_locked', label: '갤러리슬롯 잠김', group: '슬롯', hint: '300×180 · 안쪽 칸 278×126(여백 좌우상 11, 하 43) · 모서리 15', fileKeywords: ['갤러리슬롯잠김'] },
+  { id: 'gallery_idle', label: '갤러리슬롯 기본', group: '슬롯', hint: '300×180 · 안쪽 칸 278×126(여백 좌우상 11, 하 43) · 모서리 15 · 아이템·CG 갤러리 공용(칸 비율에 맞춰 늘어남)', fileKeywords: ['갤러리슬롯기본'] },
+  { id: 'gallery_locked', label: '갤러리슬롯 잠김', group: '슬롯', hint: '300×180 · 안쪽 칸 278×126(여백 좌우상 11, 하 43) · 모서리 15 · 아이템·CG 갤러리 공용(칸 비율에 맞춰 늘어남)', fileKeywords: ['갤러리슬롯잠김'] },
   { id: 'scroll_track', label: '스크롤바 트랙', group: '스크롤', hint: '10×600', fileKeywords: ['스크롤바트랙'] },
   { id: 'scroll_thumb', label: '스크롤바 핸들', group: '스크롤', hint: '10×180', fileKeywords: ['스크롤바핸들'] },
   { id: 'popup_bg', label: '종료팝업 배경', group: '팝업', hint: '680×330 · 모서리 27', fileKeywords: ['종료팝업배경'] },
@@ -666,6 +666,13 @@ export function escImageFile(id: EscImageId): string {
  * 상수 하나만 봐야 경로가 어긋나지 않는다.
  */
 export const ESC_SAVE_THUMB_MASK_FILE = 'gui/esc/save_thumb_mask.png';
+
+/**
+ * 감상한 CG 갤러리 썸네일 둥근 마스크 PNG 경로(game/ 기준) — ESC_SAVE_THUMB_MASK_FILE 과 같은 이유로
+ * 별도 생성물 상수(escCgThumbMetrics 가 크기 단일 소스, renpy/gui). 발견한 아이템 쪽은 `fit "contain"`
+ * 으로 절대 자르지 않아 마스크가 필요 없다 — CG 만 `fit "cover"` + 이 마스크로 둥근 모서리를 낸다.
+ */
+export const ESC_CG_THUMB_MASK_FILE = 'gui/esc/cg_thumb_mask.png';
 
 /**
  * 파일명 → ESC 이미지 역할. 메뉴 버튼 매칭과 같은 규칙에 **`_`·`-` 제거**를 더한다

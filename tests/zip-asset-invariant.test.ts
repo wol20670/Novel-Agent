@@ -289,6 +289,10 @@ describe('zip 에셋 불변식 매트릭스', () => {
     // 여기서 파일 존재를 직접 확인한다).
     const { files } = await collectProjectFiles(project);
     expect(files.some((f) => f.path === 'game/gui/esc/save_thumb_mask.png')).toBe(true);
+    // 감상한 CG 갤러리 둥근 마스크(마찬가지로 생성물) — cgScreens 가 fit "cover" + AlphaMask 로
+    // 참조하는 ESC_CG_THUMB_MASK_FILE 도 같은 이유로 직접 확인한다. 발견한 아이템 쪽은 fit
+    // "contain"(정사각 유지)이라 마스크가 없다 — game/gui/esc/cg_thumb_mask.png 하나만 늘어난다.
+    expect(files.some((f) => f.path === 'game/gui/esc/cg_thumb_mask.png')).toBe(true);
   });
 });
 
@@ -298,6 +302,8 @@ describe("회귀 (g): 저장 슬롯 마스크(gui/esc/save_thumb_mask.png)는 es
   it('escMenuUi 자체가 없으면 마스크 파일도 안 만든다(회귀 0 — 안 쓰는 파일을 매 빌드마다 굽지 않는다)', async () => {
     const { files } = await collectProjectFiles(plainProject());
     expect(files.some((f) => f.path === 'game/gui/esc/save_thumb_mask.png')).toBe(false);
+    // CG 마스크도 같은 게이트(escMenuActive)라 함께 안 만들어져야 한다.
+    expect(files.some((f) => f.path === 'game/gui/esc/cg_thumb_mask.png')).toBe(false);
   });
 
   it('ESC 롤 하나만(save 그룹과 무관한 card) 업로드해도 escMenu 활성 조건과 같아서 마스크가 만들어진다', async () => {
@@ -305,9 +311,13 @@ describe("회귀 (g): 저장 슬롯 마스크(gui/esc/save_thumb_mask.png)는 es
     // push 조건도 짝을 맞춰 같은 기준이어야 한다 — save_idle 류만 트리거하는 걸로 오판하면
     // save 슬롯 없이 다른 그룹만 켠 프로젝트에서 참조(AlphaMask)는 없지만 스타일 활성화 자체는
     // 되므로(escMenu 존재 하나로 fileSlotsBody 전체가 갈린다) 파일이 빠지는 게 오히려 문제다.
+    // CG 마스크도 저장 마스크와 완전히 같은 게이트(escMenuActive)를 쓰므로 함께 확인한다 — 이
+    // 프로젝트엔 CG 장면이 없어 실제 참조는 없지만(cg_gallery 화면 자체가 생략), 게이트가
+    // "escMenu 활성" 하나뿐이라 파일은 그래도 만들어진다(저장 마스크와 같은 이유).
     const project = kitchenSinkProject({ escMenuUi: { images: { card: 'asset-esc-card' } } });
     const { files } = await collectProjectFiles(project);
     expect(files.some((f) => f.path === 'game/gui/esc/save_thumb_mask.png')).toBe(true);
+    expect(files.some((f) => f.path === 'game/gui/esc/cg_thumb_mask.png')).toBe(true);
     await expectNoDangling(project);
   });
 });

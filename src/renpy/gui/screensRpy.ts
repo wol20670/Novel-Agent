@@ -28,6 +28,7 @@ import {
   QUICK_PANEL_FILE,
   escImageFile,
   ESC_SAVE_THUMB_MASK_FILE,
+  ESC_CG_THUMB_MASK_FILE,
 } from '../../types';
 import type { GuiLocales } from './index';
 // '../generate' 가 아니라 '../escape' 에서 직접 가져온다 — generate.ts → gui/index.ts →
@@ -164,16 +165,25 @@ const ESC_LAYOUT = {
   prefCardPadY: 26,
   prefCardSpacing: 30,
   /**
-   * 갤러리 칸(발견한 아이템 4열 / 감상한 CG 3열). ⚠️ 기록만 — 저장 슬롯과 같은 종류의 미정렬이
-   * 남아 있다: gallery_idle/gallery_locked 실측 규격은 300×180(안쪽 칸 278×126, ESC_IMAGES 의
-   * hint 참고)인데 아래 칸 크기는 320×250/430×260 이라 비율이 안 맞아 아트가 늘어나 그려진다
-   * (galleryGrid). 저장 슬롯은 이번에 slotThumb* 상수로 실측값을 맞췄지만, 갤러리는 사용자가
-   * 아직 지적하지 않았고 화면도 별도라 이번 범위에서는 건드리지 않는다.
+   * 갤러리 칸(발견한 아이템 4열 / 감상한 CG 3열) — 저장 슬롯과 같은 종류의 미정렬을 겪었으나(아트
+   * 300×180 대비 칸이 320×250/430×260 이라 비율이 안 맞아 아트가 늘어나 그림이 회색 칸과
+   * 어긋났다) 이번에 아트 실측(GALLERY_SLOT_ART)에서 유도해 맞췄다. 두 화면이 요구하는 그림칸
+   * 비율이 서로 다른데(아이템은 정사각 유지, CG 는 16:9) 아트는 한 장뿐이라 **아트를 늘려 쓰되
+   * 그림 자리를 "늘어난 아트의 회색 칸이 실제로 놓이는 위치"로 재계산**하는 쪽을 택했다(사용자
+   * 결정) — galleryThumbRect(cellW, cellH) 가 그 계산이고, 아래 칸 크기는 그 결과가 원하는
+   * 그림칸(아이템 300×202 정사각 근사, CG 408×230≈16:9)을 만들어내도록 역산한 값이다.
+   *   - 아이템 4열: 324×288 → 그림칸 (300,202) fit "contain"(정사각 아이템이 202×202로 가운데).
+   *   - CG 3열: 440×328 → 그림칸 (408,230)=1.774≈16:9 → fit "cover" + 둥근 마스크.
+   *   격자 폭 확인: 4×324+3×20=1356 / 3×440+2×20=1360, 둘 다 콘텐츠 폭(contentRight-contentLeft
+   *   =1390)에 여유 있게 들어간다(스크롤바 거터는 vpgrid 가 실제로 세로 스크롤될 때만 차감된다).
    */
-  itemCellWidth: 320,
-  itemCellHeight: 250,
-  cgCellWidth: 430,
-  cgCellHeight: 260,
+  itemCellWidth: 324,
+  itemCellHeight: 288,
+  cgCellWidth: 440,
+  cgCellHeight: 328,
+  /** 캡션 텍스트 y — 그림칸 바로 아래 여백 띠 안에 놓이도록 실측 배치한 값(플랜의 확정 수치). */
+  itemCaptionTop: 242,
+  cgCaptionTop: 278,
   gallerySpacing: 20,
   /**
    * 화면 제목("저장" 등) 오른쪽 옆에 붙는 작은 "페이지 N" 라벨의 절대 위치·글자 크기. 시안에서
@@ -232,6 +242,53 @@ export function escSlotThumbMetrics(height: number): { width: number; height: nu
     width: Math.round(ESC_LAYOUT.slotThumbWidth * scale),
     height: Math.round(ESC_LAYOUT.slotThumbHeight * scale),
     radius: Math.round(ESC_LAYOUT.slotThumbRadius * scale),
+  };
+}
+
+/**
+ * 갤러리슬롯 아트 실측 규격(PNG 디코딩 실측) — 전체 300×180, 안쪽 회색 칸 278×126(여백 좌·우·상
+ * 11, 하 43), 안쪽 칸 모서리 반지름 ≈6. 저장 슬롯(slotThumb*)과 달리 이 아트는 **비율이 다른 두
+ * 칸**(아이템 4열 정사각 근사 / CG 3열 16:9)에 그대로 늘려 쓰므로, "칸 크기가 정해지면 그 안에서
+ * 회색 칸이 실제로 어디 놓이는가"를 매번 다시 계산해야 한다 — 그래서 최종 픽셀을 상수로 못 박아
+ * 두는 slotThumb* 방식 대신 galleryThumbRect(cellW, cellH) 함수로 유도한다.
+ */
+const GALLERY_SLOT_ART = { w: 300, h: 180, left: 11, top: 11, right: 11, bottom: 43, radius: 6 } as const;
+
+/**
+ * 칸 크기(cellW×cellH, 1920 기준 px) → 그 칸에 늘려 그려진 갤러리슬롯 아트의 "안쪽 회색 칸"이 실제로
+ * 놓이는 자리(좌상단 pos + 크기 + 모서리 반지름, 전부 1920 기준 px). 여백에 칸/아트 배율을 곱해서
+ * 구한다 — 가로 여백(left/right)엔 가로 배율(sx=cellW/art.w), 세로 여백(top/bottom)엔 세로 배율
+ * (sy=cellH/art.h)을 쓴다(칸이 아트와 다른 종횡비로 늘어나므로 가로세로 배율이 다르다 — 특히 CG
+ * 칸은 세로가 훨씬 더 늘어난다). 모서리 반지름은 방향이 없는 스칼라라 평균 배율((sx+sy)/2)을 쓴다
+ * (원이 찌그러진 타원이 되는 걸 막는 근사 — AlphaMask 는 어차피 정수 반지름만 받는다).
+ */
+function galleryThumbRect(cellW: number, cellH: number): { left: number; top: number; width: number; height: number; radius: number } {
+  const art = GALLERY_SLOT_ART;
+  const sx = cellW / art.w;
+  const sy = cellH / art.h;
+  return {
+    left: Math.round(art.left * sx),
+    top: Math.round(art.top * sy),
+    width: Math.round((art.w - art.left - art.right) * sx),
+    height: Math.round((art.h - art.top - art.bottom) * sy),
+    radius: Math.round(art.radius * ((sx + sy) / 2)),
+  };
+}
+
+/**
+ * 감상한 CG 갤러리 썸네일 둥근 마스크의 실제 픽셀 크기(폭/높이/반지름) — escSlotThumbMetrics 와
+ * 똑같은 계약(screensRpy 의 AlphaMask xysize ↔ buildZip 의 마스크 PNG 픽셀 크기, 단일 소스). 다만
+ * escSlotThumbMetrics 는 "이미 1920 기준으로 확정된" slotThumb* 상수를 굽기만 하면 되는 반면, CG 는
+ * 칸 크기(ESC_LAYOUT.cgCellWidth/Height)에서 galleryThumbRect 로 1920 기준 그림칸을 먼저 유도한
+ * 뒤에야 실제 해상도 배율(height/1080)을 곱할 수 있어 두 단계 스케일링이 된다.
+ */
+export function escCgThumbMetrics(height: number): { width: number; height: number; radius: number } {
+  const rect = galleryThumbRect(ESC_LAYOUT.cgCellWidth, ESC_LAYOUT.cgCellHeight);
+  const scale = height / 1080;
+  return {
+    width: Math.round(rect.width * scale),
+    height: Math.round(rect.height * scale),
+    radius: Math.round(rect.radius * scale),
   };
 }
 
@@ -720,6 +777,9 @@ function itemScreens(escMenu?: EscMenuPlan): string {
     legacyImage: 184,
     cellWidth: ESC_LAYOUT.itemCellWidth,
     cellHeight: ESC_LAYOUT.itemCellHeight,
+    captionTop: ESC_LAYOUT.itemCaptionTop,
+    // 아이템은 정사각 유지가 사용자 결정 — 절대 늘리거나 자르지 않는다(fit "contain", 마스크 없음).
+    fill: 'contain',
   });
   return String.raw`
 
@@ -774,6 +834,10 @@ function cgScreens(escMenu?: EscMenuPlan): string {
     legacyImageHeight: 162,
     cellWidth: ESC_LAYOUT.cgCellWidth,
     cellHeight: ESC_LAYOUT.cgCellHeight,
+    captionTop: ESC_LAYOUT.cgCaptionTop,
+    // CG 는 그림칸이 16:9 가 되도록 칸을 높였다(사용자 결정) — 정사각 유지가 아니라 잘라 채운다.
+    fill: 'cover',
+    maskFile: ESC_CG_THUMB_MASK_FILE,
   });
   return String.raw`
 
@@ -806,12 +870,25 @@ interface GalleryGridSpec {
   /** ESC 이미지 GUI 칸 치수 — 1920 기준 px(ESC_LAYOUT). */
   cellWidth: number;
   cellHeight: number;
+  /** 캡션 텍스트 y(1920 기준 px, ESC_LAYOUT.itemCaptionTop/cgCaptionTop) — 그림칸 바로 아래 여백
+   *  띠 안에 놓이도록 실측 배치한 값이라 그림칸(galleryThumbRect)에서 산술로 재도출하지 않는다. */
+  captionTop: number;
+  /**
+   * 그림을 칸에 채우는 방식 — 아이템은 정사각을 유지해야 해서(사용자 결정) 절대 자르지 않는
+   * `"contain"`, CG 는 그림칸이 16:9 가 되도록 칸을 늘렸으니 빈틈없이 `"cover"` + 마스크로 자른다.
+   */
+  fill: 'contain' | 'cover';
+  /** fill "cover" 일 때만 쓰는 둥근 모서리 AlphaMask 경로(game/ 기준) — contain 은 자르지 않으니 불필요. */
+  maskFile?: string;
 }
 
 /**
  * 갤러리 vpgrid 본문. escMenu 가 없으면 **기존 출력과 바이트 단위로 동일**하고(회귀 0), 있으면
  * 시안 배치로 바꾼다 — 캡션이 칸 **밖 아래 가운데**가 아니라 **칸 안 좌하단**으로 들어가고(업로드한
- * 갤러리슬롯 아트가 하단에 캡션 띠를 그려둔 구조다), 칸이 카드 폭에 맞게 커진다.
+ * 갤러리슬롯 아트가 하단에 캡션 띠를 그려둔 구조다), 그림 자리는 galleryThumbRect(cellW, cellH) 로
+ * "늘어난 아트의 회색 칸이 실제로 놓이는 위치"를 계산해 맞춘다(사용자 결정 — 아트는 늘려 쓰되 그림
+ * 자리는 아트 여백×칸 배율로 재계산). 아이템(fill "contain")은 정사각을 유지하고, CG(fill "cover")는
+ * 그림칸이 16:9 가 되도록 칸을 높인 대신 빈틈없이 채워 마스크로 둥근 모서리를 낸다.
  *
  * escMenu 가 있을 때 캡션 색을 인라인으로 박는 이유: 이 텍스트들은 이름 있는 스타일이 없는 기본
  * `text` 라 뒤에 style 블록을 붙여선 골라 잡을 수 없고, `style text:` 를 통째로 덮으면 대사창까지
@@ -848,19 +925,24 @@ function galleryGrid(escMenu: EscMenuPlan | undefined, spec: GalleryGridSpec): s
 
   const s = (v: number) => px(escMenu, v);
   const { colors } = escMenu;
-  // 캡션 띠(칸 아래쪽)를 뺀 나머지가 그림 영역. 좌우 14px, 위 14px 여백.
-  // ⚠️ 그림은 반드시 안쪽 fixed 안에서 align (0.5, 0.5) 로 가운데 놓는다 — `add x: fit "contain"
-  //    xysize(...)` 는 축소 후 크기가 xysize 보다 작아지므로, pos 로 직접 놓으면 세로 사진이 칸
-  //    왼쪽에 쏠려 붙는다(실기 확인).
-  const capBand = 48;
-  const imgW = spec.cellWidth - 28;
-  // 캡션 폭을 칸 안으로 묶는다 — 안 묶으면 긴 CG 이름이 칸을 뚫고 옆 칸·카드 밖까지 흘러나간다.
-  const capW = spec.cellWidth - 36;
-  const imgHeight = spec.cellHeight - capBand - 28;
+  // 그림 자리 = 늘어난 아트의 회색 칸이 실제로 놓이는 위치(사용자 결정 — CLAUDE.md/plan 참고).
+  const thumb = galleryThumbRect(spec.cellWidth, spec.cellHeight);
+  // 캡션을 그림 폭 안으로 묶는다 — 안 묶으면 긴 CG 이름이 칸을 뚫고 옆 칸·카드 밖까지 흘러나간다.
+  const capLeft = thumb.left;
+  const capW = thumb.width;
   const idleStyleLine = escMenu.has.has('gallery_idle') ? '\n                        style "esc_gallery_idle_button"' : '';
   const lockedBackground = escMenu.has.has('gallery_locked')
     ? 'style "esc_gallery_locked_frame"'
     : 'background Solid(gui.frame_bg_color)';
+  // contain: 정사각 유지가 목적이라 안쪽 fixed 안에서 align (0.5, 0.5) 로 가운데 놓는다 — `add x:
+  //   fit "contain" xysize(...)` 는 축소 후 크기가 xysize 보다 작아지므로, pos 로 직접 놓으면 세로
+  //   사진이 칸 왼쪽에 쏠려 붙는다(실기 확인, CLAUDE.md).
+  // cover: AlphaMask(Transform(x, fit="cover", xysize=...), mask) 가 이미 칸을 정확히 채우므로
+  //   별도 align 이 필요 없다(fileSlotsBody 의 저장 슬롯 썸네일과 같은 패턴).
+  const imageLines =
+    spec.fill === 'cover'
+      ? `add AlphaMask(Transform(${spec.tagVar}, fit="cover", xysize=(${s(thumb.width)}, ${s(thumb.height)})), "${spec.maskFile}")`
+      : `add ${spec.tagVar}:\n                                fit "contain"\n                                xysize (${s(thumb.width)}, ${s(thumb.height)})\n                                align (0.5, 0.5)`;
   return `        vpgrid:
             cols ${spec.cols}
             spacing ${s(ESC_LAYOUT.gallerySpacing)}
@@ -871,14 +953,11 @@ function galleryGrid(escMenu: EscMenuPlan | undefined, spec: GalleryGridSpec): s
                         action Show("gallery_lightbox", img=${spec.tagVar}, caption=${spec.nameVar})
                         has fixed
                         fixed:
-                            pos (${s(14)}, ${s(14)})
-                            xysize (${s(imgW)}, ${s(imgHeight)})
-                            add ${spec.tagVar}:
-                                fit "contain"
-                                xysize (${s(imgW)}, ${s(imgHeight)})
-                                align (0.5, 0.5)
+                            pos (${s(thumb.left)}, ${s(thumb.top)})
+                            xysize (${s(thumb.width)}, ${s(thumb.height)})
+                            ${imageLines}
                         text ${spec.nameVar}:
-                            pos (${s(18)}, ${s(spec.cellHeight - capBand + 8)})
+                            pos (${s(capLeft)}, ${s(spec.captionTop)})
                             xsize ${s(capW)}
                             size ${s(17)}
                             color "${colors.body}"
@@ -888,12 +967,12 @@ function galleryGrid(escMenu: EscMenuPlan | undefined, spec: GalleryGridSpec): s
                         ${lockedBackground}
                         has fixed
                         text "???":
-                            pos (${s(Math.round(spec.cellWidth / 2))}, ${s(Math.round((spec.cellHeight - capBand) / 2))})
+                            pos (${s(thumb.left + Math.round(thumb.width / 2))}, ${s(thumb.top + Math.round(thumb.height / 2))})
                             anchor (0.5, 0.5)
                             size ${s(34)}
                             color "${colors.muted}"
                         text _("???"):
-                            pos (${s(18)}, ${s(spec.cellHeight - capBand + 8)})
+                            pos (${s(capLeft)}, ${s(spec.captionTop)})
                             xsize ${s(capW)}
                             size ${s(17)}
                             color "${colors.muted}"
@@ -1536,11 +1615,15 @@ style esc_save_empty_button is slot_button:
 ## ESC 메뉴 이미지 GUI — 갤러리 해금 카드. 상태별 전용 에셋이 없어 네 롤 전부 같은 이미지로 채운다
 ## (버튼이라 CRASH TRAP 대상은 그대로 — "is button" 상속만으론 배경이 없는 파일을 가리킨다).
 ## item_gallery/cg_gallery 의 button: 에 이 스타일 태그를 붙이는 쪽은 itemScreens/cgScreens 가 한다.
+## padding (0,0) — 저장 슬롯과 같은 함정(slot_button 참고): "is button" 이 gui.button_properties
+## 의 패딩을 물려받는데, galleryGrid 가 "has fixed" 자식을 (thumb.left, thumb.top) 절대좌표로 놓으므로
+## 패딩이 남아 있으면 그림·캡션이 실제로는 그만큼 더 안쪽에 찍혀 회색 칸과 어긋난다.
 style esc_gallery_idle_button is button:
     idle_background Frame("${idle}", 0, 0)
     hover_background Frame("${idle}", 0, 0)
     selected_background Frame("${idle}", 0, 0)
     insensitive_background Frame("${idle}", 0, 0)
+    padding (0, 0)
 `);
   }
   if (has('gallery_locked')) {
@@ -1549,8 +1632,11 @@ style esc_gallery_idle_button is button:
 ## ESC 메뉴 이미지 GUI — 갤러리 잠금 카드. frame: 이라 상태가 없어(버튼 아님) CRASH TRAP 대상이
 ## 아니다. item_gallery/cg_gallery 의 잠금 칸이 인라인 "background Solid(...)" 대신 이 스타일을
 ## 참조하도록 itemScreens/cgScreens 가 바꿔치기한다(이 에셋이 없으면 원본 인라인 그대로 — 회귀 0).
+## padding (0,0) — esc_gallery_idle_button 과 같은 이유. "is frame" 이 물려받는
+## gui.frame_borders.padding 을 걷어내지 않으면 "???" 잠금 라벨도 절대좌표에서 어긋난다.
 style esc_gallery_locked_frame is frame:
     background Frame("${file('gallery_locked')}", 0, 0)
+    padding (0, 0)
 `);
   }
 

@@ -184,9 +184,10 @@ describe('generateRenpyFiles: escMenuUi 그룹별 부분 업로드 — 있는 �
     const p = projectWith([galleryScene()], { escMenuUi: { images: escImages(['gallery_idle']) } });
     const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
     // escMenu 가 붙으면 격자 자체가 시안 배치(칸 안 좌하단 캡션)로 바뀐다 — 칸 치수는 ESC_LAYOUT
-    // 의 1920 기준 px 가 구워져 나온다(projectWith 는 1920×1080).
-    expect(sc).toContain('button:\n                        style "esc_gallery_idle_button"\n                        xysize (320, 250)');
-    expect(sc).toContain('button:\n                        style "esc_gallery_idle_button"\n                        xysize (430, 260)');
+    // 의 1920 기준 px 가 구워져 나온다(projectWith 는 1920×1080). 아이템 4열=324×288, CG 3열=440×328
+    // (아트 실측 GALLERY_SLOT_ART 에서 galleryThumbRect 로 유도한 최종 칸 크기).
+    expect(sc).toContain('button:\n                        style "esc_gallery_idle_button"\n                        xysize (324, 288)');
+    expect(sc).toContain('button:\n                        style "esc_gallery_idle_button"\n                        xysize (440, 328)');
   });
 
   it('gallery_locked 업로드 시 잠금 칸의 인라인 Solid 배경이 style 태그로 바뀐다', () => {
@@ -197,8 +198,32 @@ describe('generateRenpyFiles: escMenuUi 그룹별 부분 업로드 — 있는 �
     // slot_button 이 원래도 그 문구를 쓰므로(gallery_locked 와 무관하게 항상 존재), 잠금 칸
     // 패턴(frame: 블록 안의 xysize 다음 줄)만 콕 집어 확인한다.
     expect((sc.match(/style "esc_gallery_locked_frame"/g) ?? []).length).toBe(2);
-    expect(sc).not.toContain('xysize (320, 250)\n                        background Solid(gui.frame_bg_color)');
-    expect(sc).not.toContain('xysize (430, 260)\n                        background Solid(gui.frame_bg_color)');
+    expect(sc).not.toContain('xysize (324, 288)\n                        background Solid(gui.frame_bg_color)');
+    expect(sc).not.toContain('xysize (440, 328)\n                        background Solid(gui.frame_bg_color)');
+  });
+
+  it('아이템 그리드: 그림칸은 아트 실측에서 유도한 자리(300×202)에 fit "contain" 으로 정사각을 유지하고 마스크가 없다', () => {
+    const p = projectWith([galleryScene()], { escMenuUi: { images: escImages(['gallery_idle']) } });
+    const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
+    expect(sc).toContain('pos (12, 18)\n                            xysize (300, 202)');
+    expect(sc).toContain('add it_tag:\n                                fit "contain"\n                                xysize (300, 202)\n                                align (0.5, 0.5)');
+    expect(sc).not.toContain('AlphaMask(Transform(it_tag');
+    expect(sc).toContain('text it_name:\n                            pos (12, 242)');
+  });
+
+  it('CG 그리드: 그림칸은 아트 실측에서 유도한 자리(408×230=16:9)에 fit "cover" + 둥근 마스크를 씌운다', () => {
+    const p = projectWith([galleryScene()], { escMenuUi: { images: escImages(['gallery_idle']) } });
+    const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
+    expect(sc).toContain('pos (16, 20)\n                            xysize (408, 230)');
+    expect(sc).toContain('add AlphaMask(Transform(cg_tag, fit="cover", xysize=(408, 230)), "gui/esc/cg_thumb_mask.png")');
+    expect(sc).toContain('text cg_name:\n                            pos (16, 278)');
+  });
+
+  it('esc_gallery_idle_button/esc_gallery_locked_frame 은 padding (0, 0) 을 준다(패딩 함정 — 저장 슬롯과 같은 이유)', () => {
+    const p = projectWith([galleryScene()], { escMenuUi: { images: escImages(['gallery_idle', 'gallery_locked']) } });
+    const tail = escStylesBlock(contentOf(generateRenpyFiles(p).files, 'game/screens.rpy'));
+    expect(styleBlock(tail, 'esc_gallery_idle_button')).toContain('padding (0, 0)');
+    expect(styleBlock(tail, 'esc_gallery_locked_frame')).toContain('padding (0, 0)');
   });
 });
 

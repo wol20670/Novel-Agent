@@ -19,6 +19,7 @@ import {
   ESC_IMAGES,
   escImageFile,
   ESC_SAVE_THUMB_MASK_FILE,
+  ESC_CG_THUMB_MASK_FILE,
 } from '../types';
 import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName, extFromMime } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
@@ -33,6 +34,7 @@ import {
   DEFAULT_GRADIENT_OPACITY,
   DEFAULT_GRADIENT_HEIGHT,
   escSlotThumbMetrics,
+  escCgThumbMetrics,
 } from '../renpy/gui';
 import { loadFontCatalog, fontById, DEFAULT_FONT } from '../fonts/fontCatalog';
 import { ensureFontBlob, ensureFontLicense } from '../fonts/fontCache';
@@ -374,6 +376,13 @@ export async function collectProjectFiles(
   if (escMenuActive) {
     const { width, height, radius } = escSlotThumbMetrics(project.height);
     out.push({ path: `game/${ESC_SAVE_THUMB_MASK_FILE}`, data: await roundedMaskPng(width, height, radius) });
+
+    // 감상한 CG 갤러리 둥근 마스크 — 저장 슬롯과 같은 생성물·같은 게이트(escMenuActive). 발견한
+    // 아이템 쪽은 fit "contain" 으로 절대 자르지 않으니 마스크가 없다(정사각 유지가 사용자 결정).
+    // 크기는 escCgThumbMetrics 단일 소스 — screensRpy 의 AlphaMask xysize 와 반드시 같은 값이어야
+    // 마스크가 늘어나 모서리가 뭉개지지 않는다(CLAUDE.md).
+    const cg = escCgThumbMetrics(project.height);
+    out.push({ path: `game/${ESC_CG_THUMB_MASK_FILE}`, data: await roundedMaskPng(cg.width, cg.height, cg.radius) });
   }
 
   // 게임 아이콘 — ico 는 **game/ 밖 프로젝트 루트**로 나간다(Ren'Py 런처가 거기만 본다).
