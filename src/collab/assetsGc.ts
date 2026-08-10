@@ -24,7 +24,7 @@ const REMOVE_CHUNK_SIZE = 100;
  * 죽었는데 빈 집합을 돌려주면 **모든 원격 파일이 고아로 보여** 남의 방 에셋까지 지우게 된다.
  * 그래서 호출부가 반드시 failed 를 보고 중단할 수 있도록 분리해 돌려준다(fail-closed).
  */
-export interface RemoteScan {
+interface RemoteScan {
   assets: RemoteAsset[];
   failed: boolean;
 }
@@ -60,7 +60,7 @@ export async function listRemoteAssets(): Promise<RemoteScan> {
 }
 
 /** 참조 집합 + 실패 여부. failed 면 호출부는 **반드시 스윕을 중단**해야 한다(RemoteScan 주석 참고). */
-export interface RemoteRefScan {
+interface RemoteRefScan {
   ids: Set<string>;
   failed: boolean;
 }

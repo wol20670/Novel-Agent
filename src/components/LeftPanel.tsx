@@ -778,7 +778,7 @@ function ThemeStudio() {
 
       <ThemePreview theme={theme} />
       <p className="text-[10px] text-gray-500 leading-snug">
-        타이틀·메뉴 배경은 <b className="text-gray-400">에셋 탭 → 🎬 타이틀·메뉴 배경</b>에서 업로드합니다.
+        타이틀 배경은 <b className="text-gray-400">에셋 탭 → 🎬 타이틀 배경</b>에서 업로드합니다.
       </p>
 
       <DialogueGuiControls />
@@ -1024,6 +1024,9 @@ function ThemePreview({ theme }: { theme: GuiTheme }) {
   // (앱은 메뉴 아트를 더 이상 생성하지 않음 — 실제 업로드는 에셋 탭에서 한다).
   const mainArtId = useStore((s) => s.project.menuArt?.main);
   const url = useAssetUrl(mainArtId);
+  // 렌더 중 getState() 로 읽으면 title 이 바뀌어도 이 컴포넌트가 다시 그려질 이유가 없어(다른 구독이
+  // 없으면) 미리보기 글자가 갱신되지 않는다 — 필드 단위로 구독해야 제목을 바꿀 때마다 따라온다.
+  const title = useStore((s) => s.project.title);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -1044,7 +1047,7 @@ function ThemePreview({ theme }: { theme: GuiTheme }) {
           ))}
         </div>
         <span className="absolute bottom-1 right-2 text-[11px] font-bold" style={{ color: theme.accent }}>
-          {useStore.getState().project.title}
+          {title}
         </span>
       </div>
       <div className="flex gap-1">

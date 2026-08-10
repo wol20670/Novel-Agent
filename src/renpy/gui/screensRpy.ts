@@ -110,7 +110,13 @@ export interface QuickMenuPlan {
  * 반환해 screensRpy 는 아무 것도 추가하지 않는다(회귀 0 — mainMenuUi/quickMenuUi 와 같은 계약).
  */
 export interface EscMenuPlan {
-  /** 실제로 업로드된 롤 집합('bg' 도 포함될 수 있지만 화면 출력엔 관여하지 않는다 — 아래 참고). */
+  /**
+   * 실제로 업로드된 롤 집합. 'bg' 도 포함되고 화면 출력에 실제로 관여한다 — has('bg') 가
+   * ① game_menu_outer_frame 의 스크림 제거(Solid(gui.menu_overlay_color), 공통배경을 가리지
+   * 않도록) ② screen game_menu() 의 배경 단일화(`if main_menu:` 분기를 없애고 타이틀에서 연
+   * 메뉴도 gui.game_menu_background 하나로 통일) 두 곳을 게이팅한다
+   * (buildEscMenuStyles/gameMenuBackground, 커밋 0b35777).
+   */
   has: Set<EscImageId>;
   /**
    * height / 1080. 아래 ESC_LAYOUT 의 1920×1080 기준 px 를 이 배율로 곱해 최종 값을 굽는다(런타임
@@ -192,12 +198,15 @@ export const ESC_LAYOUT = {
    * ⚠️ 이 실측값을 격자 열 수만큼 그대로 늘어놓으면 뷰포트보다 넓어진다(실기에서 맨 오른쪽 열
    * 카드 오른쪽 테두리가 스크롤바에 잘려 보인 원인) — 거터(scrollbarGutter)는 game_menu_viewport
    * 스타일에 박힌 **고정폭**이라 vpgrid 가 실제로 세로 스크롤되는지와 무관하게 항상 차감된다(옛
-   * 주석의 "스크롤될 때만 차감" 은 틀렸다):
-   *   가용 폭 = contentRight-contentLeft-scrollbarGutter-GALLERY_GRID_SAFETY = 1810-420-40-8 = 1342
+   * 주석의 "스크롤될 때만 차감" 은 틀렸다). 아래는 전부 "뷰포트"(스크롤바 거터까지 뺀 폭) 하나를
+   * 기준으로 잰 값이다 — GALLERY_GRID_SAFETY(추가 여유)는 여기 포함하지 않고 fitGalleryCell() 이
+   * 실제 칸 크기를 낼 때 한 번 더 뺀다(아래 참고):
+   *   뷰포트 = contentRight-contentLeft-scrollbarGutter = 1810-420-40 = 1350
    *   아이템 4열: 4×324+3×20 = 1356 (뷰포트 1350 대비 6 초과)
    *   CG    3열: 3×440+2×20 = 1360 (뷰포트 1350 대비 10 초과)
    * 그래서 이 상수들은 칸 크기의 "실측 기준값"일 뿐이고, 실제로 화면에 굽는 칸 크기는
-   * fitGalleryCell() 이 가용 폭에 맞춰 비율 그대로 줄인 ITEM_CELL/CG_CELL 이다(아래).
+   * fitGalleryCell() 이 뷰포트에서 GALLERY_GRID_SAFETY 까지 뺀 가용 폭(1350-8=1342)에 맞춰
+   * 비율 그대로 줄인 ITEM_CELL/CG_CELL 이다(아래).
    */
   itemCellWidth: 324,
   itemCellHeight: 288,

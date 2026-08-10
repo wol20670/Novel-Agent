@@ -172,10 +172,9 @@ function applyVoiceUpdates(scenes: Scene[], updates: VoiceAttachUpdate[]): { sce
 /**
  * autoAssignEmotionAll 이 모아둔 (sceneId → lineIndex → 배정된 표정) 결과를 scenes 에 한 번에
  * 반영하는 순수 함수 — applyVoiceUpdates 와 같은 절충(배치 중 매 줄마다 scenes 를 재빌드하지 않고
- * 끝에 1회)이되, **export 해서 단위테스트 대상으로 뺀다**(autoTranslateAll 의 커밋은 액션 안에
- * 인라인되어 있어 테스트가 없다 — 여기서는 그 빚을 지지 않는다).
+ * 끝에 1회)이다. 단위테스트는 없다(autoTranslateAll 의 커밋도 액션 안에 인라인이라 같은 처지).
  */
-export function applyEmotionUpdates(scenes: Scene[], updates: Map<string, Map<number, Expression>>): Scene[] {
+function applyEmotionUpdates(scenes: Scene[], updates: Map<string, Map<number, Expression>>): Scene[] {
   if (!updates.size) return scenes;
   return scenes.map((sc) => {
     const lineMap = updates.get(sc.id);
@@ -339,8 +338,8 @@ interface State {
   removeItem: (name: string) => Promise<void>;
   /** 이 BGM 그룹(같은 이름 쓰는 모든 장면)의 업로드 해제. */
   clearBgmGroup: (key: string) => Promise<void>;
-  importMenuArt: (which: 'main' | 'game', file: File) => Promise<void>;
-  clearMenuArt: (which: 'main' | 'game') => Promise<void>;
+  importMenuArt: (file: File) => Promise<void>;
+  clearMenuArt: () => Promise<void>;
   /**
    * 게임 아이콘 업로드. which='ico' 는 Windows exe 아이콘(.ico, 프로젝트 루트로 나감),
    * which='window' 는 실행 중 창 아이콘(PNG). 자세한 차이는 Project.gameIcon JSDoc 참고.
@@ -1004,7 +1003,7 @@ export const useStore = create<State>((set, get) => {
 
     // autoTranslateAll 과 완전히 같은 골격(busy 키·진행률·PACE_MS·outer 루프 abort·finally 정리·
     // 단일 커밋·완료 토스트)이다 — 다른 건 대상 수집(collectEmotionTargets)·청크당 호출
-    // (selectEmotionsBatch)·커밋 함수(applyEmotionUpdates, export 되어 단위테스트 가능)뿐.
+    // (selectEmotionsBatch)·커밋 함수(applyEmotionUpdates)뿐.
     autoAssignEmotionAll: async () => {
       const project = get().project;
       const key = get().openaiKey.trim();
@@ -1987,29 +1986,29 @@ export const useStore = create<State>((set, get) => {
       flash('CG 업로드를 해제했습니다(Canvas 임시로 복귀).');
     },
 
-    importMenuArt: async (which, file) => {
+    importMenuArt: async (file) => {
       try {
-        const id = await uploadAsset(file, 'background', `${which === 'main' ? 'main_menu' : 'game_menu'}.png`);
-        const prev = get().project.menuArt?.[which];
+        const id = await uploadAsset(file, 'background', 'main_menu.png');
+        const prev = get().project.menuArt?.main;
         await commitAssetSwap(
-          (s) => ({ project: { ...s.project, menuArt: { ...s.project.menuArt, [which]: id } } }),
+          (s) => ({ project: { ...s.project, menuArt: { ...s.project.menuArt, main: id } } }),
           prev ? [prev] : [],
           id,
         );
-        flash(`${which === 'main' ? '메인' : '게임'} 메뉴 배경을 업로드했습니다.`);
+        flash('타이틀 배경을 업로드했습니다.');
       } catch (e) {
         flash((e as Error).message);
       }
     },
 
-    clearMenuArt: async (which) => {
-      const prev = get().project.menuArt?.[which];
+    clearMenuArt: async () => {
+      const prev = get().project.menuArt?.main;
       await commitAssetSwap((s) => {
         const menuArt = { ...s.project.menuArt };
-        delete menuArt[which];
+        delete menuArt.main;
         return { project: { ...s.project, menuArt } };
       }, prev ? [prev] : []);
-      flash(`${which === 'main' ? '메인' : '게임'} 메뉴 배경 업로드를 해제했습니다(Canvas 생성으로 복귀).`);
+      flash('타이틀 배경 업로드를 해제했습니다(테마 그라데이션으로 복귀).');
     },
 
     importGameIcon: async (which, file) => {

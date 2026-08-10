@@ -35,7 +35,7 @@ describe('collectReferencedAssetIds', () => {
     scenes,
     characters,
     itemAssetIds: { 편지: 'item1' },
-    menuArt: { main: 'menu_main', game: 'menu_game' },
+    menuArt: { main: 'menu_main' },
     mainMenuUi: {
       buttons: {
         start: { idle: 'menu_start_idle', hover: 'menu_start_hover' },
@@ -68,7 +68,6 @@ describe('collectReferencedAssetIds', () => {
         'outfit_base',
         'item1',
         'menu_main',
-        'menu_game',
         ...mainMenuIds,
       ]),
     );
@@ -89,7 +88,6 @@ describe('collectReferencedAssetIds', () => {
         'outfit_base',
         'item1',
         'menu_main',
-        'menu_game',
         ...mainMenuIds,
       ]),
     );
@@ -137,7 +135,7 @@ describe('collectReferencedAssetKinds', () => {
     scenes,
     characters,
     itemAssetIds: { 편지: 'item1' },
-    menuArt: { main: 'menu_main', game: 'menu_game' },
+    menuArt: { main: 'menu_main' },
     mainMenuUi: {
       buttons: {
         start: { idle: 'menu_start_idle', hover: 'menu_start_hover' },
@@ -173,7 +171,6 @@ describe('collectReferencedAssetKinds', () => {
 
   it('메뉴아트(menuArt)·메인메뉴 로고·버튼은 전용 kind 가 없어 cg 로 매핑된다', () => {
     expect(kinds.get('menu_main')).toBe('cg');
-    expect(kinds.get('menu_game')).toBe('cg');
     expect(kinds.get('menu_logo')).toBe('cg');
     expect(kinds.get('menu_start_idle')).toBe('cg');
     expect(kinds.get('menu_start_hover')).toBe('cg');

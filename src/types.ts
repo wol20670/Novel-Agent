@@ -304,8 +304,9 @@ export interface Project {
    * 사용한 일러스트·BGM·효과음·성우 등의 출처/라이선스를 적는다(상업 배포 전 필수 정리).
    */
   credits?: string;
-  /** 외부에서 업로드한 메뉴 배경(자체 GUI 위에 덮어씀). 없으면 Canvas 생성. */
-  menuArt?: { main?: string; game?: string };
+  /** 외부에서 업로드한 타이틀 배경(자체 GUI 위에 덮어씀). 없으면 Canvas 생성.
+   * 게임 중 ESC 메뉴 배경은 여기 없다 — `escMenuUi.images.bg` 가 그 자리다(아래 `escMenuUi` 참고). */
+  menuArt?: { main?: string };
   /**
    * 게임 아이콘(선택) — 둘은 Ren'Py 안에서 쓰이는 자리가 완전히 다르다.
    *  · ico    : 프로젝트 **루트**의 `icon.ico`. 배포 빌드 때 Ren'Py 런처가 exe 의 리소스를 다시 써
@@ -686,7 +687,7 @@ export const ESC_IMAGES: {
 /**
  * Ren'Py 프로젝트 안의 ESC 메뉴 이미지 경로(game/ 기준) — screensRpy·buildZip 공용 단일 소스.
  * ⚠️ 예외 하나: 'bg' 는 이 경로를 쓰지 않는다. 공통배경은 곧 `gui.game_menu_background` 이므로
- * buildZip 이 기존 `gui/game_menu.png` 자리에 써서 menuArt.game 을 대체한다(파일을 둘로 안 늘린다).
+ * buildZip 이 `gui/game_menu.png` 자리에 직접 써서 낸다(파일을 둘로 안 늘린다).
  */
 export function escImageFile(id: EscImageId): string {
   return `gui/esc/${id}.png`;

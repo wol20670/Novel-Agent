@@ -153,14 +153,14 @@ export default function AssetsTab() {
       </section>
 
       <section>
-        <h3 className="section-title mb-1">🎬 타이틀·메뉴 배경</h3>
+        <h3 className="section-title mb-1">🎬 타이틀 배경</h3>
         <p className="text-xs text-gray-500 mb-3">
-          게임 시작 시 타이틀(메인 메뉴) 화면과 게임 중 ESC로 여는 메뉴의 배경입니다. 어떤 크기로 올려도 화면에 꽉
-          차도록(비율 유지, 넘치는 부분은 크롭) 맞춰집니다. 업로드하지 않으면 테마색 그라데이션으로 대체됩니다.
+          게임 시작 시 타이틀(메인 메뉴) 화면의 배경입니다. 어떤 크기로 올려도 화면에 꽉 차도록(비율 유지, 넘치는
+          부분은 크롭) 맞춰집니다. 업로드하지 않으면 테마색 그라데이션으로 대체됩니다. 게임 중 ESC로 여는 메뉴의
+          배경은 별도입니다 — 아래 "⎋ ESC 메뉴 GUI" 섹션의 "공통 배경"에서 올리세요.
         </p>
         <div className="flex flex-col gap-2">
-          <MenuArtRow which="main" label="메인 메뉴(타이틀 화면)" />
-          <MenuArtRow which="game" label="게임 메뉴(ESC로 여는 인게임 메뉴)" />
+          <MenuArtRow />
         </div>
       </section>
 
@@ -240,7 +240,6 @@ export default function AssetsTab() {
   );
 }
 
-/** 타이틀·메뉴 배경 한 종(main/game) — 업로드 없으면 미업로드 표시(빌드 시 테마 그라데이션 폴백). */
 /**
  * 게임 아이콘 한 줄(exe .ico / 창 PNG). MenuArtRow 와 같은 모양이되 썸네일이 정사각이고,
  * .ico 는 파일 대화상자에서 image/* 필터에 안 걸리는 경우가 있어 accept 를 명시한다.
@@ -276,10 +275,11 @@ function GameIconRow({ which, label, hint }: { which: 'ico' | 'window'; label: s
   );
 }
 
-function MenuArtRow({ which, label }: { which: 'main' | 'game'; label: string }) {
+/** 타이틀 배경(main) 한 줄 — 업로드 없으면 미업로드 표시(빌드 시 테마 그라데이션 폴백). 슬롯이 하나뿐이라 prop 없이 라벨을 하드코딩한다. */
+function MenuArtRow() {
   const importMenuArt = useStore((s) => s.importMenuArt);
   const clearMenuArt = useStore((s) => s.clearMenuArt);
-  const assetId = useStore((s) => s.project.menuArt?.[which]);
+  const assetId = useStore((s) => s.project.menuArt?.main);
   const url = useAssetUrl(assetId);
   return (
     <div className="card border-edge p-3 flex gap-3 items-center">
@@ -287,16 +287,16 @@ function MenuArtRow({ which, label }: { which: 'main' | 'game'; label: string })
         {url ? <img src={url} className="w-full h-full object-cover" /> : '미업로드'}
       </div>
       <div className="flex-1 min-w-0">
-        <span className="text-sm text-gray-200">{label}</span>
+        <span className="text-sm text-gray-200">메인 메뉴(타이틀 화면)</span>
       </div>
       <div className="flex flex-col gap-1 shrink-0 w-24">
         <UploadButton
-          onFile={(f) => importMenuArt(which, f)}
+          onFile={(f) => importMenuArt(f)}
           label={url ? '✓ 교체' : '↥ 업로드'}
           className="btn-ghost text-[11px]"
         />
         {url && (
-          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => clearMenuArt(which)}>
+          <button className="text-[10px] text-gray-500 hover:text-rose-600" onClick={() => clearMenuArt()}>
             해제
           </button>
         )}

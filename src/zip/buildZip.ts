@@ -21,7 +21,7 @@ import {
   ESC_SAVE_THUMB_MASK_FILE,
   ESC_CG_THUMB_MASK_FILE,
 } from '../types';
-import { generateRenpyFiles, resolveItems, charIdMap, voiceBaseName, extFromMime } from '../renpy/generate';
+import { generateRenpyFiles, resolveItems, resolveCgs, charIdMap, voiceBaseName, extFromMime } from '../renpy/generate';
 import { getAsset } from '../storage/assetStore';
 import { sanitizeAscii } from '../project/safeName';
 import { canvasImage } from '../generators/image/canvasProvider';
@@ -292,27 +292,34 @@ export async function collectProjectFiles(
 
   // 타이틀·메뉴 배경 — 업로드 전용(앱은 그림을 생성하지 않음). 업로드가 없으면 테마색
   // 그라데이션 폴백만 깐다(장식 아트 없음, 게임이 안 깨지게 하는 최소한의 대비책).
+  // 두 자리는 소스가 완전히 다르다 — main 은 project.menuArt.main(에셋 탭 "🎬 타이틀 배경"),
+  // game 은 ESC 메뉴 GUI 의 'bg'(공통 배경, escMenuUi.images.bg) 하나뿐이다(예전엔 menuArt.game 도
+  // 같은 자리를 채울 수 있어 업로드 자리가 둘로 중복이었는데, 사용자가 ESC 에셋 세트 쪽으로
+  // 확정해 menuArt.game 자체를 없앴다 — types.ts Project.menuArt 참고).
   const theme = resolveTheme(project.genre, project.guiTheme);
-  const menuArtFor = async (which: 'main' | 'game'): Promise<Blob> => {
-    // ESC 메뉴 GUI 의 'bg'(공통 배경)는 곧 gui.game_menu_background 이므로, 올라와 있으면
-    // menuArt.game·그라데이션 폴백보다 우선한다(파일을 둘로 안 늘린다 — escImageFile('bg') 경로는
-    // 실제로 쓰지 않고 이 자리에 쓴다). effectiveEscMenuUi 는 이미 resolveEscMenuArt 가 blob 없는
-    // 역할을 걸러낸 뒤라 남아있는 assetId 는 항상 escArtBlobs 에 있다.
-    if (which === 'game') {
-      const escBgId = effectiveEscMenuUi?.images?.bg;
-      const escBg = escBgId ? escArtBlobs.get(escBgId) : undefined;
-      if (escBg) return escBg;
-    }
-    const upId = project.menuArt?.[which];
-    if (upId) {
-      const up = await getAsset(upId);
-      if (up) return up;
-    }
+  let mainMenuBg: Blob;
+  const mainUpId = project.menuArt?.main;
+  const mainUp = mainUpId ? await getAsset(mainUpId) : undefined;
+  if (mainUp) {
+    mainMenuBg = mainUp;
+  } else {
     placeholders += 1;
-    return menuBackdropPng(theme, project.width, project.height);
-  };
-  out.push({ path: 'game/gui/main_menu.png', data: await menuArtFor('main') });
-  out.push({ path: 'game/gui/game_menu.png', data: await menuArtFor('game') });
+    mainMenuBg = await menuBackdropPng(theme, project.width, project.height);
+  }
+  out.push({ path: 'game/gui/main_menu.png', data: mainMenuBg });
+
+  let gameMenuBg: Blob;
+  // escArtBlobs 는 resolveEscMenuArt 가 blob 없는 역할을 이미 걸러낸 뒤라, effectiveEscMenuUi 에
+  // bg assetId 가 남아있으면 항상 escArtBlobs 에도 있다(추가 getAsset 호출 불필요).
+  const escBgId = effectiveEscMenuUi?.images?.bg;
+  const escBg = escBgId ? escArtBlobs.get(escBgId) : undefined;
+  if (escBg) {
+    gameMenuBg = escBg;
+  } else {
+    placeholders += 1;
+    gameMenuBg = await menuBackdropPng(theme, project.width, project.height);
+  }
+  out.push({ path: 'game/gui/game_menu.png', data: gameMenuBg });
 
   // 메인 메뉴 이미지 GUI(업로드 전용) — 업로드된 버튼·로고만 배치한다. 미업로드 버튼은 선택 기능이라
   // placeholder 카운트를 올리지 않는다("임시 에셋 N개 포함" 경고를 이 선택 기능으로 오염시키지 않기 위함).
@@ -355,8 +362,8 @@ export async function collectProjectFiles(
   }
 
   // ESC(게임 중) 메뉴 이미지 GUI(업로드 전용) — 슬롯×상태 격자가 아니라 역할 하나짜리 평평한 맵.
-  // 'bg' 는 예외로 위 menuArtFor('game') 이 이미 game/gui/game_menu.png 에 썼으므로 여기서는
-  // 건너뛴다(escImageFile('bg') 경로는 실제로 쓰지 않는다 — 파일을 둘로 안 늘린다).
+  // 'bg' 는 예외로 위에서 이미 game/gui/game_menu.png 에 썼으므로 여기서는 건너뛴다
+  // (escImageFile('bg') 경로는 실제로 쓰지 않는다 — 파일을 둘로 안 늘린다).
   // effectiveEscMenuUi 는 이미 resolveEscMenuArt 가 blob 없는 역할을 걸러낸 뒤라 여기 남은 assetId 는
   // 항상 escArtBlobs 에 있다(같은 assetId 로 getAsset 을 또 부르지 않음).
   for (const img of ESC_IMAGES) {
@@ -379,12 +386,18 @@ export async function collectProjectFiles(
     const { width, height, radius } = escSlotThumbMetrics(project.height);
     out.push({ path: `game/${ESC_SAVE_THUMB_MASK_FILE}`, data: await roundedMaskPng(width, height, radius) });
 
-    // 감상한 CG 갤러리 둥근 마스크 — 저장 슬롯과 같은 생성물·같은 게이트(escMenuActive). 발견한
-    // 아이템 쪽은 fit "contain" 으로 절대 자르지 않으니 마스크가 없다(정사각 유지가 사용자 결정).
+    // 감상한 CG 갤러리 둥근 마스크 — 저장 슬롯과 같은 생성물이지만 게이트는 escMenuActive 하나로
+    // 안 끝난다. 저장 슬롯 쪽 file_slots 화면은 세이브/로드에 항상 있어 escMenuActive 만으로
+    // 충분하지만, cg_thumb_mask 를 참조하는 screen cg_gallery() 자체가 hasCg(=resolveCgs(refs).length
+    // > 0, generate.ts) 게이트 뒤에 있다 — CG 가 하나도 없는 프로젝트는 화면 자체가 안 나가는데
+    // 마스크만 매 빌드마다 굽는 건 아무도 안 쓰는 PNG 를 zip 에 넣는 낭비다. 발견한 아이템 쪽은
+    // fit "contain" 으로 절대 자르지 않으니 마스크가 없다(정사각 유지가 사용자 결정).
     // 크기는 escCgThumbMetrics 단일 소스 — screensRpy 의 AlphaMask xysize 와 반드시 같은 값이어야
     // 마스크가 늘어나 모서리가 뭉개지지 않는다(CLAUDE.md).
-    const cg = escCgThumbMetrics(project.height);
-    out.push({ path: `game/${ESC_CG_THUMB_MASK_FILE}`, data: await roundedMaskPng(cg.width, cg.height, cg.radius) });
+    if (resolveCgs(refs).length > 0) {
+      const cg = escCgThumbMetrics(project.height);
+      out.push({ path: `game/${ESC_CG_THUMB_MASK_FILE}`, data: await roundedMaskPng(cg.width, cg.height, cg.radius) });
+    }
   }
 
   // 게임 아이콘 — ico 는 **game/ 밖 프로젝트 루트**로 나간다(Ren'Py 런처가 거기만 본다).

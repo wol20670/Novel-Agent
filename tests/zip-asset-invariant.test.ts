@@ -326,22 +326,36 @@ describe("회귀 (g): 저장 슬롯 마스크(gui/esc/save_thumb_mask.png)는 es
   it('escMenuUi 자체가 없으면 마스크 파일도 안 만든다(회귀 0 — 안 쓰는 파일을 매 빌드마다 굽지 않는다)', async () => {
     const { files } = await collectProjectFiles(plainProject());
     expect(files.some((f) => f.path === 'game/gui/esc/save_thumb_mask.png')).toBe(false);
-    // CG 마스크도 같은 게이트(escMenuActive)라 함께 안 만들어져야 한다.
+    // CG 마스크도 escMenuActive 가 꺼져 있으면 함께 안 만들어져야 한다(두 게이트 중 하나가
+    // 이미 false 라 CG 유무와 무관하게 이 케이스는 항상 없어야 정상).
     expect(files.some((f) => f.path === 'game/gui/esc/cg_thumb_mask.png')).toBe(false);
   });
 
-  it('ESC 롤 하나만(save 그룹과 무관한 card) 업로드해도 escMenu 활성 조건과 같아서 마스크가 만들어진다', async () => {
-    // buildEscMenuPlan(generate.ts) 의 게이트가 "어떤 롤이든 하나" 이므로, buildZip 의 마스크
-    // push 조건도 짝을 맞춰 같은 기준이어야 한다 — save_idle 류만 트리거하는 걸로 오판하면
+  it('ESC 롤 하나만(save 그룹과 무관한 card) 업로드해도 escMenu 활성 조건과 같아서 저장 슬롯 마스크가 만들어진다', async () => {
+    // buildEscMenuPlan(generate.ts) 의 게이트가 "어떤 롤이든 하나" 이므로, buildZip 의 저장 슬롯
+    // 마스크 push 조건도 짝을 맞춰 같은 기준이어야 한다 — save_idle 류만 트리거하는 걸로 오판하면
     // save 슬롯 없이 다른 그룹만 켠 프로젝트에서 참조(AlphaMask)는 없지만 스타일 활성화 자체는
     // 되므로(escMenu 존재 하나로 fileSlotsBody 전체가 갈린다) 파일이 빠지는 게 오히려 문제다.
-    // CG 마스크도 저장 마스크와 완전히 같은 게이트(escMenuActive)를 쓰므로 함께 확인한다 — 이
-    // 프로젝트엔 CG 장면이 없어 실제 참조는 없지만(cg_gallery 화면 자체가 생략), 게이트가
-    // "escMenu 활성" 하나뿐이라 파일은 그래도 만들어진다(저장 마스크와 같은 이유).
+    // kitchenSinkProject 는 CG 도 갖고 있어(kitchenScene) CG 마스크도 함께 만들어진다 — CG 유무에
+    // 따른 게이팅은 아래 describe 블록에서 따로 확인한다.
     const project = kitchenSinkProject({ escMenuUi: { images: { card: 'asset-esc-card' } } });
     const { files } = await collectProjectFiles(project);
     expect(files.some((f) => f.path === 'game/gui/esc/save_thumb_mask.png')).toBe(true);
     expect(files.some((f) => f.path === 'game/gui/esc/cg_thumb_mask.png')).toBe(true);
+    await expectNoDangling(project);
+  });
+});
+
+describe("회귀 (h): CG 갤러리 마스크(gui/esc/cg_thumb_mask.png)는 escMenu 활성 + CG 존재 둘 다일 때만 만들어진다", () => {
+  it('저장 슬롯 마스크와 게이트가 다르다 — CG 가 없는 ESC 프로젝트는 cg_thumb_mask.png 를 안 넣는다', async () => {
+    // cg_thumb_mask 를 참조하는 screen cg_gallery() 자체가 hasCg 게이트 뒤에 있어(screensRpy.ts),
+    // CG 가 하나도 없으면 화면이 안 나가는데 마스크만 매 빌드마다 굽는 건 낭비다(zip 불변식 위반은
+    // 아니지만 아무도 안 쓰는 PNG). plainProject() 는 CG 가 전혀 없는 장면 2개로 구성된다.
+    const project = { ...plainProject(), escMenuUi: { images: { card: 'asset-esc-card' } } };
+    const { files } = await collectProjectFiles(project);
+    // 저장 슬롯 화면(file_slots)은 CG 유무와 무관하게 항상 있으므로 마스크는 그대로 만들어진다.
+    expect(files.some((f) => f.path === 'game/gui/esc/save_thumb_mask.png')).toBe(true);
+    expect(files.some((f) => f.path === 'game/gui/esc/cg_thumb_mask.png')).toBe(false);
     await expectNoDangling(project);
   });
 });
@@ -459,27 +473,27 @@ describe('회귀 (e): ESC 메뉴 이미지 assetId 는 있지만 실제 blob 이
   });
 });
 
-describe("회귀 (f): ESC 메뉴 'bg'(공통 배경)는 game/gui/game_menu.png 를 대체하고 escImageFile('bg') 경로는 쓰지 않는다", () => {
-  it("escMenuUi.images.bg 가 project.menuArt.game 보다 우선한다", async () => {
-    const project = kitchenSinkProject({
-      menuArt: { game: 'asset-menu-game-1' },
-      escMenuUi: { images: { bg: 'asset-esc-bg' } },
-    });
+describe("회귀 (f): ESC 메뉴 'bg'(공통 배경)가 game/gui/game_menu.png 의 유일한 업로드 소스다", () => {
+  // project.menuArt.game 은 완전히 제거됐다(에셋 탭 "게임 메뉴" 줄과 ESC "공통 배경"이 같은 파일을
+  // 냈던 중복 업로드 자리 — 사용자가 ESC 에셋 세트 쪽으로 확정해 앞쪽을 없앴다). 이제 game_menu.png
+  // 소스는 escMenuUi.images.bg → 테마 그라데이션 두 단계뿐이다.
+  it('bg 를 올리면 그 blob 이 game/gui/game_menu.png 로 쓰인다(escImageFile(bg) 경로는 안 쓴다)', async () => {
+    const project = kitchenSinkProject({ escMenuUi: { images: { bg: 'asset-esc-bg' } } });
     const { files } = await collectProjectFiles(project);
     const gameMenu = files.find((f) => f.path === 'game/gui/game_menu.png');
     expect(gameMenu).toBeDefined();
-    // menuArt.game('asset-menu-game-1')이 아니라 esc bg('asset-esc-bg') blob 이 실제로 쓰여야 한다.
     expect(await (gameMenu!.data as Blob).text()).toBe('stub:asset-esc-bg');
     // escImageFile('bg') = 'gui/esc/bg.png' 자리엔 파일을 두 번 안 쓴다(둘로 안 늘린다).
     expect(files.some((f) => f.path === `game/${escImageFile('bg')}`)).toBe(false);
     await expectNoDangling(project);
   });
 
-  it('bg 가 없으면 기존처럼 menuArt.game → 그라데이션 폴백 순서를 그대로 따른다(회귀 0)', async () => {
-    const project = kitchenSinkProject({ menuArt: { game: 'asset-menu-game-1' } });
+  it('bg 가 없으면 테마 그라데이션으로 폴백한다', async () => {
+    const project = kitchenSinkProject();
     const { files } = await collectProjectFiles(project);
     const gameMenu = files.find((f) => f.path === 'game/gui/game_menu.png');
     expect(gameMenu).toBeDefined();
-    expect(await (gameMenu!.data as Blob).text()).toBe('stub:asset-menu-game-1');
+    // menuBackdropPng 모킹이 항상 이 고정 텍스트를 돌려준다(canvasMenu 모킹 참고) — 업로드 blob 이 아님.
+    expect(await (gameMenu!.data as Blob).text()).toBe('stub:menu-backdrop');
   });
 });

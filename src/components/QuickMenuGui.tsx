@@ -292,7 +292,9 @@ function LayoutControls() {
  * 이 미리보기는 접힘 애니메이션 없이 항상 패널 + 10개 버튼을 전부 보여준다.
  */
 function LayoutPreview() {
-  const bgId = useStore((s) => s.project.menuArt?.game);
+  // 퀵메뉴는 ESC 메뉴와 달리 실제로는 장면(배경) 위에 얹혀서 뜬다 — menuArt.game 이 없어진 지금은
+  // 미리보기 배경으로 첫 장면의 배경을 재사용한다(없으면 어두운 판 위에 버튼만 보인다).
+  const bgId = useStore((s) => s.project.scenes[0]?.backgroundAssetId);
   const panelId = useStore((s) => s.project.quickMenuUi?.panel);
   const panelWidth = useStore((s) => s.project.quickMenuUi?.panelWidth);
   const panelHeight = useStore((s) => s.project.quickMenuUi?.panelHeight);

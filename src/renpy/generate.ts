@@ -265,7 +265,7 @@ interface CgRef {
  * 같은 CG(같은 태그)가 여러 장면에 쓰여도 한 번만, 첫 등장 순서로 수집. 캡션은 그 CG 의 설명
  * (#CG 뒤 텍스트), 비어 있으면 장면 제목으로 대체한다.
  */
-function resolveCgs(refs: SceneAssetRef[]): CgRef[] {
+export function resolveCgs(refs: SceneAssetRef[]): CgRef[] {
   const seen = new Map<string, CgRef>();
   for (const ref of refs) {
     ref.cgTags.forEach((tag, i) => {
