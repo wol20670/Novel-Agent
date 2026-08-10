@@ -318,6 +318,23 @@ export interface Project {
    */
   gameIcon?: { ico?: string; window?: string };
   /**
+   * BGM 재생 방식(선택, 미지정이면 아래 기본값). 두 필드 모두 **켜는 쪽이 예외 동작**이 되도록
+   * 이름을 잡았다 — 그래야 필드가 없는 기존 프로젝트(=대다수)가 아무것도 안 해도 원하는 기본값을
+   * 그대로 받는다(옵트아웃 네이밍).
+   *  · restartSameBgm : 장면이 바뀔 때 **같은 곡이어도** 끊고 처음부터 다시 재생한다.
+   *                     미지정/false = 같은 곡이면 안 끊고 이어간다(기본, `play music … if_changed`
+   *                     — Ren'Py 가 현재 재생 중인 파일명과 새로 요청한 파일명이 같으면 dequeue·
+   *                     fadeout 을 건너뛰고 fadein 을 0 으로 강제한다. renpy/audio/music.py 확인).
+   *  · stopWhenUnset  : BGM 을 **지정하지 않은** 장면에 들어가면 음악을 멈춘다(`stop music fadeout 1.0`).
+   *                     미지정/false = 앞 곡이 그대로 이어진다(기본 = 기존 동작).
+   *                     판정은 `#BGM` 을 아예 안 적은 장면(hasBgm(scene)===false)에만 걸린다 —
+   *                     "안 적었다"와 "적었지만 아직 업로드를 안 했다"는 다르다. 후자(`#BGM` 은
+   *                     있는데 bgmAssetId 가 없는 장면)는 작가가 곡을 의도한 자리라, 아직 파일을
+   *                     안 올렸다고 음악을 멈춰버리면 업로드 전 임시 플레이 중 앞 곡이 끊기는
+   *                     불편이 생긴다 — 그래서 이름만 있고 파일이 없는 장면은 멈추지 않는다.
+   */
+  bgmPlayback?: { restartSameBgm?: boolean; stopWhenUnset?: boolean };
+  /**
    * 아이템(소품) 팝업 이미지 — 아이템 이름 → assetId. 같은 이름은 한 이미지를 공유한다.
    * 대본 `#아이템 <이름>` 태그로 참조되고, "발견한 아이템" 보관함이 이 목록을 갤러리로 보여준다.
    */

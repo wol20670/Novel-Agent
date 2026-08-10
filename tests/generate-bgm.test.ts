@@ -47,3 +47,68 @@ describe('generateRenpyFiles: BGM 은 kind:bgm 마커 위치에서 재생(장면
     expect(s).not.toContain('play music');
   });
 });
+
+describe('generateRenpyFiles: project.bgmPlayback — 재생 방식 토글', () => {
+  it('기본값(설정 없음)은 play music 뒤에 if_changed 가 붙는다(같은 곡이면 안 끊고 이어감)', () => {
+    const { files } = generateRenpyFiles(
+      projectWith([scene({ bgm: 'busy_city', bgmAssetId: 'a1', lines: [dialogue('민주', '안녕')] })]),
+    );
+    const s = contentOf(files, 'game/script.rpy');
+    expect(s).toContain('play music "audio/');
+    const playLine = s.split('\n').find((l) => l.includes('play music "audio/'));
+    expect(playLine).toMatch(/fadein 1\.0 if_changed$/);
+  });
+
+  it('restartSameBgm: true 면 if_changed 가 없다(옛 동작 — 장면마다 무조건 재시작, 회귀 0 대상 문자열)', () => {
+    const { files } = generateRenpyFiles(
+      projectWith([scene({ bgm: 'busy_city', bgmAssetId: 'a1', lines: [dialogue('민주', '안녕')] })], {
+        bgmPlayback: { restartSameBgm: true },
+      }),
+    );
+    const s = contentOf(files, 'game/script.rpy');
+    const playLine = s.split('\n').find((l) => l.includes('play music "audio/'));
+    expect(playLine).toMatch(/fadein 1\.0$/);
+    expect(playLine).not.toContain('if_changed');
+  });
+
+  it('위치 마커(kind:bgm)가 있는 장면도 같은 헬퍼를 타서 if_changed 가 붙는다(두 방출 경로 일치 확인)', () => {
+    const lines: Line[] = [
+      dialogue('민주', '안녕'),
+      { kind: 'bgm', name: 'busy_city' },
+      dialogue('민주', '잘 가'),
+    ];
+    const { files } = generateRenpyFiles(
+      projectWith([scene({ bgm: 'busy_city', bgmAssetId: 'a1', lines })]),
+    );
+    const s = contentOf(files, 'game/script.rpy');
+    const playLine = s.split('\n').find((l) => l.includes('play music "audio/'));
+    expect(playLine).toMatch(/fadein 1\.0 if_changed$/);
+  });
+
+  it('stopWhenUnset: true + BGM 지정이 아예 없는 장면 → 그 라벨에 stop music fadeout 1.0', () => {
+    const { files } = generateRenpyFiles(
+      projectWith([scene({ lines: [dialogue('민주', '안녕')] })], {
+        bgmPlayback: { stopWhenUnset: true },
+      }),
+    );
+    const s = contentOf(files, 'game/script.rpy');
+    expect(s).toContain('stop music fadeout 1.0');
+  });
+
+  it('stopWhenUnset: true + #BGM 은 적었지만 bgmAssetId 없음 → stop music 이 안 나온다(업로드 대기 중인 자리를 끊지 않음)', () => {
+    const { files } = generateRenpyFiles(
+      projectWith([scene({ bgm: 'busy_city', lines: [dialogue('민주', '안녕')] })], {
+        bgmPlayback: { stopWhenUnset: true },
+      }),
+    );
+    const s = contentOf(files, 'game/script.rpy');
+    expect(s).not.toContain('stop music');
+    expect(s).not.toContain('play music'); // bgmAssetId 가 없으니 재생도 안 나온다(기존 규칙)
+  });
+
+  it('stopWhenUnset 미지정(기본)이면 BGM 없는 장면이어도 stop music 이 어디에도 없다(회귀 0)', () => {
+    const { files } = generateRenpyFiles(projectWith([scene({ lines: [dialogue('민주', '안녕')] })])); // bgmPlayback 없음
+    const s = contentOf(files, 'game/script.rpy');
+    expect(s).not.toContain('stop music');
+  });
+});

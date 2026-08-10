@@ -223,6 +223,7 @@ export default function AssetsTab() {
         <p className="text-xs text-gray-500 mb-3">
           BGM 이름이 같으면 한 번만 업로드해 모든 장면에 적용됩니다. Suno 등에서 만든 mp3 를 올리세요.
         </p>
+        <BgmPlaybackToggles />
         {bgms.length === 0 ? (
           <p className="text-gray-600 text-sm">BGM 지정 장면 없음</p>
         ) : (
@@ -236,6 +237,57 @@ export default function AssetsTab() {
 
       <CleanupSection />
       <RemoteCleanupSection />
+    </div>
+  );
+}
+
+/**
+ * BGM 재생 방식 토글 두 개(project.bgmPlayback, 생성기 쪽은 generate.ts scriptBody 의
+ * bgmRestart/bgmStopWhenUnset 참고). EscMenuGui.tsx 의 SidebarLogoToggle 과 같은 패턴 —
+ * 새 store 액션을 만들지 않고 이미 검증된 updateProjectMeta(저장·협업 push 경로)를 그대로 쓰고,
+ * onChange 안에서는 getState() 로 비반응 읽기(구독하면 bgmPlayback 이 바뀔 때마다 이 토글도
+ * 매번 리렌더된다).
+ */
+function BgmPlaybackToggles() {
+  const restartSameBgm = useStore((s) => s.project.bgmPlayback?.restartSameBgm ?? false);
+  const stopWhenUnset = useStore((s) => s.project.bgmPlayback?.stopWhenUnset ?? false);
+  const updateProjectMeta = useStore((s) => s.updateProjectMeta);
+  return (
+    <div className="card border-edge p-3 flex flex-col gap-2 mb-3">
+      <label className="flex items-start gap-2 text-xs text-gray-300 cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={restartSameBgm}
+          onChange={(e) => {
+            const prev = useStore.getState().project.bgmPlayback;
+            updateProjectMeta({ bgmPlayback: { ...prev, restartSameBgm: e.target.checked } });
+          }}
+        />
+        <span>
+          같은 BGM이어도 장면이 바뀌면 처음부터 다시 재생
+          <span className="block text-[10px] text-gray-500 mt-0.5">
+            기본은 같은 곡이면 안 끊고 이어갑니다. 다른 곡으로 바뀔 때는 어느 쪽이든 새로 재생됩니다.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 text-xs text-gray-300 cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={stopWhenUnset}
+          onChange={(e) => {
+            const prev = useStore.getState().project.bgmPlayback;
+            updateProjectMeta({ bgmPlayback: { ...prev, stopWhenUnset: e.target.checked } });
+          }}
+        />
+        <span>
+          BGM을 지정하지 않은 장면에서는 음악 정지
+          <span className="block text-[10px] text-gray-500 mt-0.5">
+            기본은 앞 장면의 곡이 그대로 이어집니다. #BGM 을 적었지만 아직 업로드하지 않은 장면은 멈추지 않습니다.
+          </span>
+        </span>
+      </label>
     </div>
   );
 }

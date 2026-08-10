@@ -502,6 +502,18 @@ function scriptBody(
   project: Project,
 ): string {
   const resolve = makeResolver(refs);
+  // BGM 재생 방식(project.bgmPlayback, types.ts 주석 참고) — 장면 루프 밖에서 한 번만 계산.
+  // 기본(둘 다 false/미지정)은 지금까지의 동작과 100% 동일해야 하므로(회귀 0), 옵트인일 때만
+  // 문자열이 달라진다.
+  const bgmRestart = project.bgmPlayback?.restartSameBgm === true;
+  const bgmStopWhenUnset = project.bgmPlayback?.stopWhenUnset === true;
+  // play music 를 내는 두 곳(장면 시작 폴백 / kind:'bgm' 위치 마커)이 반드시 같은 문자열을 내도록
+  // 헬퍼로 묶는다 — 따로 고치면 "마커 있는 장면만 이어진다" 같은 설명 안 되는 불일치가 생긴다.
+  // if_changed 는 Ren'Py 가 "지금 재생 중인 파일명과 요청한 파일명이 같으면 dequeue·fadeout 을
+  // 건너뛰고 fadein 을 0 으로 강제"하는 키워드(renpy/audio/music.py 확인) — 곡이 다르면 기존과
+  // 완전히 같은 경로(fadeout → fadein 1.0)를 그대로 탄다.
+  const playMusicLine = (file: string): string =>
+    `${indent(1)}play music "audio/${file}" fadein 1.0${bgmRestart ? '' : ' if_changed'}`;
   const itemTag = new Map(items.map((it) => [it.name, it.tag]));
   const spritesByChar = new Map<string, SpriteRef[]>();
   for (const sp of sprites) {
@@ -571,7 +583,13 @@ function scriptBody(
     // 위치 마커가 없는 기존 저장 데이터(재파싱 전)나 장면 맨 앞에서 지정된 곡은 지금처럼 장면 시작
     // 에서 바로 재생(폴백, 회귀 0). r.bgmFile 은 업로드본이 있을 때만 채워지므로 없으면 아무것도 안 낸다.
     if (r.bgmFile && !s.lines.some((l) => l.kind === 'bgm')) {
-      out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
+      out.push(playMusicLine(r.bgmFile));
+    } else if (bgmStopWhenUnset && !hasBgm(s)) {
+      // BGM 을 아예 지정하지 않은 장면(#BGM 자체가 없음 — 업로드 대기 중인 장면과는 다르다,
+      // playMusicLine 헬퍼 주석·types.ts bgmPlayback 주석 참고)이면 scene 문 바로 뒤(= 원래
+      // play music 이 나갔을 자리)에서 앞 장면의 곡을 멈춘다. 기본은 꺼짐이라 이 분기 자체가
+      // 안 타면 출력은 지금과 완전히 동일하다(회귀 0).
+      out.push(`${indent(1)}stop music fadeout 1.0`);
     }
     // CG 배경 전환: kind:'cg' 라인 위치에서 발동 — 그 지점부터 배경=CG, 스프라이트 숨김(장면 끝까지),
     // 대사창·TTS 는 계속. 위치 마커가 없는 기존 저장 데이터(재파싱 전)는 첫 CG 를 장면 시작부터 배경으로 폴백.
@@ -617,7 +635,7 @@ function scriptBody(
       if (line.kind === 'bgm') {
         // 대본에서 #BGM 태그가 나온 그 위치에서 재생 시작(장면 시작 아님). r.bgmFile 이 없으면
         // (업로드본 미등록) 없는 파일을 참조하지 않도록 아무것도 내지 않는다 — 장면 시작 게이트와 동일 규칙.
-        if (r.bgmFile) out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
+        if (r.bgmFile) out.push(playMusicLine(r.bgmFile));
         continue;
       }
       // 인물 숨김 전이 처리 — item/cg/bgm 줄은 위에서 이미 continue 했으므로 여기 도달하는 줄은
