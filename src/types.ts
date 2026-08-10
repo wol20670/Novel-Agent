@@ -363,8 +363,11 @@ export interface Project {
    * character = 대상 화자의 project.characters[].name. 대본을 다시 파싱해 그 이름이 사라지면
    * (캐릭터 삭제/개명) 생성기가 조용히 이 기능을 끈다 — 없는 캐릭터를 참조하지 않는다(characterDefs 의
    * `project.characters.find(c => c.name === playerName.character)` 게이트, 못 찾으면 undefined 와 동일 출력).
-   * Ren'Py 쪽 구현은 `Character(<callable>, dynamic=True)` — 대사를 낼 때마다 who() 를 다시 불러서
-   * (renpy/character.py) persistent 에 담긴 이름이 세이브를 넘어서도 즉시 반영된다.
+   * Ren'Py 쪽 구현은 `Character(<callable>, dynamic=True)` — say 문이 실행될 때마다 who() 를 다시
+   * 불러서(renpy/character.py) persistent 에 담긴 이름이 세이브를 넘어서도 따라온다.
+   * ⚠️ **"즉시"가 아니라 "다음 대사부터"다** — 설정에서 이름을 바꿔도 화면에 이미 떠 있는 줄과
+   * 기록(히스토리)의 옛 항목은 그대로 남는다. 엔진 한계이지 버그가 아니고 우회로도 없다
+   * (근거·시도하지 말아야 할 것은 CLAUDE.md "플레이어 지정 주인공 이름은 다음 대사부터" 항목 참고).
    */
   playerName?: { character: string };
   /** 메인 메뉴 이미지 GUI(업로드 전용). 비어 있으면 기존 텍스트 메뉴 그대로 나간다(회귀 0). */
