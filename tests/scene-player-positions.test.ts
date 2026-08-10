@@ -84,3 +84,39 @@ describe('computeStagePositions — ScenePlayer 미리보기가 generate.ts scri
     }
   });
 });
+
+describe('computeStagePositions — 인물 숨김(hideSprites, spriteHiddenFlags 단일 소스)도 CG 와 같은 방식으로 게이팅', () => {
+  // 민주(auto)·우측(right) 이 먼저 서고, 숨김 구간에서 좌측(left)이 처음 말한 뒤 다시 표시된다.
+  const characters: Character[] = [sprited('민주', 'auto'), sprited('우측', 'right'), sprited('좌측', 'left')];
+  const scene: Scene = {
+    id: 's2',
+    title: '장면2',
+    direction: [],
+    cg: [],
+    lines: [
+      { kind: 'dialogue', speaker: '민주', text: '줄0' }, // 0: 민주 등장(중앙 50)
+      { kind: 'dialogue', speaker: '우측', text: '줄1' }, // 1: 우측 등장(민주 30/우측 70 으로 재배치)
+      { kind: 'dialogue', speaker: '민주', text: '숨김', hideSprites: true }, // 2: 여기부터 숨김
+      { kind: 'dialogue', speaker: '좌측', text: '숨김 중 처음 등장' }, // 3: 숨김 중이라 순서에 안 들어감
+      { kind: 'dialogue', speaker: '민주', text: '다시 표시', hideSprites: false }, // 4: 여기부터 표시
+    ],
+    choices: [],
+    status: 'approved',
+  };
+
+  it('전이가 일어난 줄(hideSprites:true)부터 activeCgIdx>=0 과 동일하게 빈 Map', () => {
+    expect(computeStagePositions(scene, characters, 2, -1).size).toBe(0);
+  });
+
+  it('숨김 구간이 이어지는 동안(다음 줄도) 계속 빈 Map', () => {
+    expect(computeStagePositions(scene, characters, 3, -1).size).toBe(0);
+  });
+
+  it('다시 표시(hideSprites:false)되면, 숨김 중 처음 말한 캐릭터는 빠진 채 숨기기 전과 같은 좌표로 복원된다', () => {
+    const pos = computeStagePositions(scene, characters, 4, -1);
+    expect(pos.get('민주')).toBe(30);
+    expect(pos.get('우측')).toBe(70);
+    expect(pos.get('좌측')).toBeUndefined(); // 숨김 중에만 말한 캐릭터는 등장 순서에 안 들어감
+    expect(pos.size).toBe(2);
+  });
+});

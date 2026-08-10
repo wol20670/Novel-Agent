@@ -92,10 +92,18 @@ function carryLineMeta(next: Line, prev: Line): Line {
       i18n: mergeI18n(prev.i18n, next.i18n),
       voiced: prev.voiced,
       voiceAssetIds: prev.voiceAssetIds,
+      // emotion 과 같은 규칙 — 대본 태그(#인물숨김/#인물표시)가 있으면 그게 정본, 없으면 장면 카드
+      // 줄 버튼으로 지정한 값을 유지(재분석마다 UI 토글이 풀리면 안 된다).
+      hideSprites: next.hideSprites ?? prev.hideSprites,
     };
   }
   if (next.kind === 'narration' && prev.kind === 'narration') {
-    return { ...next, i18n: mergeI18n(prev.i18n, next.i18n), voiced: prev.voiced };
+    return {
+      ...next,
+      i18n: mergeI18n(prev.i18n, next.i18n),
+      voiced: prev.voiced,
+      hideSprites: next.hideSprites ?? prev.hideSprites,
+    };
   }
   return next;
 }
@@ -531,6 +539,8 @@ export function mergeScenes(prev: Scene[], next: Scene[], mode: AnalyzeMode): Sc
       // 대본에 #복장이 있으면 그게 정본(next 우선), 없으면 앱에서 지정한 예외(장면 카드 수동 지정)를
       // 승계 — carryLineMeta 의 "엑셀이 정본" 원칙과 동일.
       outfits: ns.outfits ?? prevMatch.outfits,
+      // 장면 시작 인물 숨김도 outfits 와 같은 자리·규칙(대본 태그 우선, 없으면 장면 카드 토글 유지).
+      hideSprites: ns.hideSprites ?? prevMatch.hideSprites,
     };
   });
 }

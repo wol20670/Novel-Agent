@@ -19,6 +19,7 @@ import {
   effectiveTextLocales,
   effectiveVoiceLocales,
   resolveOutfit,
+  spriteHiddenFlags,
   MAIN_MENU_SLOTS,
   MENU_BUTTON_STATES,
   mainMenuLayout,
@@ -556,6 +557,13 @@ function scriptBody(
     // 중앙, 2번째가 등장하는 순간 arrangePositions 로 다시 배치해 이미 서 있던 캐릭터도 스냅 이동.
     const revealedOrder: string[] = [];
     let currentPos = new Map<string, number>();
+    // 인물 숨김(hideSprites, spriteHiddenFlags 단일 소스) — 줄마다 숨김 여부를 미리 계산해두고,
+    // 전이(false→true/true→false)가 일어나는 줄에서만 hide/show 를 낸다. cgActive 와는 OR 로 합쳐
+    // 판단하되, cgActive 중엔 scene 문이 이미 다 지웠으므로 hide/복원 자체를 생략한다(아래 루프 참고).
+    const hiddenFlags = spriteHiddenFlags(s);
+    // hide 뒤엔 태그의 속성(의상/표정) 기억이 사라지므로, 다시 보여줄 때 쓸 마지막 속성을 기록해둔다.
+    const lastShown = new Map<string, { outfitAttr: string; attr: string }>();
+    let hiddenNow = false; // 지금까지 반영된 "유효 숨김" 상태(장면 시작은 항상 false — 아직 아무도 안 섰으므로 hide 대상이 없다).
     out.push(`# ── ${commentSafe(s.title)} ──`);
     out.push(`label ${r.label}:`);
     out.push(`${indent(1)}scene ${r.bgTag} at vn_bg with ${transition}`);
@@ -612,14 +620,38 @@ function scriptBody(
         if (r.bgmFile) out.push(`${indent(1)}play music "audio/${r.bgmFile}" fadein 1.0`);
         continue;
       }
+      // 인물 숨김 전이 처리 — item/cg/bgm 줄은 위에서 이미 continue 했으므로 여기 도달하는 줄은
+      // 항상 대사 또는 지문이다. hidden 은 이 줄의 목표 숨김 상태(spriteHiddenFlags), cgActive 와
+      // OR 로 합쳐 "유효 숨김"을 만든다 — 단, cgActive 중엔 scene 문이 이미 스프라이트를 전부 지운
+      // 뒤라 우리가 또 hide/show 를 낼 필요가 없다(오히려 없는 상태를 잘못 만짐).
+      const hidden = hiddenFlags[lineIdx];
+      const effHidden = hidden || cgActive;
+      if (!cgActive && effHidden !== hiddenNow) {
+        if (effHidden) {
+          // 서 있던 스프라이트를 전부 내린다. hide 뒤엔 태그의 속성 기억이 사라지므로, 다시 보여줄 때는
+          // 반드시 lastShown 에 적어둔 속성으로 show 를 다시 내야 한다(속성 없는 show 는 크래시).
+          for (const id of revealedOrder) out.push(`${indent(1)}hide ${id}`);
+        } else {
+          // 숨기기 직전 그 자리·그 표정으로 복원(lastShown). 숨김 구간에서 처음 말한 캐릭터는 애초에
+          // revealedOrder 에 들어간 적이 없으므로(아래 newlyRevealed 가 숨김 중엔 항상 빈 배열) 여기서
+          // 유령처럼 튀어나오지 않는다 — 다음에 말할 때 정상적으로 새로 등장한다.
+          for (const id of revealedOrder) {
+            const shown = lastShown.get(id);
+            if (!shown) continue;
+            out.push(`${indent(1)}show ${id} ${shown.outfitAttr} ${shown.attr} at vn_char(${currentPos.get(id) ?? 50})`);
+          }
+        }
+      }
+      hiddenNow = effHidden;
+
       if (line.kind === 'dialogue') {
         const speakerIds = lineSpeakerIds(line, ids);
         // 이번 줄에서 처음 등장하는(스프라이트 보유) 화자를 한 번에 모아 추가 — 합동 대사로 여럿이
         // 동시에 처음 등장해도 재배치가 한 번만 일어나게. 새 등장이 있으면 전체를 다시 배치하고,
         // 이번 줄 화자가 아니면서 이미 서 있던 캐릭터 중 위치가 바뀐 쪽만 스냅 이동시킨다(속성 생략
         // — Ren'Py는 태그의 마지막 표시 속성을 유지하므로 표정·의상 재지정 불필요).
-        // CG 배경이 켜진 뒤에는 스프라이트 등장·재배치를 전부 억제(장면 끝까지 인물 없음).
-        const newlyRevealed = cgActive
+        // CG 배경이 켜졌거나 인물 숨김 중이면 스프라이트 등장·재배치를 전부 억제.
+        const newlyRevealed = effHidden
           ? []
           : speakerIds.filter((id) => spritesByChar.has(id) && !revealedOrder.includes(id));
         if (newlyRevealed.length) {
@@ -636,8 +668,8 @@ function scriptBody(
           }
         }
         const want = attrFor(effectiveEmotion(line, s, project));
-        // 스프라이트가 있는 화자(들) 등장 — 합동 대사면 멤버 전원이 함께 선다. CG 배경 중엔 세우지 않음.
-        for (const sid of cgActive ? [] : speakerIds) {
+        // 스프라이트가 있는 화자(들) 등장 — 합동 대사면 멤버 전원이 함께 선다. CG 배경·인물 숨김 중엔 세우지 않음.
+        for (const sid of effHidden ? [] : speakerIds) {
           const owned = spritesByChar.get(sid);
           if (!owned || !owned.length) continue;
           // 이 장면에서 입을 의상 — 장면 직접 지정 > 배경 키워드 규칙 > 기본(resolveOutfit 우선순위).
@@ -651,6 +683,7 @@ function scriptBody(
             (pool.some((o) => o.attr === want) && want) ||
             (pool.some((o) => o.attr === 'neutral') ? 'neutral' : pool[0].attr);
           out.push(`${indent(1)}show ${sid} ${outfitAttr} ${attr} at vn_char(${currentPos.get(sid) ?? 50})`);
+          lastShown.set(sid, { outfitAttr, attr }); // 다음 숨김→표시 전환 때 이 속성으로 복원한다.
         }
         // 말하는 주체: 합동이면 묶음 Character, 아니면 단일 화자.
         const voiceId =

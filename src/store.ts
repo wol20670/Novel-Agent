@@ -220,6 +220,11 @@ interface State {
   updateScene: (id: string, patch: Partial<Scene>) => void;
   /** 대사 한 줄의 표정을 수동 지정(undefined = 자동 추론으로 되돌림). */
   setLineEmotion: (sceneId: string, lineIndex: number, emotion: Expression | undefined) => void;
+  /**
+   * 대사/지문 한 줄부터 스프라이트 숨김을 override(3-state: true=숨김/false=표시/undefined=이전
+   * 줄 상태 상속). 판정 단일 소스는 spriteHiddenFlags(types.ts) — 이 액션은 그 입력값만 바꾼다.
+   */
+  setLineHideSprites: (sceneId: string, lineIndex: number, hide: boolean | undefined) => void;
   /** 대사/지문 한 줄의 원문(base) 텍스트를 실시간 수정한다(대사·지문 공통). */
   setLineText: (sceneId: string, lineIndex: number, text: string) => void;
   /** 대사/지문 한 줄의 로케일 번역(i18n)을 수정한다. 빈 값이면 그 로케일을 제거(원문 폴백). */
@@ -240,6 +245,11 @@ interface State {
   /** AI 표정 배정 진행 상황(장면 기준) — null = 실행 중 아님. translateProgress 와 동일한 표시 계약. */
   emotionProgress: { done: number; total: number } | null;
   setSceneStatus: (id: string, status: Scene['status']) => void;
+  /**
+   * 이 장면을 스프라이트 숨김 상태로 시작할지(장면 카드 헤더 토글). 차량 내부처럼 인물이 서 있는
+   * 구도가 어색한 장면 전체에 쓴다 — 줄 단위로만 숨기려면 setLineHideSprites 를 쓸 것.
+   */
+  setSceneHideSprites: (sceneId: string, hide: boolean) => void;
   approveAll: () => void;
   selectScene: (id: string | null) => void;
   setActiveTab: (t: Tab) => void;
@@ -834,6 +844,18 @@ export const useStore = create<State>((set, get) => {
       );
     },
 
+    setLineHideSprites: (sceneId, lineIndex, hide) => {
+      setScenes(
+        get().project.scenes.map((sc) => {
+          if (sc.id !== sceneId) return sc;
+          const lines = sc.lines.map((l, i) =>
+            i === lineIndex && (l.kind === 'dialogue' || l.kind === 'narration') ? { ...l, hideSprites: hide } : l,
+          );
+          return { ...sc, lines };
+        }),
+      );
+    },
+
     setLineText: (sceneId, lineIndex, text) => {
       setScenes(
         get().project.scenes.map((sc) => {
@@ -1099,6 +1121,10 @@ export const useStore = create<State>((set, get) => {
 
     setSceneStatus: (id, status) => {
       setScenes(get().project.scenes.map((sc) => (sc.id === id ? { ...sc, status } : sc)));
+    },
+
+    setSceneHideSprites: (sceneId, hide) => {
+      setScenes(get().project.scenes.map((sc) => (sc.id === sceneId ? { ...sc, hideSprites: hide } : sc)));
     },
 
     approveAll: () => {

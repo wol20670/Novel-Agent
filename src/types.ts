@@ -80,8 +80,22 @@ export type Line =
        * 쓴다 — 언어마다 다른 배우를 붙여도 자막 언어와 상관없이 플레이어가 음성 언어만 따로 고를 수 있다.
        */
       voiceAssetIds?: Partial<Record<Locale, string>>;
+      /**
+       * 이 줄부터 스프라이트 숨김(true)/다시 표시(false) — `#인물숨김`/`#인물표시` 태그나 장면 카드
+       * 줄 버튼으로 지정. 미지정(undefined)이면 앞 줄의 상태를 그대로 유지(3-state, spriteHiddenFlags
+       * 참고). 차량 내부처럼 인물이 서 있는 구도가 어색한 장면에서, 배경을 CG로 바꾸지 않고도
+       * 주인공처럼 얼굴 없이 대사만 내보내고 싶을 때 쓴다.
+       */
+      hideSprites?: boolean;
     }
-  | { kind: 'narration'; text: string; i18n?: I18nText; voiced?: boolean }
+  | {
+      kind: 'narration';
+      text: string;
+      i18n?: I18nText;
+      voiced?: boolean;
+      /** dialogue 쪽과 완전히 같은 의미(3-state) — spriteHiddenFlags 참고. */
+      hideSprites?: boolean;
+    }
   /**
    * 아이템(소품) 팝업 인라인 이벤트. 태그 위치(그 순간)에 사물을 라이트박스로 잠깐 띄운다.
    * name === '' 이면 hide 마커(#아이템끝). 이미지는 프로젝트 공유(Project.itemAssetIds[name]).
@@ -123,6 +137,12 @@ export interface Scene {
   bgmAssetId?: string;
   /** #복장 — 이 장면에서 캐릭터별로 입을 의상(캐릭터명 → 의상명). 없으면 '기본'. */
   outfits?: Record<string, string>;
+  /**
+   * 이 장면을 스프라이트 숨김 상태로 시작할지(기본 false) — `#인물숨김`/`#인물표시` 태그나 장면 카드
+   * 토글로 지정. 장면이 바뀌면 항상 이 값으로 리셋된다(배경 변경으로 파서가 장면을 쪼개는 것과 같은
+   * 단위). 줄 단위 override 는 Line.hideSprites, 최종 판정은 spriteHiddenFlags 단일 소스.
+   */
+  hideSprites?: boolean;
 }
 
 /**
@@ -968,6 +988,24 @@ export function resolveOutfit(rules: OutfitRule[] | undefined, scene: Scene, cha
   return best?.outfit ?? '기본';
 }
 
+/**
+ * 장면의 줄마다 "스프라이트를 숨겨야 하는지"를 판정하는 단일 소스 — generate.ts(scriptBody)와
+ * ScenePlayer 가 각자 계산하면 어긋나므로(CLAUDE.md 의 resolveEmotion 규칙과 같은 이유) 이 함수만
+ * 본다. scene.hideSprites(장면 시작 상태)에서 출발해, 각 줄의 hideSprites(dialogue/narration 만
+ * 가짐, 3-state — 미지정이면 앞 줄 상태 유지)로 뒤집힌다. `#CG` 게이팅(장면 끝까지 스프라이트 숨김)은
+ * 이 함수가 모르는 별개 상태라 호출 측이 OR 로 합친다.
+ */
+export function spriteHiddenFlags(scene: Scene): boolean[] {
+  const flags: boolean[] = [];
+  let hidden = scene.hideSprites ?? false;
+  for (const line of scene.lines) {
+    if ((line.kind === 'dialogue' || line.kind === 'narration') && line.hideSprites !== undefined) {
+      hidden = line.hideSprites;
+    }
+    flags.push(hidden);
+  }
+  return flags;
+}
 
 /**
  * 프로젝트의 base 로케일(대본 원문 언어). 미지정이면 'ko'.

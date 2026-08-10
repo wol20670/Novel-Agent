@@ -22,6 +22,7 @@ import {
   emojiFor,
   spriteAssetId,
   resolveOutfit,
+  spriteHiddenFlags,
   type Scene,
   type Character,
   type Expression,
@@ -43,6 +44,12 @@ const speakersOf = (l: Line): string[] =>
  * (ScenePlayer 의 렌더 조건) 그 상태에서는 위치가 안 쓰이지만, activeCgIdx<0 이면 아직 CG가
  * 시작되지 않았다는 뜻이라 scriptBody 의 cgActive 게이팅 없이 단순 누적으로도 정확히 같다.
  * 컴포넌트 밖의 순수 함수라 React 없이도 테스트할 수 있다(tests/scene-player-positions.test.ts).
+ *
+ * 인물 숨김(spriteHiddenFlags, generate.ts 와 공유하는 단일 판정 소스)도 CG 와 같은 방식으로 게이팅
+ * 한다 — 현재 줄이 숨김이면 빈 Map, 순서 누적 루프도 숨김 줄은 건너뛴다(그 구간에서 처음 말한
+ * 캐릭터는 order 에 안 들어가 다시 표시돼도 유령처럼 안 튀어나온다 — generate.ts 의 revealedOrder와
+ * 대칭). 숨기기 전에 이미 순서에 들어간 캐릭터는 숨김 구간을 건너뛰어도 order 에 그대로 남아있어
+ * 다시 표시되면 같은 자리로 복원된다(generate.ts 의 lastShown 복원과 대칭).
  */
 export function computeStagePositions(
   scene: Scene,
@@ -51,9 +58,12 @@ export function computeStagePositions(
   activeCgIdx: number,
 ): Map<string, number> {
   if (activeCgIdx >= 0) return new Map();
+  const hiddenFlags = spriteHiddenFlags(scene);
+  if (hiddenFlags[uptoLine]) return new Map();
   const isNarrOnly = (name: string) => !!characters.find((c) => c.name === name)?.isProtagonist;
   const order: string[] = [];
   for (let k = 0; k <= uptoLine && k < scene.lines.length; k++) {
+    if (hiddenFlags[k]) continue;
     const l = scene.lines[k];
     if (l.kind !== 'dialogue') continue;
     for (const sp of speakersOf(l)) if (!isNarrOnly(sp) && !order.includes(sp)) order.push(sp);
@@ -208,9 +218,19 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
     };
   }, [cgAssetId, cgDesc, projW, projH]);
 
-  // 현재 줄까지 각 캐릭터의 "최신 표정"(Ren'Py 처럼 마지막 표정 유지).
+  // 인물 숨김 — generate.ts 와 공유하는 단일 판정 소스(spriteHiddenFlags). 지금 줄이 숨김이면
+  // 스프라이트를 아예 그리지 않는다(아래 렌더 게이트). 이 항목이 없으면(필드 미사용) 전부 false라
+  // 기존 동작과 동일.
+  const hiddenFlags = useMemo(() => spriteHiddenFlags(scene), [scene]);
+
+  // 현재 줄까지 각 캐릭터의 "최신 표정"(Ren'Py 처럼 마지막 표정 유지). 숨김 구간(hiddenFlags[k])에
+  // 등장한 화자는 생성기(revealedOrder)와 동일하게 목록에 넣지 않는다 — 그래야 다시 표시로 돌아왔을
+  // 때 숨김 중 처음 말한 캐릭터가 유령처럼 튀어나오지 않는다. 숨기기 전에 이미 서 있던 캐릭터는 이
+  // 루프가 그 이전 줄에서 채워둔 값을 그대로 들고 있으므로(숨김 구간은 그냥 건너뜀) 다시 표시될 때
+  // 자동으로 복원된다(생성기의 lastShown 복원과 대칭).
   const visible = new Map<string, Expression>();
   for (let k = 0; k <= i && k < total; k++) {
+    if (hiddenFlags[k]) continue;
     const l = scene.lines[k];
     if (l.kind !== 'dialogue') continue;
     const emo = emoOf(l);
@@ -259,7 +279,7 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
             배경 미생성
           </div>
         )}
-        {activeCgIdx < 0 && [...visible].map(([nm, ex]) => {
+        {activeCgIdx < 0 && !hiddenFlags[i] && [...visible].map(([nm, ex]) => {
           const c = charByName.get(nm);
           return c ? (
             <PreviewSprite key={nm} char={c} expr={ex} outfit={resolveOutfit(outfitRules, scene, nm)} xpct={positions.get(nm) ?? 50} k={charK} />

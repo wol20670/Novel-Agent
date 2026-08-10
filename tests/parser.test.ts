@@ -92,3 +92,38 @@ describe('parser: #BGM 위치 마커 (#CG 와 같은 패턴)', () => {
     expect(scenes[1].title).toContain('busy_city');
   });
 });
+
+describe('parser: #인물숨김 / #인물표시 (setBgm 과 같은 위치 마커 규칙)', () => {
+  it('장면 맨 앞이면 scene.hideSprites 로 바로 반영되고 라인엔 아무 흔적도 안 남는다', () => {
+    const { scenes } = parseText(['#S 차 안', '#인물숨김', '민주: 어디 가?'].join('\n'));
+    expect(scenes[0].hideSprites).toBe(true);
+    expect(scenes[0].lines).toEqual([
+      { kind: 'dialogue', speaker: '민주', text: '어디 가?', emotion: undefined, i18n: undefined, hideSprites: undefined },
+    ]);
+  });
+
+  it('도중에 나오면 다음 대사/지문 줄의 hideSprites 로 얹힌다(그 사이 줄은 영향 없음)', () => {
+    const text = ['#S 차 안', '민주: 출발!', '#인물숨김', '민주: 계속 가자', '#인물표시', '민주: 도착'].join('\n');
+    const { scenes } = parseText(text);
+    expect(scenes[0].hideSprites).toBeUndefined(); // 장면 시작엔 태그가 없었다
+    const lines = scenes[0].lines as Extract<(typeof scenes)[0]['lines'][number], { kind: 'dialogue' }>[];
+    expect(lines.map((l) => l.hideSprites)).toEqual([undefined, true, false]);
+  });
+
+  it('#인물등장 은 #인물표시 의 별칭이다', () => {
+    const text = ['#S 차 안', '민주: 하나', '#인물숨김', '민주: 둘', '#인물등장', '민주: 셋'].join('\n');
+    const { scenes } = parseText(text);
+    const lines = scenes[0].lines as Extract<(typeof scenes)[0]['lines'][number], { kind: 'dialogue' }>[];
+    expect(lines.map((l) => l.hideSprites)).toEqual([undefined, true, false]);
+  });
+
+  it('태그 이후 장면이 그대로 끝나면(다음 줄 없음) pendingHide 는 조용히 버려진다', () => {
+    // 두 번째 장면에서 hideSprites 가 실수로 새어나오지 않는지가 핵심 — startScene 이 pendingHide 를 비워야 한다.
+    const text = ['#S 장면1', '민주: 안녕', '#인물숨김', '#S 장면2', '민주: 반가워'].join('\n');
+    const { scenes } = parseText(text);
+    expect(scenes).toHaveLength(2);
+    expect(scenes[1].hideSprites).toBeUndefined();
+    const line2 = scenes[1].lines[0] as Extract<(typeof scenes)[0]['lines'][number], { kind: 'dialogue' }>;
+    expect(line2.hideSprites).toBeUndefined();
+  });
+});

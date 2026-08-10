@@ -8,6 +8,7 @@ import {
   LOCALE_LABEL,
   characterOutfits,
   resolveOutfit,
+  spriteHiddenFlags,
   type SceneStatus,
   type Expression,
   type Line,
@@ -57,6 +58,7 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
   const scene = useStore((s) => sceneById(s.project.scenes, sceneId))!;
   const update = useStore((s) => s.updateScene);
   const setStatus = useStore((s) => s.setSceneStatus);
+  const setSceneHide = useStore((s) => s.setSceneHideSprites);
   const select = useStore((s) => s.selectScene);
   const selected = useStore((s) => s.selectedSceneId === sceneId);
   const importBg = useStore((s) => s.importBackground);
@@ -69,6 +71,9 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
   // 배경 키워드 의상 규칙 — project 전체가 아니라 이 배열만 좁게 구독(SceneCard 는 memo 라 불필요한
   // 전체 리렌더를 피해야 한다).
   const outfitRules = useStore((s) => s.project.outfitRules);
+  // 줄마다 "유효 숨김 상태" — spriteHiddenFlags 단일 소스(generate.ts·ScenePlayer 와 동일 판정).
+  // 카드 렌더 한 번에 한 번만 계산해 LineRow(장면당 최대 수십 개)에 나눠준다.
+  const hiddenFlags = useMemo(() => spriteHiddenFlags(scene), [scene]);
   // 이 장면에 등장하는(대사 화자) 캐릭터 중 추가 의상을 가진 캐릭터만 — 의상 지정 UI 대상.
   const outfitChars = useMemo(() => {
     const names = new Set<string>();
@@ -133,6 +138,22 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
             </button>
           );
         })}
+        {/* 차량 내부처럼 인물이 서 있는 구도가 어색한 장면 전체를 인물 없이(주인공처럼 대사만)
+            내보낸다 — #CG 와 달리 배경은 그대로 두고, 줄 버튼으로 도중에 다시 표시할 수 있다. */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setSceneHide(sceneId, !scene.hideSprites);
+          }}
+          className={`chip flex items-center gap-1.5 ${
+            scene.hideSprites
+              ? 'bg-rose-500/15 text-rose-600 border-rose-500'
+              : 'border-edge text-gray-500 hover:text-gray-300'
+          }`}
+          title="이 장면을 인물 숨김 상태로 시작합니다(장면 끝까지가 아니라, 줄 단위로 다시 표시 가능)."
+        >
+          🚫 인물 숨김
+        </button>
       </div>
 
       {/* 배경 미리보기 */}
@@ -226,7 +247,15 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
       <div className="bg-ink/70 rounded-lg border border-edge p-3 max-h-44 overflow-y-auto text-sm mb-3 space-y-0.5">
         {scene.lines.length === 0 && <span className="text-gray-600 text-xs">대사 없음</span>}
         {scene.lines.map((l, i) => (
-          <LineRow key={i} sceneId={sceneId} index={i} line={l} scene={scene} charMap={charMap} />
+          <LineRow
+            key={i}
+            sceneId={sceneId}
+            index={i}
+            line={l}
+            scene={scene}
+            charMap={charMap}
+            effHidden={hiddenFlags[i]}
+          />
         ))}
         {scene.cg.map((c, i) => (
           <p key={`cg${i}`} className="text-pink-600 text-xs">
@@ -268,6 +297,8 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
 export default memo(SceneCard);
 
 type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
+/** 대사·지문 공통(hideSprites 를 갖는 두 kind) — LineHideToggle 이 받는 타입. */
+type HideableLine = Extract<Line, { kind: 'dialogue' }> | Extract<Line, { kind: 'narration' }>;
 
 /**
  * 대사/지문 한 줄 — 미리보기 + 인라인 편집.
@@ -280,12 +311,15 @@ function LineRow({
   line,
   scene,
   charMap,
+  effHidden,
 }: {
   sceneId: string;
   index: number;
   line: Line;
   scene: Scene;
   charMap: Map<string, Character>;
+  /** 이 줄의 유효 숨김 상태(spriteHiddenFlags[index]) — 버튼 표시·title 안내용. */
+  effHidden: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -406,6 +440,8 @@ function LineRow({
           {editing ? '완료' : '✏️'}
         </button>
 
+        <LineHideToggle sceneId={sceneId} index={index} line={line} effHidden={effHidden} />
+
         {isDlg && (
           <LineEmotion sceneId={sceneId} index={index} line={line as DialogueLine} scene={scene} charMap={charMap} />
         )}
@@ -415,6 +451,53 @@ function LineRow({
         <VoiceLab sceneId={sceneId} lineIndex={index} char={speakerChar} line={line as DialogueLine} baseLocale={base} />
       )}
     </div>
+  );
+}
+
+/** 상속(undefined) → 숨김(true) → 표시(false) → 상속 순으로 순환. */
+function nextHideState(v: boolean | undefined): boolean | undefined {
+  if (v === undefined) return true;
+  if (v === true) return false;
+  return undefined;
+}
+
+/**
+ * 대사/지문 한 줄부터 스프라이트 숨김을 3단계로 지정 — 상속(앞 줄 상태 유지)/숨김/표시.
+ * `#인물숨김`/`#인물표시` 태그와 완전히 같은 값(setLineHideSprites)이라 대본에서 지정한 값은
+ * 여기서도 그대로 보이고, 여기서 바꾼 값도 재분석 전까지는 그대로 유지된다(mergeScenes 참고).
+ */
+function LineHideToggle({
+  sceneId,
+  index,
+  line,
+  effHidden,
+}: {
+  sceneId: string;
+  index: number;
+  line: HideableLine;
+  effHidden: boolean;
+}) {
+  const setHide = useStore((s) => s.setLineHideSprites);
+  const raw = line.hideSprites;
+  const rawLabel = raw === undefined ? '상속' : raw ? '숨김' : '표시';
+  const icon = raw === undefined ? '👤' : raw ? '🚫' : '👤';
+  return (
+    <button
+      className={`text-[11px] rounded px-1 py-0.5 shrink-0 border outline-none ${
+        raw === true
+          ? 'border-rose-500 text-rose-500 bg-rose-500/10'
+          : raw === false
+            ? 'border-emerald-500 text-emerald-600 bg-emerald-500/10'
+            : 'border-edge text-gray-500 bg-panel2 opacity-60'
+      }`}
+      onClick={(e) => {
+        e.stopPropagation();
+        setHide(sceneId, index, nextHideState(raw));
+      }}
+      title={`이 줄부터 스프라이트: ${rawLabel} — 현재: ${effHidden ? '숨김' : '표시'}${raw === undefined ? '(상속)' : ''}. 클릭해서 순환(상속→숨김→표시)`}
+    >
+      {icon}
+    </button>
   );
 }
 

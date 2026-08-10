@@ -75,6 +75,13 @@ export class SceneBuilder {
   private speakers = new Set<string>();
   private current: Scene | null = null;
   private meta: ScriptMeta = {};
+  /**
+   * #인물숨김/#인물표시 가 장면 도중(이미 대사/지문이 나온 뒤)에 나오면, 그 값을 여기 잠깐 담아뒀다가
+   * 다음에 push 되는 dialogue/narration 줄이 소비한다(setBgm 의 위치 마커와 같은 문제의식이지만,
+   * hideSprites 는 UI 토글이 쓰는 값과 같은 필드라 마커 라인을 새로 만들지 않고 줄에 직접 얹는다).
+   * 장면이 그대로 끝나거나 새 장면이 시작되면(startScene) 소비되지 못한 채 조용히 버려진다.
+   */
+  private pendingHide?: boolean;
 
   /** #S 가 나오기 전 본문이 들어오면 자동으로 도입 장면을 연다. */
   private ensureScene(): Scene {
@@ -100,6 +107,7 @@ export class SceneBuilder {
   startScene(title: string) {
     this.current = this.newScene(title);
     this.scenes.push(this.current);
+    this.pendingHide = undefined; // 새 장면으로 넘어가면 이전 장면에서 못 쓴 예약값은 버린다.
   }
 
   /** 분할 장면의 표시 제목 루트(기존 " · 배경" 접미를 떼어 원 #S 제목만). */
@@ -122,9 +130,17 @@ export class SceneBuilder {
     if (carryOutfits) this.current!.outfits = { ...carryOutfits };
   }
 
+  /** pendingHide 를 한 번만 소비(읽고 비움) — dialogue/narration 두 갈래가 공유. */
+  private consumePendingHide(): boolean | undefined {
+    const v = this.pendingHide;
+    this.pendingHide = undefined;
+    return v;
+  }
+
   addDialogue(speaker: string, text: string, emotion?: string, i18n?: I18nText) {
     const sc = this.ensureScene();
     const tr = normalizeI18n(i18n);
+    const hideSprites = this.consumePendingHide();
 
     // 합동 대사: "한지수, 강민주" / "한지수 & 강민주" 처럼 둘 이상이 동시에 말하는 줄.
     // 멤버(실제 등록 이름) 각각을 캐릭터로 등록하고, 표시 라벨은 " & " 로 묶는다(유령 캐릭터 없음).
@@ -137,6 +153,7 @@ export class SceneBuilder {
         text: text.trim(),
         members,
         i18n: tr,
+        hideSprites,
       });
       return;
     }
@@ -152,12 +169,12 @@ export class SceneBuilder {
     // 표정 이름은 자유 문자열(사용자 커스텀 가능) → 비어있지 않으면 그대로 채택(작가 신뢰).
     const valid: Expression | undefined = emo ? emo : undefined;
     this.speakers.add(name);
-    sc.lines.push({ kind: 'dialogue', speaker: name, text: text.trim(), emotion: valid, i18n: tr });
+    sc.lines.push({ kind: 'dialogue', speaker: name, text: text.trim(), emotion: valid, i18n: tr, hideSprites });
   }
 
   addNarration(text: string, i18n?: I18nText) {
     const sc = this.ensureScene();
-    sc.lines.push({ kind: 'narration', text: text.trim(), i18n: normalizeI18n(i18n) });
+    sc.lines.push({ kind: 'narration', text: text.trim(), i18n: normalizeI18n(i18n), hideSprites: this.consumePendingHide() });
   }
 
   /** #아이템 <이름> = 팝업 표시, #아이템끝 = 빈 이름(hide 마커). 라인 흐름 "그 위치"에 꽂힌다. */
@@ -218,6 +235,19 @@ export class SceneBuilder {
       if (ch && outfit) map[ch] = outfit;
     }
     sc.outfits = map;
+  }
+  /**
+   * #인물숨김/#인물표시 — setBgm 과 같은 규칙: 장면 맨 앞(아직 대사/지문 없음)이면 장면 시작 상태
+   * (sc.hideSprites)로 바로 반영, 도중이면 다음에 push 되는 dialogue/narration 줄에 얹는다
+   * (pendingHide, consumePendingHide 가 소비). 장면이 그대로 끝나면 조용히 버려진다.
+   */
+  setHideSprites(hide: boolean) {
+    const sc = this.ensureScene();
+    if (sc.lines.length === 0) {
+      sc.hideSprites = hide;
+    } else {
+      this.pendingHide = hide;
+    }
   }
   addDirection(note: string) {
     this.ensureScene().direction.push(note.trim());
@@ -307,6 +337,16 @@ export function applyTag(b: SceneBuilder, body: string): boolean {
   }
   if (t.startsWith('#복장')) {
     b.setOutfit(t.replace(/^#복장\s*/, ''));
+    return true;
+  }
+  // 인물(스프라이트) 숨김 — #CG 와 달리 배경은 그대로 두고 인물만 숨기며, 되돌릴 수 있다.
+  // 표시 쪽은 #인물표시/#인물등장 둘 다 받는다(둘 다 자연스러운 표기라 별칭 처리).
+  if (t.startsWith('#인물숨김')) {
+    b.setHideSprites(true);
+    return true;
+  }
+  if (t.startsWith('#인물표시') || t.startsWith('#인물등장')) {
+    b.setHideSprites(false);
     return true;
   }
   // 아이템(소품) 팝업. #아이템끝(닫기)을 #아이템보다 먼저 매칭한다.

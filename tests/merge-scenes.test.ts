@@ -593,3 +593,54 @@ describe('previewMerge/mergeScenes: 태그성 필드(점프·선택지·의상·
     expect(preview.tagChangedTitles).toEqual([]);
   });
 });
+
+describe('mergeScenes: 인물 숨김(hideSprites) 승계 — outfits 와 같은 자리·규칙(대본 태그 우선, 없으면 UI 토글 유지)', () => {
+  it('장면 토글: next 에 태그가 없으면(undefined) 앱에서 지정한 prev.hideSprites 가 승계된다', () => {
+    const prev: Scene[] = [scene('s1', '장면1', { hideSprites: true })];
+    const next: Scene[] = [scene('n1', '장면1')]; // 대본에 #인물숨김 태그 없음
+    const result = mergeScenes(prev, next, 'merge');
+    expect(result[0].hideSprites).toBe(true);
+  });
+
+  it('장면 토글: next 에 태그가 있으면(#인물숨김/#인물표시) 대본이 정본이라 그게 이긴다', () => {
+    const prev: Scene[] = [scene('s1', '장면1', { hideSprites: true })];
+    const next: Scene[] = [scene('n1', '장면1', { hideSprites: false })]; // 대본이 명시적으로 표시
+    const result = mergeScenes(prev, next, 'merge');
+    expect(result[0].hideSprites).toBe(false);
+  });
+
+  it('줄 override: 텍스트가 그대로면 앱에서 지정한 prev 줄의 hideSprites 가 승계된다(emotion 과 동일 규칙)', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '숨겨줘', hideSprites: true },
+          { kind: 'narration', text: '다시 보여줘', hideSprites: false },
+        ],
+      }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '숨겨줘' }, // 태그 없음(undefined) → prev 승계
+          { kind: 'narration', text: '다시 보여줘' },
+        ],
+      }),
+    ];
+    const result = mergeScenes(prev, next, 'merge');
+    const [l1, l2] = result[0].lines as Line[];
+    expect((l1 as Extract<Line, { kind: 'dialogue' }>).hideSprites).toBe(true);
+    expect((l2 as Extract<Line, { kind: 'narration' }>).hideSprites).toBe(false);
+  });
+
+  it('줄 override: next 대본에 값이 있으면(#인물숨김 재태깅) prev 값을 덮어쓴다', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', { lines: [{ kind: 'dialogue', speaker: '민주', text: '숨겨줘', hideSprites: true }] }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', { lines: [{ kind: 'dialogue', speaker: '민주', text: '숨겨줘', hideSprites: false }] }),
+    ];
+    const result = mergeScenes(prev, next, 'merge');
+    const [l1] = result[0].lines as Extract<Line, { kind: 'dialogue' }>[];
+    expect(l1.hideSprites).toBe(false);
+  });
+});
