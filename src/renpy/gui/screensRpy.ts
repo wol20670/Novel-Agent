@@ -2221,17 +2221,34 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
         pos (${px(escMenu, ESC_LAYOUT.contentLeft)}, ${px(escMenu, ESC_LAYOUT.ruleY)})`
     : '';
 
-  // 좌측 사이드바 타이틀 로고(작업 3) — 메인 메뉴 로고(mainMenuUi.logo)를 작게 재사용한다(사용자
-  // 결정). escMenu.titleLogo 가 없으면(로고 자체가 없거나 showSidebarLogo=false — buildEscMenuPlan
-  // 이 이미 판단해서 넘긴다) 빈 문자열(회귀 0). `if not main_menu:` 로 감싸는 이유: screen
-  // navigation() 은 텍스트 메인 메뉴에서도 함께 쓰이는데, 메인 메뉴엔 이미 자기 로고가 따로 있어
-  // (buildImageMainMenuScreen) 안 걸면 타이틀 화면에 로고가 두 번 나온다. add 블록엔 정적 속성만
-  // (fit/xysize/pos) — CLAUDE.md 규칙: 화면 언어의 add 블록엔 애니메이션 ATL 금지.
-  let escNavLogo = '';
+  // 좌측 사이드바 타이틀 로고 — 메인 메뉴 로고(mainMenuUi.logo)를 작게 재사용한다(사용자 결정).
+  // escMenu.titleLogo 가 없으면(로고 자체가 없거나 showSidebarLogo=false — buildEscMenuPlan 이 이미
+  // 판단해서 넘긴다) 빈 문자열(회귀 0). `screen game_menu()`(메뉴 화면 전용)에만 조건 없이 얹는다 —
+  // `screen navigation()`은 텍스트 메인 메뉴도 함께 쓰는 공용 화면이라 거기 두면(예전 배치) 메인
+  // 메뉴엔 이미 자기 로고가 따로 있어(buildImageMainMenuScreen) 타이틀 화면에 로고가 두 번 나와
+  // `if not main_menu:` 래핑이 필요했다. game_menu 는 메뉴 화면 전용이라 그 문제가 없고, 오히려
+  // 타이틀에서 연 설정 화면에도 로고가 나오길 원한다(사용자 결정 — 아래 gameMenuBackground 와 같은
+  // 이유로 "타이틀에서 연 메뉴도 ESC 메뉴처럼 보이게" 통일). add 블록엔 정적 속성만(fit/xysize/pos)
+  // — CLAUDE.md 규칙: 화면 언어의 add 블록엔 애니메이션 ATL 금지.
+  let escGameMenuLogo = '';
   if (escMenu && escMenu.titleLogo) {
     const { width, height } = escMenu.titleLogo;
-    escNavLogo = `\n\n    if not main_menu:\n        add Transform("${TITLE_LOGO_FILE}", fit="contain", xysize=(${width}, ${height})):\n            pos (${px(escMenu, ESC_LAYOUT.sidebarLogoX)}, ${px(escMenu, ESC_LAYOUT.sidebarLogoY)})`;
+    escGameMenuLogo = `\n\n    add Transform("${TITLE_LOGO_FILE}", fit="contain", xysize=(${width}, ${height})):\n        pos (${px(escMenu, ESC_LAYOUT.sidebarLogoX)}, ${px(escMenu, ESC_LAYOUT.sidebarLogoY)})`;
   }
+
+  // 게임 메뉴 배경 — 사용자 결정: 타이틀에서 연 메뉴("환경설정" 등)도 ESC 공통배경으로 통일한다.
+  // stock 은 main_menu 여부로 gui.main_menu_background/gui.game_menu_background 를 갈라 쓰는데,
+  // ESC 이미지 모드는 buildEscMenuStyles 가 game_menu_outer_frame 의 어두운 스크림(Solid)을 걷어
+  // 낸다 — 업로드한 ESC 공통배경이 이미 사이드바+카드를 그린 완성 아트라는 전제라서다. 타이틀에서
+  // 들어오면 스크림도 카드도 없는 맨 타이틀 아트 위라 제목·내비 글자가 묻힌다(실기 버그). 그래서
+  // **스크림을 걷는 조건(has('bg'))과 반드시 같은 게이트**로 분기 자체를 없애고 game_menu_background
+  // 하나로 고정한다 — 어긋나면 "스크림도 없고 배경은 타이틀 아트"(원래 버그) 또는 "ESC 배경 위에
+  // 스크림 이중"이 된다. bg 를 안 올렸으면(다른 ESC 롤만 쓰거나 ESC 자체를 안 쓰면) 기존
+  // main_menu/game_menu 분기를 글자 하나 안 바꾸고 그대로 낸다(회귀 0).
+  const gameMenuBackground =
+    escMenu && escMenu.has.has('bg')
+      ? `    add Transform(gui.game_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))`
+      : `    if main_menu:\n        add Transform(gui.main_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))\n    else:\n        add Transform(gui.game_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))`;
 
   const base = String.raw`################################################################################
 ## 자동 생성: 자체 GUI 화면 (zero-PNG, Solid 기반)
@@ -2548,7 +2565,7 @@ ${galleryNav}
 
         if renpy.variant("pc"):
 
-            textbutton _("종료") action Quit(confirm=not main_menu)${escNavLogo}
+            textbutton _("종료") action Quit(confirm=not main_menu)
 
 
 style navigation_button is gui_button
@@ -2601,10 +2618,7 @@ screen game_menu(title, scroll=None, yinitial=0.0, spacing=0):
 
     style_prefix "game_menu"
 
-    if main_menu:
-        add Transform(gui.main_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))
-    else:
-        add Transform(gui.game_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))
+${gameMenuBackground}
 
     frame:
         style "game_menu_outer_frame"
@@ -2650,7 +2664,7 @@ screen game_menu(title, scroll=None, yinitial=0.0, spacing=0):
 
                     transclude
 
-    use navigation
+    use navigation${escGameMenuLogo}
 
     textbutton _("돌아가기"):
         style "return_button"

@@ -679,42 +679,94 @@ describe('generateRenpyFiles: 기록(대사 로그) 화면 본문 — ESC 모드
   });
 });
 
-describe('generateRenpyFiles: 좌측 사이드바 타이틀 로고(작업 3) — mainMenuUi.logo 재사용', () => {
-  it('mainMenuUi.logo 가 없으면 navigation 화면에 title_logo 참조가 없다', () => {
+/**
+ * screens.rpy 전체에서 screen game_menu(...) 정의 하나만 잘라낸다 — "add Transform(" 은 다른 화면
+ * (메인 메뉴 자체 로고 등)에도 나오므로 전체 문자열 검색은 오검출이다(mainMenuBlock/historyBlock 과
+ * 같은 이유, fixtures.ts 참고). 끝 지점은 screen 정의 바로 다음에 오는 첫 style 문(base 템플릿에서
+ * 항상 그 자리에 있다).
+ */
+function gameMenuBlock(sc: string): string {
+  const start = sc.indexOf('screen game_menu(title, scroll=None, yinitial=0.0, spacing=0):');
+  const end = sc.indexOf('style game_menu_outer_frame is empty', start);
+  return sc.slice(start, end);
+}
+
+describe('generateRenpyFiles: 좌측 사이드바 타이틀 로고 — mainMenuUi.logo 재사용, screen game_menu 전용', () => {
+  it('mainMenuUi.logo 가 없으면 title_logo 참조가 없다', () => {
     const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
     const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
     expect(sc).not.toContain('title_logo.png');
   });
 
-  it('로고가 있으면 screen navigation() 의 "if not main_menu:" 블록 안에만 참조가 나온다(메인메뉴 자체 로고와 별개)', () => {
+  it('로고가 있으면 screen game_menu() 블록 안에 조건 없이 나오고, screen navigation() 블록엔 없다(메인메뉴 자체 로고와 별개)', () => {
     const p = projectWith([plainScene()], {
       escMenuUi: { images: escImages(['bg']) },
       mainMenuUi: { logo: 'logo-asset-1', logoAspect: 2 },
     });
     const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
+
+    const gmBlock = gameMenuBlock(sc);
+    expect(gmBlock).toContain('    add Transform("gui/title_logo.png"');
+    // game_menu 는 타이틀 화면엔 안 열리는 메뉴 전용 화면이라 로고가 두 번 나올 일이 없다 — navigation
+    // 에 있던 예전 "if not main_menu:" 래핑이 이제 필요 없다.
+    expect(gmBlock).not.toContain('if not main_menu:');
+
     const navStart = sc.indexOf('screen navigation():');
     const navEnd = sc.indexOf('style navigation_button is gui_button');
     expect(navStart).toBeGreaterThan(-1);
     expect(navEnd).toBeGreaterThan(navStart);
-    const navBlock = sc.slice(navStart, navEnd);
-    expect(navBlock).toContain('if not main_menu:\n        add Transform("gui/title_logo.png"');
+    expect(sc.slice(navStart, navEnd)).not.toContain('title_logo.png');
+
     // 메인 메뉴 화면 자체의 큰 로고(buildImageMainMenuScreen) 1개 + 사이드바 작은 로고 1개 = 총 2번.
     expect((sc.match(/title_logo\.png/g) ?? []).length).toBe(2);
   });
 
-  it('showSidebarLogo: false 면 로고가 있어도 사이드바엔 나오지 않는다(메인 메뉴 자체 로고는 유지)', () => {
+  it('showSidebarLogo: false 면 로고가 있어도 game_menu 블록엔 나오지 않는다(메인 메뉴 자체 로고는 유지)', () => {
     const p = projectWith([plainScene()], {
       escMenuUi: { images: escImages(['bg']), showSidebarLogo: false },
       mainMenuUi: { logo: 'logo-asset-1' },
     });
     const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
-    const navStart = sc.indexOf('screen navigation():');
-    const navEnd = sc.indexOf('style navigation_button is gui_button');
-    const navBlock = sc.slice(navStart, navEnd);
-    // "elif not main_menu:"(기존 메인 메뉴 복귀 분기)도 부분 문자열로 "if not main_menu:" 를 포함해
-    // 오검출되므로, 사이드바 로고 삽입부의 정확한 들여쓰기(줄 시작 "    if not main_menu:")로 확인한다.
-    expect(navBlock).not.toContain('\n    if not main_menu:\n        add Transform(');
+    expect(gameMenuBlock(sc)).not.toContain('title_logo.png');
     // 메인 메뉴 자체 로고(1개)는 showSidebarLogo 와 무관하게 그대로 남는다.
     expect((sc.match(/title_logo\.png/g) ?? []).length).toBe(1);
+  });
+});
+
+describe('generateRenpyFiles: game_menu 배경 — 타이틀에서 연 메뉴도 ESC 공통배경으로 통일(has(\'bg\') 게이트)', () => {
+  it('bg 를 올리면 배경이 gui.game_menu_background 단일 분기로 통일되고 main_menu_background 참조가 없다', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
+    const block = gameMenuBlock(sc);
+    expect(block).toContain(
+      '    add Transform(gui.game_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))',
+    );
+    expect(block).not.toContain('gui.main_menu_background');
+    // game_menu 블록엔 "if main_menu:"가 배경 분기 말고 하단의 key "game_menu" 처리에도 등장하므로
+    // (base 템플릿 stock 부분, escMenu 와 무관) 배경 if/else 자체가 없어졌는지는 정확한 패턴으로 짚는다.
+    expect(block).not.toContain('    if main_menu:\n        add Transform(');
+  });
+
+  it('bg 없이 다른 ESC 롤만 올리면 기존 if main_menu: 분기가 그대로 남는다(스크림 제거도 같은 게이트라 짝이 맞다)', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['card']) } });
+    const { files } = generateRenpyFiles(p);
+    const sc = contentOf(files, 'game/screens.rpy');
+    const block = gameMenuBlock(sc);
+    expect(block).toContain(
+      '    if main_menu:\n        add Transform(gui.main_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))\n    else:\n        add Transform(gui.game_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))',
+    );
+    // 스크림 제거(buildEscMenuStyles)도 has('bg') 게이트라, bg 가 없으면 이쪽도 안 나와야 짝이 맞는다.
+    expect(escStylesBlock(sc)).not.toContain('style game_menu_outer_frame:\n    background None');
+  });
+
+  it('ESC 미사용이면 game_menu/navigation 두 화면 모두 stock 그대로다(회귀 0)', () => {
+    const sc = contentOf(generateRenpyFiles(projectWith([plainScene()])).files, 'game/screens.rpy');
+    const block = gameMenuBlock(sc);
+    expect(block).toContain(
+      '    if main_menu:\n        add Transform(gui.main_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))\n    else:\n        add Transform(gui.game_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))',
+    );
+    const navStart = sc.indexOf('screen navigation():');
+    const navEnd = sc.indexOf('style navigation_button is gui_button');
+    expect(sc.slice(navStart, navEnd)).not.toContain('title_logo.png');
   });
 });

@@ -313,7 +313,10 @@ describe('zip 에셋 불변식 매트릭스', () => {
     const { files } = await collectProjectFiles(project);
     const sc = files.find((f) => f.path === 'game/screens.rpy');
     expect(typeof sc?.data).toBe('string');
-    expect(sc!.data as string).toContain('if not main_menu:\n        add Transform("gui/title_logo.png"');
+    // 사이드바 로고는 이제 screen game_menu() 전용(메뉴 화면에만 열리므로 조건 없이 얹는다) —
+    // 예전 screen navigation() 배치 때 필요했던 "if not main_menu:" 래핑이 더는 없다.
+    expect(sc!.data as string).toContain('    add Transform("gui/title_logo.png"');
+    expect(sc!.data as string).not.toContain('if not main_menu:\n        add Transform("gui/title_logo.png"');
   });
 });
 
