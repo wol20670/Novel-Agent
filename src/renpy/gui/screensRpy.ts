@@ -246,6 +246,18 @@ const ESC_LAYOUT = {
   sidebarLogoX: 64,
   sidebarLogoY: 56,
   sidebarLogoWidth: 200,
+  /**
+   * 기록(대사 로그) 화면 — 시안 실측 근사(실기 보고 이 상수만 조정). 직전 커밋에서 고정 높이
+   * (gui.history_height=gui.scale(140))를 "내용 높이 + gui.scale(8) 간격"으로 바꿔 잘림은
+   * 없앴지만 문장이 너무 붙어 보였다(실기 확인) — 시안 실측(본문 아래 20px 에 구분선, 구분선
+   * 아래 60px 에 다음 항목 = 한 줄 항목 피치 ≈113)으로 간격·구분선을 맞춘다. 구분선은 이름 열
+   * x=500 에서 시작해 본문 오른쪽 끝 1660 에서 끝난다(콘텐츠 원점 contentLeft=420 기준 80..1240).
+   */
+  historyRowGap: 60, // 항목 사이(= gui.history_spacing 으로 나간다)
+  historyDividerGap: 20, // 본문 ↔ 구분선
+  historyRuleX: 80, // 콘텐츠 프레임 원점 기준 x
+  historyRuleWidth: 1160,
+  historyRuleThickness: 1,
 } as const;
 
 /**
@@ -319,6 +331,29 @@ export function escCgThumbMetrics(height: number): { width: number; height: numb
  */
 export function escSidebarLogoWidth(height: number): number {
   return Math.round(ESC_LAYOUT.sidebarLogoWidth * (height / 1080));
+}
+
+/**
+ * 기록(대사 로그) 화면 행 간격·구분선의 baked px — ESC_LAYOUT.history* 를 height/1080 배율로 굽는다.
+ * **간격 단일 소스**: guiRpy(`gui.history_spacing` define)와 screensRpy(historyBody 의 구분선 배치)가
+ * 반드시 같은 함수를 같은 인자로 불러야 한다(escSlotThumbMetrics 와 같은 이유, CLAUDE.md) — 하나만
+ * 바뀌면 행 사이는 벌어졌는데 구분선은 엉뚱한 자리에 그려지는 식으로 어긋난다.
+ */
+export function escHistoryMetrics(height: number): {
+  rowGap: number;
+  dividerGap: number;
+  ruleX: number;
+  ruleWidth: number;
+  ruleThickness: number;
+} {
+  const scale = height / 1080;
+  return {
+    rowGap: Math.round(ESC_LAYOUT.historyRowGap * scale),
+    dividerGap: Math.round(ESC_LAYOUT.historyDividerGap * scale),
+    ruleX: Math.round(ESC_LAYOUT.historyRuleX * scale),
+    ruleWidth: Math.round(ESC_LAYOUT.historyRuleWidth * scale),
+    ruleThickness: Math.round(ESC_LAYOUT.historyRuleThickness * scale),
+  };
 }
 
 /**
@@ -1284,6 +1319,83 @@ function fileSlotsBody(escMenu: EscMenuPlan | undefined): string {
   ].join('\n');
 }
 
+/** historyBody 의 ESC 분기가 쓰는 구분선 색 알파(팔레트 muted 위에 얹는다) — 불투명하면 표처럼
+ *  보인다(실기 확인, 사용자 결정). 25% 정도로 옅게 둔다. */
+const HISTORY_RULE_ALPHA = '40';
+
+/**
+ * screen history() 의 for 루프 + 빈 상태 라벨 본문. `escMenu` 가 없으면 지금 출력을 **글자 하나 안
+ * 바꾸고** 그대로 반환한다(회귀 0 — preferencesBody/fileSlotsBody 와 같은 계약).
+ *
+ * 있으면 대사 한 줄(이름+본문)을 vbox 로 묶고 그 아래 구분선(add Solid)을 이어붙여 카드 목록처럼
+ * 보이게 한다 — 직전 커밋(내용 높이 기반 스크롤로 잘림은 없앰)까지는 문장 사이 간격이 좁아 답답해
+ * 보였다(실기 확인). 행 간격(gui.history_spacing, guiRpy.ts)과 이 구분선 배치는 escHistoryMetrics
+ * (height) 가 단일 소스 — 둘이 다른 인자로 불리면 간격만 벌어지고 선은 엉뚱한 자리에 그려진다.
+ *
+ * ⚠️ `style_prefix "history"` 를 ESC 분기에서 쓰지 않는다 — 새로 감싸는 vbox 가 `history_vbox`
+ * (정의된 적 없는 스타일)를 찾다 죽는다(CLAUDE.md, preferencesBody 가 카드 배치에서 style_prefix 를
+ * 피하는 것과 같은 이유) — 그래서 위젯마다 스타일을 명시한다. 캐릭터별 이름 색 분기(`if "color" in
+ * h.who_args`)도 ESC 분기에서만 뺀다 — 시안은 이름이 전부 강조색(history_name_text, escPaletteStyles
+ * 가 결정) 통일이고, 밝은 아이보리 카드 위에서는 파스텔 캐릭터색이 대비가 약해 잘 안 읽힌다(사용자
+ * 결정) — 색은 이미 history_name_text 가 정하므로 이름 라벨엔 추가 작업이 없다.
+ */
+function historyBody(escMenu: EscMenuPlan | undefined): string {
+  if (!escMenu) {
+    return `        style_prefix "history"
+
+        for h in _history_list:
+
+            window:
+
+                has fixed:
+                    yfit True
+
+                if h.who:
+
+                    label h.who:
+                        style "history_name"
+                        substitute False
+
+                        if "color" in h.who_args:
+                            text_color h.who_args["color"]
+
+                $ what = renpy.filter_text_tags(h.what, allow=gui.history_allow_tags)
+                text what:
+                    substitute False
+
+        if not _history_list:
+            label _("대화 기록이 비어 있습니다.")`;
+  }
+
+  const m = escHistoryMetrics(escMenu.height);
+  // 구분선 색 — add Solid 는 정적 속성(xysize/xoffset)만 쓴다(애니메이션 ATL 금지, CLAUDE.md).
+  const ruleColor = withAlpha6(escMenu.colors.muted, HISTORY_RULE_ALPHA);
+  return `        for h in _history_list:
+
+            vbox:
+                spacing ${m.dividerGap}
+
+                window:
+                    style "history_window"
+                    has fixed:
+                        yfit True
+                    if h.who:
+                        label h.who:
+                            style "history_name"
+                            substitute False
+                    $ what = renpy.filter_text_tags(h.what, allow=gui.history_allow_tags)
+                    text what:
+                        style "history_text"
+                        substitute False
+
+                add Solid("${ruleColor}"):
+                    xysize (${m.ruleWidth}, ${m.ruleThickness})
+                    xoffset ${m.ruleX}
+
+        if not _history_list:
+            label _("대화 기록이 비어 있습니다.") style "history_label"`;
+}
+
 /**
  * 원본(텍스트 알약 메뉴) screen quick_menu() 정의(데스크톱) — base 템플릿의 `${quickMenuScreen}` 자리에
  * 그대로 보간되는 "기본값"(quickMenuUi 미지정일 때). mainMenuUi 와 같은 회귀 0 계약 — 원본 텍스트가
@@ -2030,6 +2142,17 @@ function inkOn(hex: string): string {
   return luma > 0.6 ? '#3b2f26' : '#fdf6ec';
 }
 
+/**
+ * "#rrggbb" → "#rrggbbaa"(구분선처럼 불투명하면 안 되는 자리용) — inkOn 과 같은 방어(정규식 매칭
+ * 실패 시 원본 그대로). 사용자가 입력한 색이 이미 8자리(#rrggbbaa)이거나 형식이 어긋나 있어도(EscColors
+ * 는 앱 UI 에서 6자리로만 입력받지만 값이 깨져 들어올 가능성을 방어) 크래시 대신 원본을 그대로 낸다.
+ */
+function withAlpha6(hex: string, alphaHex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  return `#${m[1]}${alphaHex}`;
+}
+
 /** screensRpy 옵션(위치 인자가 너무 늘어나 객체로 통합 — generateGuiFiles 의 GuiGenOptions 와 동형). */
 interface ScreensRpyOptions {
   locales?: GuiLocales;
@@ -2086,6 +2209,9 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
   const fileSlotsBodyText = fileSlotsBody(escMenu);
   // 설정 화면은 그룹을 카드로 감싸야 해서 본문 전체를 분기한다(escMenu 없으면 기존 텍스트 그대로).
   const prefsBody = preferencesBody(escMenu, locales, languagePrefs);
+  // 기록(대사 로그) 화면 본문 — escMenu 없으면 원본 그대로(byte-identical), 있으면 대사 한 줄마다
+  // 구분선을 두는 배치로 바뀐다(historyBody 참고).
+  const historyBodyText = historyBody(escMenu);
   // 제목 밑 장식 밑줄 — 시안에 있는 얇은 선. 화면 최상위 `label title` 바로 뒤에 절대좌표로 얹는다.
   const escTitleRule = escMenu
     ? `
@@ -2845,30 +2971,7 @@ screen history():
 
     use game_menu(_("기록"), scroll=("vpgrid" if gui.history_height else "viewport"), yinitial=1.0, spacing=gui.history_spacing):
 
-        style_prefix "history"
-
-        for h in _history_list:
-
-            window:
-
-                has fixed:
-                    yfit True
-
-                if h.who:
-
-                    label h.who:
-                        style "history_name"
-                        substitute False
-
-                        if "color" in h.who_args:
-                            text_color h.who_args["color"]
-
-                $ what = renpy.filter_text_tags(h.what, allow=gui.history_allow_tags)
-                text what:
-                    substitute False
-
-        if not _history_list:
-            label _("대화 기록이 비어 있습니다.")
+${historyBodyText}
 
 
 define gui.history_allow_tags = { "alt", "noalt", "rt", "rb", "art" }

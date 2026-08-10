@@ -76,5 +76,5 @@ export {
   DEFAULT_GRADIENT_HEIGHT,
 } from './theme';
 export type { GuiTheme, GenreId } from './theme';
-export { escSlotThumbMetrics, escCgThumbMetrics, escSidebarLogoWidth } from './screensRpy';
+export { escSlotThumbMetrics, escCgThumbMetrics, escSidebarLogoWidth, escHistoryMetrics } from './screensRpy';
 export type { MainMenuPlan, QuickMenuPlan, EscMenuPlan } from './screensRpy';

@@ -4,6 +4,10 @@
 // 레이아웃 수치는 Ren'Py 8.5.3 기본값을 따른다(검증된 값). gui.scale() 은 guisupport.rpy 제공.
 
 import { dialogueGradientMetrics, type GuiTheme } from './theme';
+// screensRpy.ts → guiRpy.ts 방향 import 는 없으니(screensRpy 는 gui/index.ts 만 참조) 순환이 안
+// 생긴다 — gui.history_spacing(아래)과 historyBody(screensRpy.ts)의 구분선 배치가 반드시 같은 baked
+// px 를 써야 해서(escSlotThumbMetrics 와 같은 단일 소스 패턴) 여기서 직접 가져와 쓴다.
+import { escHistoryMetrics } from './screensRpy';
 
 /** guiRpy 그라데이션 인자 — bool 하나로는 페이드 높이 비율까지 못 실어 옵션 객체로 뺐다. */
 export interface DialogueGradientOptions {
@@ -93,8 +97,11 @@ export function guiRpy(
   // 는 escMenuUi.images 존재만으로 켜진다) 행 높이를 내용에 맞춰 스크롤을 vpgrid 대신 viewport 로
   // 돌린다(screen history() 의 엔진 내장 분기, screensRpy.ts 참고) — 고정 높이(140)면 배경 카드
   // 아트 위에서 행이 답답하게 붙어 보인다(실기 확인). ESC 미사용 프로젝트는 항상 기존 값 그대로.
+  // 간격 값은 gui.scale()(720p 기준)이 아니라 escHistoryMetrics(height) 가 굽는 baked px 다 — ESC
+  // 좌표계(1920×1080 기준)와 안 맞으면 이중 스케일링이 된다(CLAUDE.md). historyBody(screensRpy.ts)
+  // 의 구분선 배치와 반드시 같은 함수·같은 인자를 써야 한다(단일 소스).
   const historyHeightLine = escActive ? 'None' : 'gui.scale(140)';
-  const historySpacingLine = escActive ? 'gui.scale(8)' : '0';
+  const historySpacingLine = escActive ? String(escHistoryMetrics(height).rowGap) : '0';
   // 대사창 배경: 그라데이션이면 buildZip 이 만든 gui/textbox.png 를 Frame(0,0)으로 늘려 쓰고(위로 투명),
   // 아니면 기존 단색 Solid. screens.rpy 의 window 가 이 변수만 참조한다(테마 표면적 최소화).
   const dialogueBg = gradientOn

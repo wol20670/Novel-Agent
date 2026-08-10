@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { generateRenpyFiles } from '../src/renpy/generate';
+import { escHistoryMetrics } from '../src/renpy/gui';
 import type { EscImageId, Line } from '../src/types';
 import { ESC_IMAGES, DEFAULT_ESC_COLORS } from '../src/types';
 import { fontGamePath } from '../src/fonts/fontCatalog';
@@ -614,11 +615,13 @@ describe('generateRenpyFiles: ESC 메뉴 글꼴(escMenuUi.fontId, 작업 1) — 
 });
 
 describe('generateRenpyFiles: 기록(대사 로그) 행 간격(작업 2) — ESC 활성 여부로만 갈린다(escFont 와 별개)', () => {
-  it('ESC 이미지가 있으면(글꼴 미지정이어도) 행 높이가 None, 간격이 8, 모바일 변형도 None', () => {
+  it('ESC 이미지가 있으면(글꼴 미지정이어도) 행 높이가 None, 간격이 escHistoryMetrics(1080).rowGap, 모바일 변형도 None', () => {
     const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
     const gui = contentOf(generateRenpyFiles(p).files, 'game/gui.rpy');
     expect(gui).toContain('define gui.history_height = None');
-    expect(gui).toContain('define gui.history_spacing = gui.scale(8)');
+    // gui.scale()(720p 기준)이 아니라 baked px — historyBody(screensRpy.ts)의 구분선과 같은 단일
+    // 소스(escHistoryMetrics)를 같은 인자(project.height=1080)로 불러야 한다.
+    expect(gui).toContain(`define gui.history_spacing = ${escHistoryMetrics(1080).rowGap}`);
     expect((gui.match(/history_height = None/g) ?? []).length).toBe(2); // 기본 + small 변형.
     expect(gui).not.toContain('gui.history_height = gui.scale(140)');
     expect(gui).not.toContain('gui.history_height = gui.scale(190)');
@@ -630,6 +633,49 @@ describe('generateRenpyFiles: 기록(대사 로그) 행 간격(작업 2) — ESC
     expect(gui).toContain('define gui.history_spacing = 0');
     expect(gui).toContain('gui.history_height = gui.scale(190)');
     expect(gui).not.toContain('history_height = None');
+  });
+});
+
+/**
+ * screens.rpy 전체에서 screen history() 정의 하나만 잘라낸다 — 'add Solid(' 같은 패턴은 item_popup
+ * (`add Solid("#00000073")`) 등 escMenu 와 무관한 다른 화면에도 항상 나오므로, historyBody 검증은
+ * 반드시 이 범위로 좁혀야 한다(mainMenuBlock 과 같은 이유, fixtures.ts 참고).
+ */
+function historyBlock(sc: string): string {
+  const start = sc.indexOf('screen history():');
+  const end = sc.indexOf('define gui.history_allow_tags', start);
+  return sc.slice(start, end);
+}
+
+describe('generateRenpyFiles: 기록(대사 로그) 화면 본문 — ESC 모드는 대사 한 줄마다 구분선을 두는 카드 배치로 바뀐다', () => {
+  it('ESC 모드면 구분선(add Solid)이 나오고 style_prefix "history" 도 who_args 색 분기도 없다', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const block = historyBlock(contentOf(generateRenpyFiles(p).files, 'game/screens.rpy'));
+    expect(block).toContain('add Solid(');
+    expect(block).not.toContain('if "color" in h.who_args');
+    // style_prefix "history" 는 새로 감싼 vbox 가 history_vbox(정의된 적 없는 스타일)를 찾다
+    // 죽는 원인이라(CLAUDE.md) ESC 분기에선 아예 쓰지 않는다 — 위젯마다 style 을 직접 명시한다.
+    expect(block).not.toContain('style_prefix "history"');
+    expect(block).toContain('window:\n                    style "history_window"');
+    expect(block).toContain('text what:\n                        style "history_text"');
+    expect(block).toContain('label _("대화 기록이 비어 있습니다.") style "history_label"');
+  });
+
+  it('ESC 미사용이면 stock 그대로 — 구분선 없이 style_prefix "history" 와 who_args 색 분기가 남는다(회귀 0)', () => {
+    const block = historyBlock(contentOf(generateRenpyFiles(projectWith([plainScene()])).files, 'game/screens.rpy'));
+    expect(block).toContain('        style_prefix "history"');
+    expect(block).toContain('if "color" in h.who_args:');
+    expect(block).not.toContain('add Solid(');
+    expect(block).toContain('label _("대화 기록이 비어 있습니다.")\n');
+  });
+
+  it('구분선의 xysize/xoffset 이 escHistoryMetrics 값과 일치한다', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const block = historyBlock(contentOf(generateRenpyFiles(p).files, 'game/screens.rpy'));
+    const m = escHistoryMetrics(1080);
+    expect(block).toContain('add Solid(');
+    expect(block).toContain(`xysize (${m.ruleWidth}, ${m.ruleThickness})\n                    xoffset ${m.ruleX}`);
+    expect(block).toContain(`vbox:\n                spacing ${m.dividerGap}`);
   });
 });
 
