@@ -148,7 +148,10 @@ export interface EscMenuPlan {
  * 카페테리아 에셋 기준 실측: 사이드바 0..318, 카드 362..1868 × 48..1028.
  * 여기 값이 곧 "카드 안쪽 여백을 둔 콘텐츠 박스"다 — 다른 아트를 쓰면 이 상수만 고치면 된다.
  */
-const ESC_LAYOUT = {
+// export: 테스트가 뷰포트 가용 폭(contentRight-contentLeft-scrollbarGutter 등)을 이 상수에서 직접
+// 읽어 기하 불변식을 검증한다(값을 테스트에 다시 하드코딩하면 여기 수치가 바뀌었을 때 조용히
+// 어긋난다 — galleryThumbRect/escSlotThumbMetrics 와 같은 "단일 소스" 원칙).
+export const ESC_LAYOUT = {
   /** 콘텐츠 좌측 시작 x(카드 좌측 362 + 안쪽 여백 58). */
   contentLeft: 420,
   /** 콘텐츠 우측 끝 x(카드 우측 1868 - 안쪽 여백 58). */
@@ -182,11 +185,19 @@ const ESC_LAYOUT = {
    * 비율이 서로 다른데(아이템은 정사각 유지, CG 는 16:9) 아트는 한 장뿐이라 **아트를 늘려 쓰되
    * 그림 자리를 "늘어난 아트의 회색 칸이 실제로 놓이는 위치"로 재계산**하는 쪽을 택했다(사용자
    * 결정) — galleryThumbRect(cellW, cellH) 가 그 계산이고, 아래 칸 크기는 그 결과가 원하는
-   * 그림칸(아이템 300×202 정사각 근사, CG 408×230≈16:9)을 만들어내도록 역산한 값이다.
+   * 그림칸(아이템 300×202 정사각 근사, CG 408×230≈16:9)을 만들어내도록 역산한 "실측 기준값"이다.
    *   - 아이템 4열: 324×288 → 그림칸 (300,202) fit "contain"(정사각 아이템이 202×202로 가운데).
    *   - CG 3열: 440×328 → 그림칸 (408,230)=1.774≈16:9 → fit "cover" + 둥근 마스크.
-   *   격자 폭 확인: 4×324+3×20=1356 / 3×440+2×20=1360, 둘 다 콘텐츠 폭(contentRight-contentLeft
-   *   =1390)에 여유 있게 들어간다(스크롤바 거터는 vpgrid 가 실제로 세로 스크롤될 때만 차감된다).
+   *
+   * ⚠️ 이 실측값을 격자 열 수만큼 그대로 늘어놓으면 뷰포트보다 넓어진다(실기에서 맨 오른쪽 열
+   * 카드 오른쪽 테두리가 스크롤바에 잘려 보인 원인) — 거터(scrollbarGutter)는 game_menu_viewport
+   * 스타일에 박힌 **고정폭**이라 vpgrid 가 실제로 세로 스크롤되는지와 무관하게 항상 차감된다(옛
+   * 주석의 "스크롤될 때만 차감" 은 틀렸다):
+   *   가용 폭 = contentRight-contentLeft-scrollbarGutter-GALLERY_GRID_SAFETY = 1810-420-40-8 = 1342
+   *   아이템 4열: 4×324+3×20 = 1356 (뷰포트 1350 대비 6 초과)
+   *   CG    3열: 3×440+2×20 = 1360 (뷰포트 1350 대비 10 초과)
+   * 그래서 이 상수들은 칸 크기의 "실측 기준값"일 뿐이고, 실제로 화면에 굽는 칸 크기는
+   * fitGalleryCell() 이 가용 폭에 맞춰 비율 그대로 줄인 ITEM_CELL/CG_CELL 이다(아래).
    */
   itemCellWidth: 324,
   itemCellHeight: 288,
@@ -261,6 +272,43 @@ const ESC_LAYOUT = {
 } as const;
 
 /**
+ * 갤러리 격자를 뷰포트 폭에 맞춰 줄일 때 남겨두는 안전 여백(px, 1920 기준). 둥근 테두리가
+ * 스크롤바 트랙에 딱 맞닿아 "잘려 보이는" 걸 막는 여유일 뿐 기하 계산엔 필요 없는 값이라(칸이
+ * 뷰포트에 들어가기만 하면 충분) 별도 상수로 이름 붙였다.
+ */
+export const GALLERY_GRID_SAFETY = 8;
+
+/**
+ * 갤러리 격자가 뷰포트(콘텐츠 폭 − 스크롤바 거터 − GALLERY_GRID_SAFETY)를 넘지 않도록 칸을 비율
+ * 그대로 줄인다. 이미 들어가는 크기면 실측값을 그대로 반환한다(불필요한 변경 방지 — 칸 크기를
+ * 손으로 다시 못 박지 않고 뷰포트 폭에서 유도해두면, 나중에 ESC_LAYOUT.contentLeft/Right 나
+ * scrollbarGutter 가 바뀌어도 이 함수가 자동으로 다시 맞춰준다).
+ */
+export function fitGalleryCell(
+  cols: number,
+  baseW: number,
+  baseH: number,
+  baseCaptionTop: number,
+): { width: number; height: number; captionTop: number } {
+  const available =
+    ESC_LAYOUT.contentRight - ESC_LAYOUT.contentLeft - ESC_LAYOUT.scrollbarGutter - GALLERY_GRID_SAFETY;
+  const maxW = Math.floor((available - (cols - 1) * ESC_LAYOUT.gallerySpacing) / cols);
+  if (baseW <= maxW) return { width: baseW, height: baseH, captionTop: baseCaptionTop };
+  const ratio = maxW / baseW; // 폭·높이·캡션 y 를 같은 배율로 줄여야 galleryThumbRect 가 만드는
+  // 그림칸 모양(비율)이 그대로 유지된다 — 폭만 줄이면 그림칸이 찌그러진다.
+  return {
+    width: maxW,
+    height: Math.round(baseH * ratio),
+    captionTop: Math.round(baseCaptionTop * ratio),
+  };
+}
+
+/** 실제로 화면에 굽는 갤러리 칸 크기 — 실측 기준값(ESC_LAYOUT.item/cgCell*)을 뷰포트에 맞게 한
+ *  번만 축소해둔 모듈 상수(런타임 재계산 없음). itemScreens/cgScreens/escCgThumbMetrics 가 공유. */
+export const ITEM_CELL = fitGalleryCell(4, ESC_LAYOUT.itemCellWidth, ESC_LAYOUT.itemCellHeight, ESC_LAYOUT.itemCaptionTop);
+export const CG_CELL = fitGalleryCell(3, ESC_LAYOUT.cgCellWidth, ESC_LAYOUT.cgCellHeight, ESC_LAYOUT.cgCaptionTop);
+
+/**
  * 저장 슬롯 썸네일 둥근 마스크의 실제 픽셀 크기(폭/높이/반지름) — ESC_LAYOUT.slotThumb* 를
  * height/1080 배율로 굽는다. **크기 단일 소스**: screensRpy(아래 fileSlotsBody 가 AlphaMask 의
  * xysize 로 씀)와 buildZip(마스크 PNG 를 실제 이 픽셀 크기로 그림) 이 반드시 같은 값을 써야 한다
@@ -293,7 +341,7 @@ const GALLERY_SLOT_ART = { w: 300, h: 180, left: 11, top: 11, right: 11, bottom:
  * 칸은 세로가 훨씬 더 늘어난다). 모서리 반지름은 방향이 없는 스칼라라 평균 배율((sx+sy)/2)을 쓴다
  * (원이 찌그러진 타원이 되는 걸 막는 근사 — AlphaMask 는 어차피 정수 반지름만 받는다).
  */
-function galleryThumbRect(cellW: number, cellH: number): { left: number; top: number; width: number; height: number; radius: number } {
+export function galleryThumbRect(cellW: number, cellH: number): { left: number; top: number; width: number; height: number; radius: number } {
   const art = GALLERY_SLOT_ART;
   const sx = cellW / art.w;
   const sy = cellH / art.h;
@@ -310,11 +358,13 @@ function galleryThumbRect(cellW: number, cellH: number): { left: number; top: nu
  * 감상한 CG 갤러리 썸네일 둥근 마스크의 실제 픽셀 크기(폭/높이/반지름) — escSlotThumbMetrics 와
  * 똑같은 계약(screensRpy 의 AlphaMask xysize ↔ buildZip 의 마스크 PNG 픽셀 크기, 단일 소스). 다만
  * escSlotThumbMetrics 는 "이미 1920 기준으로 확정된" slotThumb* 상수를 굽기만 하면 되는 반면, CG 는
- * 칸 크기(ESC_LAYOUT.cgCellWidth/Height)에서 galleryThumbRect 로 1920 기준 그림칸을 먼저 유도한
- * 뒤에야 실제 해상도 배율(height/1080)을 곱할 수 있어 두 단계 스케일링이 된다.
+ * 칸 크기(CG_CELL, 뷰포트에 맞춰 이미 축소된 값)에서 galleryThumbRect 로 1920 기준 그림칸을 먼저
+ * 유도한 뒤에야 실제 해상도 배율(height/1080)을 곱할 수 있어 두 단계 스케일링이 된다. **반드시
+ * CG_CELL 을 써야 한다** — ESC_LAYOUT.cgCellWidth/Height(실측 기준값, 뷰포트 밖)를 쓰면 이 마스크가
+ * buildZip 이 실제로 그리는(=cgScreens 가 실제로 굽는) 칸보다 커져 둥근 모서리가 뭉개진다.
  */
 export function escCgThumbMetrics(height: number): { width: number; height: number; radius: number } {
-  const rect = galleryThumbRect(ESC_LAYOUT.cgCellWidth, ESC_LAYOUT.cgCellHeight);
+  const rect = galleryThumbRect(CG_CELL.width, CG_CELL.height);
   const scale = height / 1080;
   return {
     width: Math.round(rect.width * scale),
@@ -833,9 +883,9 @@ function itemScreens(escMenu?: EscMenuPlan): string {
     nameVar: 'it_name',
     legacyCell: 200,
     legacyImage: 184,
-    cellWidth: ESC_LAYOUT.itemCellWidth,
-    cellHeight: ESC_LAYOUT.itemCellHeight,
-    captionTop: ESC_LAYOUT.itemCaptionTop,
+    cellWidth: ITEM_CELL.width,
+    cellHeight: ITEM_CELL.height,
+    captionTop: ITEM_CELL.captionTop,
     // 아이템은 정사각 유지가 사용자 결정 — 절대 늘리거나 자르지 않는다(fit "contain", 마스크 없음).
     fill: 'contain',
   });
@@ -890,9 +940,9 @@ function cgScreens(escMenu?: EscMenuPlan): string {
     legacyCellHeight: 190,
     legacyImage: 288,
     legacyImageHeight: 162,
-    cellWidth: ESC_LAYOUT.cgCellWidth,
-    cellHeight: ESC_LAYOUT.cgCellHeight,
-    captionTop: ESC_LAYOUT.cgCaptionTop,
+    cellWidth: CG_CELL.width,
+    cellHeight: CG_CELL.height,
+    captionTop: CG_CELL.captionTop,
     // CG 는 그림칸이 16:9 가 되도록 칸을 높였다(사용자 결정) — 정사각 유지가 아니라 잘라 채운다.
     fill: 'cover',
     maskFile: ESC_CG_THUMB_MASK_FILE,
@@ -925,11 +975,12 @@ interface GalleryGridSpec {
   legacyCellHeight?: number;
   legacyImage: number;
   legacyImageHeight?: number;
-  /** ESC 이미지 GUI 칸 치수 — 1920 기준 px(ESC_LAYOUT). */
+  /** ESC 이미지 GUI 칸 치수 — 1920 기준 px(ITEM_CELL/CG_CELL, fitGalleryCell 로 뷰포트에 맞춰 이미
+   *  축소된 값 — ESC_LAYOUT.item/cgCellWidth/Height 는 축소 전 실측 기준값이라 여기 직접 쓰지 않는다). */
   cellWidth: number;
   cellHeight: number;
-  /** 캡션 텍스트 y(1920 기준 px, ESC_LAYOUT.itemCaptionTop/cgCaptionTop) — 그림칸 바로 아래 여백
-   *  띠 안에 놓이도록 실측 배치한 값이라 그림칸(galleryThumbRect)에서 산술로 재도출하지 않는다. */
+  /** 캡션 텍스트 y(1920 기준 px, ITEM_CELL.captionTop/CG_CELL.captionTop) — 실측 배치한 기준값을
+   *  칸과 같은 배율로 축소한 값이라 그림칸(galleryThumbRect)에서 산술로 재도출하지 않는다. */
   captionTop: number;
   /**
    * 그림을 칸에 채우는 방식 — 아이템은 정사각을 유지해야 해서(사용자 결정) 절대 자르지 않는

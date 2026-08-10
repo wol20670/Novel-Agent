@@ -76,5 +76,17 @@ export {
   DEFAULT_GRADIENT_HEIGHT,
 } from './theme';
 export type { GuiTheme, GenreId } from './theme';
-export { escSlotThumbMetrics, escCgThumbMetrics, escSidebarLogoWidth, escHistoryMetrics } from './screensRpy';
+export {
+  escSlotThumbMetrics,
+  escCgThumbMetrics,
+  escSidebarLogoWidth,
+  escHistoryMetrics,
+  // 갤러리 격자 기하 — tests/esc-menu-screen.test.ts 가 하드코딩 대신 불변식으로 검증할 때 쓴다.
+  ESC_LAYOUT,
+  GALLERY_GRID_SAFETY,
+  fitGalleryCell,
+  ITEM_CELL,
+  CG_CELL,
+  galleryThumbRect,
+} from './screensRpy';
 export type { MainMenuPlan, QuickMenuPlan, EscMenuPlan } from './screensRpy';

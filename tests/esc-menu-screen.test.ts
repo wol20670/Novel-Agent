@@ -9,7 +9,15 @@
 
 import { describe, it, expect } from 'vitest';
 import { generateRenpyFiles } from '../src/renpy/generate';
-import { escHistoryMetrics } from '../src/renpy/gui';
+import {
+  escHistoryMetrics,
+  escCgThumbMetrics,
+  ESC_LAYOUT,
+  GALLERY_GRID_SAFETY,
+  ITEM_CELL,
+  CG_CELL,
+  galleryThumbRect,
+} from '../src/renpy/gui';
 import type { EscImageId, Line } from '../src/types';
 import { ESC_IMAGES, DEFAULT_ESC_COLORS } from '../src/types';
 import { fontGamePath } from '../src/fonts/fontCatalog';
@@ -197,11 +205,13 @@ describe('generateRenpyFiles: escMenuUi 그룹별 부분 업로드 — 있는 �
   it('gallery_idle 업로드 시 item_gallery/cg_gallery 의 해금 칸 button: 에 style 태그가 실제로 붙는다', () => {
     const p = projectWith([galleryScene()], { escMenuUi: { images: escImages(['gallery_idle']) } });
     const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
-    // escMenu 가 붙으면 격자 자체가 시안 배치(칸 안 좌하단 캡션)로 바뀐다 — 칸 치수는 ESC_LAYOUT
-    // 의 1920 기준 px 가 구워져 나온다(projectWith 는 1920×1080). 아이템 4열=324×288, CG 3열=440×328
-    // (아트 실측 GALLERY_SLOT_ART 에서 galleryThumbRect 로 유도한 최종 칸 크기).
-    expect(sc).toContain('button:\n                        style "esc_gallery_idle_button"\n                        xysize (324, 288)');
-    expect(sc).toContain('button:\n                        style "esc_gallery_idle_button"\n                        xysize (440, 328)');
+    // escMenu 가 붙으면 격자 자체가 시안 배치(칸 안 좌하단 캡션)로 바뀐다 — 칸 치수는 ITEM_CELL/
+    // CG_CELL 의 1920 기준 px 가 구워져 나온다(projectWith 는 1920×1080). 실측 기준값(324×288/
+    // 440×328)은 뷰포트보다 넓어(스크롤바 거터 차감분까지 고려하면 넘친다) fitGalleryCell 이 비율
+    // 그대로 축소한 값(아이템 320×284, CG 434×324)이 실제로 구워진다 — "gallery-grid-fit" 버그의
+    // 회귀 가드(아래 fitGalleryCell 불변식 테스트들과 짝).
+    expect(sc).toContain(`button:\n                        style "esc_gallery_idle_button"\n                        xysize (${ITEM_CELL.width}, ${ITEM_CELL.height})`);
+    expect(sc).toContain(`button:\n                        style "esc_gallery_idle_button"\n                        xysize (${CG_CELL.width}, ${CG_CELL.height})`);
   });
 
   it('gallery_locked 업로드 시 잠금 칸의 인라인 Solid 배경이 style 태그로 바뀐다', () => {
@@ -212,27 +222,98 @@ describe('generateRenpyFiles: escMenuUi 그룹별 부분 업로드 — 있는 �
     // slot_button 이 원래도 그 문구를 쓰므로(gallery_locked 와 무관하게 항상 존재), 잠금 칸
     // 패턴(frame: 블록 안의 xysize 다음 줄)만 콕 집어 확인한다.
     expect((sc.match(/style "esc_gallery_locked_frame"/g) ?? []).length).toBe(2);
-    expect(sc).not.toContain('xysize (324, 288)\n                        background Solid(gui.frame_bg_color)');
-    expect(sc).not.toContain('xysize (440, 328)\n                        background Solid(gui.frame_bg_color)');
+    expect(sc).not.toContain(`xysize (${ITEM_CELL.width}, ${ITEM_CELL.height})\n                        background Solid(gui.frame_bg_color)`);
+    expect(sc).not.toContain(`xysize (${CG_CELL.width}, ${CG_CELL.height})\n                        background Solid(gui.frame_bg_color)`);
   });
 
-  it('아이템 그리드: 그림칸은 아트 실측에서 유도한 자리(300×202)에 fit "contain" 으로 정사각을 유지하고 마스크가 없다', () => {
+  it('아이템 그리드: 그림칸은 확정 수치(칸 320×284 안 pos(12,17) 297×199, fit "contain")로 정사각을 유지하고 마스크가 없다', () => {
+    // 이 테스트만은 계획서가 직접 검산한 확정 수치를 리터럴로 박아둔다(1080p 프로젝트 기준) — 아래
+    // '갤러리 격자 기하' describe 의 불변식 테스트들이 로직 자체를 검증하므로, 여기서는 "실제로
+    // 생성된 screens.rpy 에 그 값이 그대로 나오는가"만 본다(수치가 맞다는 걸 눈으로 확인하는 골든
+    // 값 — ITEM_CELL/galleryThumbRect 를 그대로 재계산해 쓰면 구현 버그가 나도 테스트가 항상
+    // 통과하는 동어반복이 된다).
     const p = projectWith([galleryScene()], { escMenuUi: { images: escImages(['gallery_idle']) } });
     const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
-    expect(sc).toContain('pos (12, 18)\n                            xysize (300, 202)');
-    expect(sc).toContain('add it_tag:\n                                fit "contain"\n                                xysize (300, 202)\n                                align (0.5, 0.5)');
+    expect(sc).toContain('pos (12, 17)\n                            xysize (297, 199)');
+    expect(sc).toContain('add it_tag:\n                                fit "contain"\n                                xysize (297, 199)\n                                align (0.5, 0.5)');
     expect(sc).not.toContain('AlphaMask(Transform(it_tag');
-    expect(sc).toContain('text it_name:\n                            pos (12, 242)');
+    expect(sc).toContain('text it_name:\n                            pos (12, 239)');
   });
 
-  it('CG 그리드: 그림칸은 아트 실측에서 유도한 자리(408×230=16:9)에 fit "cover" + 둥근 마스크를 씌운다', () => {
+  it('CG 그리드: 그림칸은 확정 수치(칸 434×324 안 pos(16,20) 402×227≈16:9)에 fit "cover" + 둥근 마스크를 씌운다', () => {
+    // 위와 같은 이유로 골든 값을 리터럴로 검증(1080p 프로젝트 기준).
     const p = projectWith([galleryScene()], { escMenuUi: { images: escImages(['gallery_idle']) } });
     const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
-    expect(sc).toContain('pos (16, 20)\n                            xysize (408, 230)');
-    expect(sc).toContain('add AlphaMask(Transform(cg_tag, fit="cover", xysize=(408, 230)), "gui/esc/cg_thumb_mask.png")');
-    expect(sc).toContain('text cg_name:\n                            pos (16, 278)');
+    expect(sc).toContain('pos (16, 20)\n                            xysize (402, 227)');
+    expect(sc).toContain('add AlphaMask(Transform(cg_tag, fit="cover", xysize=(402, 227)), "gui/esc/cg_thumb_mask.png")');
+    expect(sc).toContain('text cg_name:\n                            pos (16, 274)');
   });
 
+});
+
+// 갤러리 격자가 뷰포트(콘텐츠 폭 − 스크롤바 거터)보다 넓어 맨 오른쪽 열 카드 테두리가 스크롤바에
+// 잘려 보이던 버그(fix/gallery-grid-fit)의 회귀 가드 — 칸 크기·그림칸·마스크 짝을 하드코딩 수치가
+// 아니라 "어떤 조건을 항상 만족해야 하는가"로 검증한다. ESC_LAYOUT/GALLERY_GRID_SAFETY 상수가
+// 나중에 바뀌어도(다른 아트·다른 카드 여백) 이 불변식들은 여전히 성립해야 한다.
+describe('갤러리 격자 기하 — 뷰포트 안에 들어가는지 불변식으로 검증', () => {
+  const available = ESC_LAYOUT.contentRight - ESC_LAYOUT.contentLeft - ESC_LAYOUT.scrollbarGutter;
+
+  it('아이템 4열 격자가 뷰포트 안에 들어가고, 남는 여유가 GALLERY_GRID_SAFETY 이상이다', () => {
+    const gridWidth = 4 * ITEM_CELL.width + 3 * ESC_LAYOUT.gallerySpacing;
+    expect(gridWidth).toBeLessThanOrEqual(available);
+    expect(available - gridWidth).toBeGreaterThanOrEqual(GALLERY_GRID_SAFETY);
+  });
+
+  it('CG 3열 격자가 뷰포트 안에 들어가고, 남는 여유가 GALLERY_GRID_SAFETY 이상이다', () => {
+    const gridWidth = 3 * CG_CELL.width + 2 * ESC_LAYOUT.gallerySpacing;
+    expect(gridWidth).toBeLessThanOrEqual(available);
+    expect(available - gridWidth).toBeGreaterThanOrEqual(GALLERY_GRID_SAFETY);
+  });
+
+  it('아이템 그림칸이 칸 안에 들어간다(넘치지 않음)', () => {
+    const thumb = galleryThumbRect(ITEM_CELL.width, ITEM_CELL.height);
+    expect(thumb.left + thumb.width).toBeLessThanOrEqual(ITEM_CELL.width);
+    expect(thumb.top + thumb.height).toBeLessThanOrEqual(ITEM_CELL.height);
+  });
+
+  it('CG 그림칸이 칸 안에 들어간다(넘치지 않음)', () => {
+    const thumb = galleryThumbRect(CG_CELL.width, CG_CELL.height);
+    expect(thumb.left + thumb.width).toBeLessThanOrEqual(CG_CELL.width);
+    expect(thumb.top + thumb.height).toBeLessThanOrEqual(CG_CELL.height);
+  });
+
+  it('아이템 캡션이 그림칸 아래 · 칸 안에 들어간다', () => {
+    const thumb = galleryThumbRect(ITEM_CELL.width, ITEM_CELL.height);
+    const captionLineHeight = Math.round(17 * 1.2); // size 17 텍스트 한 줄의 대략적인 높이.
+    expect(thumb.top + thumb.height).toBeLessThanOrEqual(ITEM_CELL.captionTop);
+    expect(ITEM_CELL.captionTop + captionLineHeight).toBeLessThanOrEqual(ITEM_CELL.height);
+  });
+
+  it('CG 캡션이 그림칸 아래 · 칸 안에 들어간다', () => {
+    const thumb = galleryThumbRect(CG_CELL.width, CG_CELL.height);
+    const captionLineHeight = Math.round(17 * 1.2);
+    expect(thumb.top + thumb.height).toBeLessThanOrEqual(CG_CELL.captionTop);
+    expect(CG_CELL.captionTop + captionLineHeight).toBeLessThanOrEqual(CG_CELL.height);
+  });
+
+  it('CG 그림칸 비율이 16:9 에 3% 이내로 근접한다', () => {
+    const thumb = galleryThumbRect(CG_CELL.width, CG_CELL.height);
+    const ratio = thumb.width / thumb.height;
+    expect(Math.abs(ratio - 16 / 9)).toBeLessThanOrEqual(0.03);
+  });
+
+  it('escCgThumbMetrics(마스크 PNG 픽셀 크기)가 galleryThumbRect(CG_CELL)와 정확히 같다(단일 소스 짝)', () => {
+    // height=1080 이면 scale=1 이라 escCgThumbMetrics 의 두 번째 스케일링이 항등이 되므로
+    // galleryThumbRect(CG_CELL.width, CG_CELL.height) 결과와 1:1로 비교할 수 있다 — 어긋나면
+    // buildZip 이 그리는 마스크 PNG 와 screensRpy 의 AlphaMask xysize 가 안 맞아 둥근 모서리가
+    // 뭉개진다(CLAUDE.md).
+    const metrics = escCgThumbMetrics(1080);
+    const thumb = galleryThumbRect(CG_CELL.width, CG_CELL.height);
+    expect(metrics).toEqual({ width: thumb.width, height: thumb.height, radius: thumb.radius });
+  });
+});
+
+describe('esc-menu-screen: 저장 슬롯 스타일', () => {
   it('esc_gallery_idle_button/esc_gallery_locked_frame 은 padding (0, 0) 을 준다(패딩 함정 — 저장 슬롯과 같은 이유)', () => {
     const p = projectWith([galleryScene()], { escMenuUi: { images: escImages(['gallery_idle', 'gallery_locked']) } });
     const tail = escStylesBlock(contentOf(generateRenpyFiles(p).files, 'game/screens.rpy'));
