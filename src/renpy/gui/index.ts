@@ -32,6 +32,8 @@ interface GuiGenOptions {
   escMenu?: EscMenuPlan;
   /** 메인 메뉴 버튼 텍스트 폰트(주/부, 이미 fontGamePath 로 해석된 경로). generate.ts 가 계산해 넘긴다. */
   menuFonts?: { main: string; sub: string };
+  /** ESC 메뉴 글꼴(이미 fontGamePath 로 해석된 경로). generate.ts 가 project.escMenuUi?.fontId 로 계산해 넘긴다. */
+  escFont?: string;
 }
 
 // 스톡 guisupport.rpy 는 런처 gui7 로 PNG 를 자동 생성(SDK 경로 의존)한다.
@@ -48,13 +50,16 @@ init -100 python in gui:
 
 /** GuiTheme + 해상도 → game/gui.rpy · screens.rpy · guisupport.rpy */
 export function generateGuiFiles(theme: GuiTheme, width: number, height: number, opts?: GuiGenOptions): RenpyFile[] {
-  const { outline, dialogueGradient, locales, hasItems, hasCg, mainMenu, quickMenu, escMenu, menuFonts } = opts ?? {};
+  const { outline, dialogueGradient, locales, hasItems, hasCg, mainMenu, quickMenu, escMenu, menuFonts, escFont } = opts ?? {};
   // 일본어(자막·음성 어느 쪽이든)가 하나라도 있으면 gui.rpy 가 JP 폰트(FontGroup)를 참조·번들한다.
   // 없으면 생략 → buildZip 의 폰트 번들 조건과 일치해야 한다(같은 규칙: ja ∈ text|voice).
   const japanese = !!locales && (locales.text.includes('ja') || locales.voice.includes('ja'));
+  // escActive 는 escFont 와 별개 게이트 — 글꼴 미지정이어도 ESC 이미지가 하나라도 있으면(escMenu
+  // 존재) 기록 화면 행 간격(gui.history_height/spacing)이 ESC 배치를 따라간다(작업 2, guiRpy.ts).
+  const escActive = !!escMenu;
   return [
     { path: 'game/guisupport.rpy', content: guisupportRpy(height) },
-    { path: 'game/gui.rpy', content: guiRpy(theme, width, height, outline, dialogueGradient, japanese, menuFonts) },
+    { path: 'game/gui.rpy', content: guiRpy(theme, width, height, outline, dialogueGradient, japanese, menuFonts, escFont, escActive) },
     { path: 'game/screens.rpy', content: screensRpy({ locales, hasItems, hasCg, mainMenu, quickMenu, escMenu }) },
   ];
 }
@@ -71,5 +76,5 @@ export {
   DEFAULT_GRADIENT_HEIGHT,
 } from './theme';
 export type { GuiTheme, GenreId } from './theme';
-export { escSlotThumbMetrics, escCgThumbMetrics } from './screensRpy';
+export { escSlotThumbMetrics, escCgThumbMetrics, escSidebarLogoWidth } from './screensRpy';
 export type { MainMenuPlan, QuickMenuPlan, EscMenuPlan } from './screensRpy';

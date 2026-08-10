@@ -385,6 +385,8 @@ interface State {
   importEscImages: (files: File[]) => Promise<void>;
   /** ESC 메뉴 글자색(본문/제목/강조/보조/선택배경). 빈 값을 주면 그 롤은 기본값(밝은 아트 기준)으로. */
   setEscColors: (patch: Partial<EscColors>) => void;
+  /** ESC 메뉴 글꼴 지정. undefined/빈 값이면 필드를 지워 인터페이스 폰트로 복귀. */
+  setEscFont: (fontId: string | undefined) => void;
 
   // 설정/저장
   /**
@@ -2412,6 +2414,16 @@ export const useStore = create<State>((set, get) => {
         if (!colors[k]) delete colors[k];
       }
       get().updateProjectMeta({ escMenuUi: { ...project.escMenuUi, colors } });
+    },
+
+    // ESC 메뉴 글꼴 — setMenuFont(mainMenuUi) 와 같은 패턴. 빈 값이면 필드 자체를 지운다(인터페이스
+    // 폰트로 복귀 — types.ts escMenuUi.fontId 주석 참고: 이미지가 하나도 없으면 애초에 무시된다).
+    setEscFont: (fontId) => {
+      const { project } = get();
+      const escMenuUi = { ...project.escMenuUi };
+      if (fontId) escMenuUi.fontId = fontId;
+      else delete escMenuUi.fontId;
+      get().updateProjectMeta({ escMenuUi });
     },
 
     // 파일명 자동 매칭 일괄 업로드(matchEscImageFile) — importQuickButtons 와 동일 패턴이지만

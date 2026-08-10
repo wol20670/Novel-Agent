@@ -294,6 +294,27 @@ describe('zip 에셋 불변식 매트릭스', () => {
     // "contain"(정사각 유지)이라 마스크가 없다 — game/gui/esc/cg_thumb_mask.png 하나만 늘어난다.
     expect(files.some((f) => f.path === 'game/gui/esc/cg_thumb_mask.png')).toBe(true);
   });
+
+  it('10) ESC 메뉴 커스텀 글꼴(escMenuUi.fontId) — selectedFontFiles 의 escId 배선이 실제로 번들한다', async () => {
+    const project = kitchenSinkProject({ escMenuUi: { images: allEscImages().images, fontId: 'custom-esc' } });
+    await expectNoDangling(project);
+    const { files } = await collectProjectFiles(project);
+    const guiRpy = files.find((f) => f.path === 'game/gui.rpy');
+    expect(typeof guiRpy?.data).toBe('string');
+    expect(guiRpy!.data as string).toContain('define gui.esc_text_font =');
+  });
+
+  it('11) ESC 메뉴 + 사이드바 타이틀 로고(mainMenuUi.logo 재사용) — 참조·배치가 같은 게이트를 쓴다', async () => {
+    const project = kitchenSinkProject({
+      mainMenuUi: allButtonsMainMenuUi(),
+      escMenuUi: { images: allEscImages().images },
+    });
+    await expectNoDangling(project);
+    const { files } = await collectProjectFiles(project);
+    const sc = files.find((f) => f.path === 'game/screens.rpy');
+    expect(typeof sc?.data).toBe('string');
+    expect(sc!.data as string).toContain('if not main_menu:\n        add Transform("gui/title_logo.png"');
+  });
 });
 
 // ── 타겟 회귀 3건 ────────────────────────────────────────────────────────────

@@ -25,6 +25,17 @@ export function guiRpy(
    * 규칙으로 한 번 더 방어한다(guiRpy 를 다른 경로에서 직접 호출해도 항상 유효한 값이 나가도록).
    */
   menuFonts?: { main: string; sub: string },
+  /**
+   * ESC 메뉴 글꼴(이미 fontGamePath 로 해석된 게임 내 경로) — project.escMenuUi?.fontId 미지정이면
+   * undefined 라 gui.esc_text_font define 자체를 안 낸다(회귀 0, screensRpy 의 escFontStyles 참고).
+   */
+  escFont?: string,
+  /**
+   * ESC 이미지 GUI 활성 여부(escFont 와 별개 게이트 — 글꼴 미지정이어도 ESC 이미지가 하나라도 있으면
+   * true). true 면 기록(대사 로그) 화면의 행 높이/간격이 내용에 맞춰지는 배치로 바뀐다(작업 2) —
+   * ESC 미사용 프로젝트는 이 값이 항상 false 라 세 줄(모바일 변형 포함) 모두 기존 값 그대로다.
+   */
+  escActive?: boolean,
 ): string {
   const gradientOn = !!dialogueGradient?.enabled;
   // 그라데이션 꺼짐 = 기존 고정값(화면 높이의 1/4), delta 0 → 아래 ypos 식이 "+ 0" 없이 예전과 바이트 동일.
@@ -72,6 +83,18 @@ export function guiRpy(
   // 여기서 한 번 더 방어). 일본어 FontGroup 처리는 본문/이름/인터페이스 폰트와 동일하게 적용한다.
   const menuMainFont = menuFonts?.main ?? theme.textFont;
   const menuSubFont = menuFonts?.sub ?? menuMainFont;
+  // ESC 메뉴 글꼴 define — escFont 가 있을 때만 한 줄을 낸다(무조건 내면 회귀 0 이 깨진다). 값이
+  // 없으면 escFontLine 이 빈 문자열이라 삽입 지점에 바이트 하나도 안 남는다(outlineLine 과 같은
+  // 관용구, screensRpy.ts buildMmStyles 참고 — 별도 템플릿 줄이 아니라 앞줄에 바로 이어 붙인다).
+  const escFontLine = escFont
+    ? `\n## ESC 메뉴 글꼴 — escMenuUi.fontId 지정 시에만(screensRpy.ts 의 escFontStyles 가 참조).\ndefine gui.esc_text_font = ${fontVal(escFont)}`
+    : '';
+  // 기록(대사 로그) 행 간격(작업 2) — ESC 이미지 GUI 가 활성이면(escFont 와 별개 게이트, escActive
+  // 는 escMenuUi.images 존재만으로 켜진다) 행 높이를 내용에 맞춰 스크롤을 vpgrid 대신 viewport 로
+  // 돌린다(screen history() 의 엔진 내장 분기, screensRpy.ts 참고) — 고정 높이(140)면 배경 카드
+  // 아트 위에서 행이 답답하게 붙어 보인다(실기 확인). ESC 미사용 프로젝트는 항상 기존 값 그대로.
+  const historyHeightLine = escActive ? 'None' : 'gui.scale(140)';
+  const historySpacingLine = escActive ? 'gui.scale(8)' : '0';
   // 대사창 배경: 그라데이션이면 buildZip 이 만든 gui/textbox.png 를 Frame(0,0)으로 늘려 쓰고(위로 투명),
   // 아니면 기존 단색 Solid. screens.rpy 의 window 가 이 변수만 참조한다(테마 표면적 최소화).
   const dialogueBg = gradientOn
@@ -119,7 +142,7 @@ define gui.name_text_font = ${fontVal(theme.nameFont)}
 define gui.interface_text_font = ${fontVal(theme.interfaceFont)}
 ## 메인 메뉴 버튼 텍스트 전용(주/부) — screensRpy.ts 의 mm_button_text/mm_main_text/mm_sub_text 가 참조.
 define gui.menu_text_font = ${fontVal(menuMainFont)}
-define gui.menu_sub_text_font = ${fontVal(menuSubFont)}
+define gui.menu_sub_text_font = ${fontVal(menuSubFont)}${escFontLine}
 
 ## 글자 외곽선 (가독성 — 대사창 위 흰 글자 등). screens.rpy 의 say 스타일이 참조.
 define gui.dialogue_outlines = ${outlineList}
@@ -251,8 +274,8 @@ define gui.unscrollable = "hide"
 
 ## 히스토리 ####################################################################
 define config.history_length = 250
-define gui.history_height = gui.scale(140)
-define gui.history_spacing = 0
+define gui.history_height = ${historyHeightLine}
+define gui.history_spacing = ${historySpacingLine}
 define gui.history_name_xpos = gui.scale(155)
 define gui.history_name_ypos = 0
 define gui.history_name_width = gui.scale(155)
@@ -305,7 +328,7 @@ ${smallTextboxLine}
         gui.navigation_spacing = gui.scale(20)
         gui.pref_button_spacing = gui.scale(10)
 
-        gui.history_height = gui.scale(190)
+        gui.history_height = ${escActive ? 'None' : 'gui.scale(190)'}
         gui.history_text_width = gui.scale(690)
 
         gui.quick_button_text_size = gui.scale(20)

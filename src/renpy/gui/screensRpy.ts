@@ -127,6 +127,17 @@ export interface EscMenuPlan {
   height: number;
   /** ESC 메뉴 위 글자색(generate.ts 가 escColors() 로 기본값을 병합해 넘긴다 — 항상 전부 채워져 있다). */
   colors: Required<EscColors>;
+  /**
+   * ESC 메뉴 글꼴 — 값이 있으면 항상 'gui.esc_text_font'(gui.rpy 의 define, generate.ts 가 이미
+   * fontGamePath 로 해석해 그 define 을 냈다는 뜻). undefined = 인터페이스 폰트 그대로(회귀 0).
+   */
+  font?: string;
+  /**
+   * 좌측 사이드바 타이틀 로고 — 이미 구운 px(1920×1080 기준을 height/1080 배율로 구운 값).
+   * generate.ts 의 buildEscMenuPlan 이 project.mainMenuUi?.logo 존재 + showSidebarLogo!==false 일
+   * 때만 채운다(mainMenuUi.logo 자체가 없으면 undefined — TITLE_LOGO_FILE 을 참조할 파일이 없다).
+   */
+  titleLogo?: { width: number; height: number };
 }
 
 /**
@@ -227,6 +238,14 @@ const ESC_LAYOUT = {
   slotThumbRadius: 8,
   /** 칸 아래 여백(172..228) 안에서 세로 가운데 — "슬롯 N"/날짜 캡션이 시작하는 y. */
   slotCaptionTop: 186,
+  /**
+   * 좌측 사이드바 위 작은 타이틀 로고(mainMenuUi.logo 재사용) 위치·폭 — 1920 기준 px, 시안 실측
+   * 근사(실기 보고 이 상수만 조정). 사이드바 폭이 361 이라(ESC_IMAGES 의 'bg' 힌트 참고) 그 안에
+   * 여백을 두고 놓는다. 높이는 로고 실제 비율(mainMenuUi.logoAspect)로 정해지므로 여기 없다.
+   */
+  sidebarLogoX: 64,
+  sidebarLogoY: 56,
+  sidebarLogoWidth: 200,
 } as const;
 
 /**
@@ -290,6 +309,16 @@ export function escCgThumbMetrics(height: number): { width: number; height: numb
     height: Math.round(rect.height * scale),
     radius: Math.round(rect.radius * scale),
   };
+}
+
+/**
+ * 좌측 사이드바 타이틀 로고의 baked 폭(ESC_LAYOUT.sidebarLogoWidth 를 height/1080 배율로 굽는다) —
+ * escSlotThumbMetrics 와 같은 이유로 단일 소스 함수로 뺐다. generate.ts 의 buildEscMenuPlan 이 이
+ * 값과 mainMenuUi.logoAspect 로 높이를 계산해 EscMenuPlan.titleLogo 를 채운다(x/y 는 aspect 와
+ * 무관해 screensRpy 가 ESC_LAYOUT 에서 직접 굽는다 — px() 헬퍼 참고).
+ */
+export function escSidebarLogoWidth(height: number): number {
+  return Math.round(ESC_LAYOUT.sidebarLogoWidth * (height / 1080));
 }
 
 /**
@@ -919,6 +948,10 @@ function galleryGrid(escMenu: EscMenuPlan | undefined, spec: GalleryGridSpec): s
 
   const s = (v: number) => px(escMenu, v);
   const { colors } = escMenu;
+  // 캡션 인라인 텍스트 3곳(이름/잠금 물음표 2개)의 글꼴 — 이름 있는 스타일이 없는 기본 text 라
+  // escFontStyles(style 블록)로는 못 잡는다(위 함수 주석 참고). 화면 언어의 text 프로퍼티는 식을
+  // 받으므로 plan.font('gui.esc_text_font')를 그대로 꽂는다. 미지정이면 빈 문자열(회귀 0).
+  const fontLine = escMenu.font ? `\n                            font ${escMenu.font}` : '';
   // 그림 자리 = 늘어난 아트의 회색 칸이 실제로 놓이는 위치(사용자 결정 — CLAUDE.md/plan 참고).
   const thumb = galleryThumbRect(spec.cellWidth, spec.cellHeight);
   // 캡션을 그림 폭 안으로 묶는다 — 안 묶으면 긴 CG 이름이 칸을 뚫고 옆 칸·카드 밖까지 흘러나간다.
@@ -950,7 +983,7 @@ function galleryGrid(escMenu: EscMenuPlan | undefined, spec: GalleryGridSpec): s
                             pos (${s(thumb.left)}, ${s(thumb.top)})
                             xysize (${s(thumb.width)}, ${s(thumb.height)})
                             ${imageLines}
-                        text ${spec.nameVar}:
+                        text ${spec.nameVar}:${fontLine}
                             pos (${s(capLeft)}, ${s(spec.captionTop)})
                             xsize ${s(capW)}
                             size ${s(17)}
@@ -960,12 +993,12 @@ function galleryGrid(escMenu: EscMenuPlan | undefined, spec: GalleryGridSpec): s
                         xysize (${s(spec.cellWidth)}, ${s(spec.cellHeight)})
                         ${lockedBackground}
                         has fixed
-                        text "???":
+                        text "???":${fontLine}
                             pos (${s(thumb.left + Math.round(thumb.width / 2))}, ${s(thumb.top + Math.round(thumb.height / 2))})
                             anchor (0.5, 0.5)
                             size ${s(34)}
                             color "${colors.muted}"
-                        text _("???"):
+                        text _("???"):${fontLine}
                             pos (${s(capLeft)}, ${s(spec.captionTop)})
                             xsize ${s(capW)}
                             size ${s(17)}
@@ -1680,6 +1713,12 @@ ${ESC_TEXT_COLORS('confirm_button_text', 'onLight')}
 
   parts.push(escLayoutStyles(plan));
   parts.push(escPaletteStyles(plan));
+  // escFontStyles 는 반드시 마지막이어야 한다 — tests/esc-menu-screen.test.ts 의 styleBlock() 헬퍼가
+  // "다음 `\nstyle ` 직전까지"로 한 스타일 정의만 잘라내는데, navigation_button_text 등 일부 이름이
+  // 위 색 블록에도 이미 나온다(Ren'Py 는 style 문을 누적 적용하므로 동작엔 문제없다 — 뒤에 나온
+  // 정의가 앞 정의 위에 속성을 얹는다). 글꼴 블록을 색 블록보다 앞에 두면 styleBlock() 이 그 뒤에
+  // 오는 색 블록까지 "같은 스타일 정의"로 착각해 잘라내 테스트 단언이 깨진다.
+  parts.push(escFontStyles(plan));
   return parts.join('');
 }
 
@@ -1879,6 +1918,55 @@ style hyperlink_text:
 }
 
 /**
+ * ESC 메뉴 이미지 GUI — 글꼴(작업 1, escMenuUi.fontId). plan.font 가 없으면(fontId 미지정) 빈
+ * 문자열이라 이 블록 자체가 안 나온다(회귀 0 — 이미지 미사용 프로젝트뿐 아니라 이미지는 올렸지만
+ * 글꼴을 안 고른 프로젝트도 여기까지는 영향이 없다). 색·크기·정렬은 위 escLayoutStyles/
+ * escPaletteStyles 가 이미 정했으니 여기서는 font 프로퍼티 하나만 얹는다(Ren'Py 는 style 문을
+ * 누적 적용 — 뒤에 나온 정의가 앞 정의 위에 속성만 더한다, 대체가 아니다).
+ *
+ * ⚠️ buildEscMenuStyles 가 이 함수를 **반드시 맨 마지막에** push 해야 한다 —
+ * tests/esc-menu-screen.test.ts 의 styleBlock() 헬퍼는 "다음 `\nstyle ` 직전까지"로 한 스타일
+ * 정의만 잘라내는데, navigation_button_text 등 여기 나오는 이름 중 일부는 위 색 블록에도 이미
+ * 나온다 — 글꼴 블록이 색 블록보다 앞에 오면 styleBlock() 이 색 블록까지 "같은 정의"로 착각해
+ * 잘라내 기존 색 검증 단언이 깨진다(font 블록 자체는 별도 헬퍼로 검사한다).
+ */
+function escFontStyles(plan: EscMenuPlan): string {
+  if (!plan.font) return '';
+  const names = [
+    'navigation_button_text',
+    'return_button_text',
+    'game_menu_label_text',
+    'page_label_text',
+    'page_button_text',
+    'slot_button_text',
+    'slot_time_text',
+    'slot_name_text',
+    'esc_slot_empty_text',
+    'radio_button_text',
+    'check_button_text',
+    'pref_label_text',
+    'esc_pref_title',
+    'esc_pref_sub',
+    'history_text',
+    'history_name_text',
+    'history_label_text',
+    'about_text',
+    'about_label_text',
+    'help_text',
+    'help_label_text',
+    'help_button_text',
+    'confirm_prompt_text',
+    'confirm_button_text',
+  ];
+  const blocks = names.map((name) => `style ${name}:\n    font ${plan.font}`).join('\n\n');
+  return `
+
+## ESC 메뉴 이미지 GUI — 글꼴(escMenuUi.fontId 지정 시에만, 항상 맨 마지막 블록 — 위 주석 참고).
+${blocks}
+`;
+}
+
+/**
  * 도움말 상단 장치 탭(키보드/마우스/게임패드). 선택 상태를 Solid 로 칠하면 각진 색 블록이 되어
  * 아트와 겉돌기 때문에, 업로드한 선택버튼 알약이 있으면 그걸 쓰고 없을 때만 Solid 로 떨어진다.
  * 어느 쪽이든 CRASH TRAP 대응으로 네 롤을 전부 채운다.
@@ -2006,6 +2094,18 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
         xysize (${px(escMenu, ESC_LAYOUT.ruleWidth)}, ${px(escMenu, ESC_LAYOUT.ruleHeight)})
         pos (${px(escMenu, ESC_LAYOUT.contentLeft)}, ${px(escMenu, ESC_LAYOUT.ruleY)})`
     : '';
+
+  // 좌측 사이드바 타이틀 로고(작업 3) — 메인 메뉴 로고(mainMenuUi.logo)를 작게 재사용한다(사용자
+  // 결정). escMenu.titleLogo 가 없으면(로고 자체가 없거나 showSidebarLogo=false — buildEscMenuPlan
+  // 이 이미 판단해서 넘긴다) 빈 문자열(회귀 0). `if not main_menu:` 로 감싸는 이유: screen
+  // navigation() 은 텍스트 메인 메뉴에서도 함께 쓰이는데, 메인 메뉴엔 이미 자기 로고가 따로 있어
+  // (buildImageMainMenuScreen) 안 걸면 타이틀 화면에 로고가 두 번 나온다. add 블록엔 정적 속성만
+  // (fit/xysize/pos) — CLAUDE.md 규칙: 화면 언어의 add 블록엔 애니메이션 ATL 금지.
+  let escNavLogo = '';
+  if (escMenu && escMenu.titleLogo) {
+    const { width, height } = escMenu.titleLogo;
+    escNavLogo = `\n\n    if not main_menu:\n        add Transform("${TITLE_LOGO_FILE}", fit="contain", xysize=(${width}, ${height})):\n            pos (${px(escMenu, ESC_LAYOUT.sidebarLogoX)}, ${px(escMenu, ESC_LAYOUT.sidebarLogoY)})`;
+  }
 
   const base = String.raw`################################################################################
 ## 자동 생성: 자체 GUI 화면 (zero-PNG, Solid 기반)
@@ -2322,7 +2422,7 @@ ${galleryNav}
 
         if renpy.variant("pc"):
 
-            textbutton _("종료") action Quit(confirm=not main_menu)
+            textbutton _("종료") action Quit(confirm=not main_menu)${escNavLogo}
 
 
 style navigation_button is gui_button

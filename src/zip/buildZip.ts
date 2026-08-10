@@ -134,7 +134,7 @@ export async function collectProjectFiles(
   // gui.rpy 를 생성해야 파일 목록과 참조가 항상 일치한다.
   const japanese =
     effectiveTextLocales(project).includes('ja') || effectiveVoiceLocales(project).includes('ja');
-  const fontResult = await selectedFontFiles(project.guiOverrides, project.mainMenuUi, japanese);
+  const fontResult = await selectedFontFiles(project.guiOverrides, project.mainMenuUi, project.escMenuUi, japanese);
   const effectiveGuiOverrides = adoptGuiOverrideFonts(project.guiOverrides, fontResult.adoptedIds);
   const mainMenuUiWithFonts = adoptMainMenuUiFonts(project.mainMenuUi, fontResult.adoptedIds);
   // 폰트와 같은 이유로, 메뉴 버튼/로고도 blob 이 실제로 있는 것만 남도록 gui.rpy 생성 전에
@@ -144,9 +144,11 @@ export async function collectProjectFiles(
   // 퀵메뉴는 mainMenuUi 와 달리 폰트 필드가 없으므로(QuickMenuLayout 에 menuFontId 류가 없다)
   // adoptGuiOverrideFonts/adoptMainMenuUiFonts 대상이 아니다 — project.quickMenuUi 를 그대로 넣는다.
   const { quickMenuUi: effectiveQuickMenuUi, blobs: quickArtBlobs } = await resolveQuickMenuArt(project.quickMenuUi);
-  // ESC 메뉴도 같은 이유로 미리 가지치기한다(resolveQuickMenuArt 와 정확히 같은 패턴 — 격자가 아니라
-  // 역할 하나짜리 평평한 맵이라는 점만 다르다).
-  const { escMenuUi: effectiveEscMenuUi, blobs: escArtBlobs } = await resolveEscMenuArt(project.escMenuUi);
+  // ESC 메뉴는 mainMenuUi 처럼 폰트 필드(fontId)가 있으므로 adoptMainMenuUiFonts 와 같은 이유로
+  // 먼저 보정한 뒤(adoptEscMenuUiFonts) 이미지 가지치기(resolveEscMenuArt, 퀵메뉴와 같은 패턴)를
+  // 적용한다 — 순서가 바뀌면 다운로드 실패로 대체된 폰트 id 가 gui.rpy 생성 전에 반영되지 않는다.
+  const escMenuUiWithFonts = adoptEscMenuUiFonts(project.escMenuUi, fontResult.adoptedIds);
+  const { escMenuUi: effectiveEscMenuUi, blobs: escArtBlobs } = await resolveEscMenuArt(escMenuUiWithFonts);
   // 게임 아이콘도 같은 이유로 미리 가지치기한다 — 특히 창 아이콘은 blob 이 있어야만 gui.rpy 가
   // `define gui.window_icon` 을 내보내도 되기 때문에(없는 파일을 참조하면 zip 불변식이 깨진다).
   const { gameIcon: effectiveGameIcon, blobs: iconBlobs } = await resolveGameIcon(project.gameIcon);
@@ -168,8 +170,8 @@ export async function collectProjectFiles(
 
   // fontResult.unresolved: 커스텀 폰트뿐 아니라 대체용 기본 폰트(나눔고딕)까지 못 구한 경우 —
   // gui.rpy 가 game/fonts/ 에 없는 파일을 참조하지 않도록 generateRenpyFiles 에 신호를 넘긴다
-  // (fontFallback, generate.ts — DejaVuSans.ttf 로 대체). 정상 케이스(전부 성공)는 세 값 모두
-  // false 라 generateRenpyFiles 동작이 기존과 완전히 같다(회귀 0).
+  // (fontFallback, generate.ts — DejaVuSans.ttf 로 대체). 정상 케이스(전부 성공)는 네 값(body/menu/
+  // menuSub/esc) 모두 false 라 generateRenpyFiles 동작이 기존과 완전히 같다(회귀 0).
   const { files: textFiles, refs, sprites } = generateRenpyFiles(effectiveProject, fontResult.unresolved);
   const out: ProjectFile[] = textFiles.map((f) => ({ path: f.path, data: f.content }));
 
@@ -469,6 +471,7 @@ export async function buildRenpyZip(project: Project): Promise<ZipResult> {
 async function selectedFontFiles(
   guiOverrides: Project['guiOverrides'],
   mainMenuUi: Project['mainMenuUi'],
+  escMenuUi: Project['escMenuUi'],
   includeJapanese: boolean,
 ): Promise<{
   files: ProjectFile[];
@@ -480,7 +483,7 @@ async function selectedFontFiles(
    * 참조하게 한다. adoptedIds 만으로는 이 케이스를 구분할 수 없다(대체 실패해도 actual 은
    * 여전히 DEFAULT_FONT 로 세팅되어 있어 "정상 대체"와 구별이 안 됨 — 그래서 별도 필드로 뺐다).
    */
-  unresolved: { body: boolean; menu: boolean; menuSub: boolean };
+  unresolved: { body: boolean; menu: boolean; menuSub: boolean; esc: boolean };
 }> {
   // 호출 측(collectProjectFiles)이 gui.rpy 생성 전에 이미 로드해두지만, 이 함수만 독립 호출될 가능성도
   // 방어(loadFontCatalog 는 캐시돼 있으면 즉시 반환이라 비용 없음).
@@ -495,7 +498,10 @@ async function selectedFontFiles(
   // 추가 다운로드가 발생한다(기존 프로젝트 배포 zip 크기/동작에 회귀 없음).
   const menuId = mainMenuUi?.menuFontId ?? bodyId;
   const menuSubId = mainMenuUi?.menuSubFontId ?? menuId;
-  const requestedIds = [...new Set([bodyId, nameId, menuId, menuSubId])];
+  // ESC 메뉴 글꼴도 같은 폴백 규칙(미지정=본문 폰트) — escMenuUi.fontId 를 안 고른 프로젝트(대부분)는
+  // bodyId 와 겹쳐 Set 으로 중복 제거되므로 추가 다운로드가 없다(회귀 0, 위 메뉴 폰트와 동일 이유).
+  const escId = escMenuUi?.fontId ?? bodyId;
+  const requestedIds = [...new Set([bodyId, nameId, menuId, menuSubId, escId])];
   const wanted = requestedIds.map((id) => fontById(id));
 
   // 본문/이름 폰트를 병렬로 확보(각각 독립적인 GCS 다운로드일 수 있음).
@@ -545,6 +551,7 @@ async function selectedFontFiles(
     body: !gotBlob(bodyId) || !gotBlob(nameId),
     menu: !gotBlob(menuId),
     menuSub: !gotBlob(menuSubId),
+    esc: !gotBlob(escId),
   };
 
   return { files, placeholders, adoptedIds, unresolved };
@@ -593,6 +600,22 @@ function adoptMainMenuUiFonts(
     ...(menuChanged ? { menuFontId: nextMenu } : {}),
     ...(subChanged ? { menuSubFontId: nextSub } : {}),
   };
+}
+
+/**
+ * adoptMainMenuUiFonts 와 동일한 목적이지만 escMenuUi.fontId 대상 — 안 하면 다운로드 실패 시 gui.rpy
+ * 는 대체 폰트(DejaVuSans.ttf/기본 폰트)를 참조하는데 escMenuUi 는 여전히 원래 id를 들고 있어 다음
+ * 저장/재생성 때 불일치가 재발할 수 있다(adoptMainMenuUiFonts 와 같은 이유).
+ */
+function adoptEscMenuUiFonts(
+  escMenuUi: Project['escMenuUi'],
+  adoptedIds: Map<string, string>,
+): Project['escMenuUi'] {
+  if (!escMenuUi) return escMenuUi;
+  const nextFont = escMenuUi.fontId && adoptedIds.get(escMenuUi.fontId);
+  const fontChanged = !!nextFont && nextFont !== escMenuUi.fontId;
+  if (!fontChanged) return escMenuUi;
+  return { ...escMenuUi, fontId: nextFont };
 }
 
 /**

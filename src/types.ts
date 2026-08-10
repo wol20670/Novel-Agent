@@ -381,6 +381,19 @@ export interface Project {
      * 어두운 사이드바 위라 애초에 규칙이 반대다 — screensRpy 의 ESC_TEXT_COLORS 주석 참고).
      */
     colors?: EscColors;
+    /**
+     * ESC 메뉴 글꼴 — src/fonts/fontCatalog.ts 의 FontPreset id. 미지정 = 인터페이스 폰트(본문 폰트)를
+     * 그대로 따라간다. colors 와 같은 게이트 — **ESC 이미지를 하나라도 올린 프로젝트에서만 적용된다**
+     * (images 가 비어 있으면 escMenuUi 자체가 회귀 0 이라 이 필드도 무시된다).
+     */
+    fontId?: string;
+    /**
+     * 좌측 사이드바에 메인 메뉴 타이틀 로고(mainMenuUi.logo)를 작게 표시(기본 true=켜짐). 시안엔
+     * 사이드바 위에 게임 제목이 있는데, ESC 이미지 GUI 는 새 화면을 만들지 않고 기존 화면에 스타일만
+     * 얹는 방식이라 이 자리를 채울 전용 텍스트 위젯이 없었다 — 로고가 있으면 그걸 재사용한다. logo
+     * 자체가 없으면 이 값과 무관하게 표시되지 않는다.
+     */
+    showSidebarLogo?: boolean;
   };
 }
 

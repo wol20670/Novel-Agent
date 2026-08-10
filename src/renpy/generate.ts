@@ -38,6 +38,7 @@ import {
   resolveTheme,
   withGuiOverrides,
   DEFAULT_GRADIENT_HEIGHT,
+  escSidebarLogoWidth,
   type MainMenuPlan,
   type QuickMenuPlan,
   type EscMenuPlan,
@@ -1091,7 +1092,7 @@ function buildQuickMenuPlan(project: Project): QuickMenuPlan | undefined {
  * 하나를 앵커로 요구하지 않는다 — ESC 메뉴는 새 화면이 아니라 기존 화면의 부분 스타일 교체라 "일부만
  * 이미지"가 어색하지 않다). escMenuUi 자체가 없거나 images 가 비어 있으면 undefined(회귀 0).
  */
-function buildEscMenuPlan(project: Project): EscMenuPlan | undefined {
+function buildEscMenuPlan(project: Project, escFont?: string): EscMenuPlan | undefined {
   const images = project.escMenuUi?.images;
   if (!images) return undefined;
   const has = new Set<EscImageId>();
@@ -1101,11 +1102,29 @@ function buildEscMenuPlan(project: Project): EscMenuPlan | undefined {
   if (has.size === 0) return undefined;
   // 팔레트는 **이미지가 하나라도 있을 때만** 따라 나간다. 색만 바꾸는 건 이미지 GUI 를 안 쓰는
   // 게임에도 영향을 주는 별개 기능이라 여기서 문을 열지 않는다(회귀 0 계약 유지).
+  //
+  // 좌측 사이드바 타이틀 로고(작업 3) — 메인 메뉴 로고(mainMenuUi.logo)를 작게 재사용한다(사용자
+  // 결정). 로고 자체가 없으면(참조할 파일이 없다) 무조건 생략, 있으면 showSidebarLogo 를 명시적으로
+  // false 로 끄지 않는 한 켠다(미지정=켜짐, mainMenuUi.showInfoLinks 선례). buildZip 의 로고 배치
+  // 게이트(effectiveMainMenuUi.logo blob 존재)와 반드시 같아야 zip 불변식이 안 깨지는데, buildZip
+  // 이 이 함수를 blob 가지치기가 끝난 effectiveProject 로 호출하므로 project.mainMenuUi?.logo 만
+  // 봐도 자동으로 같은 조건이 된다(다시 blob 을 확인할 필요가 없다).
+  const showLogo = !!project.mainMenuUi?.logo && project.escMenuUi?.showSidebarLogo !== false;
+  let titleLogo: EscMenuPlan['titleLogo'];
+  if (showLogo) {
+    const width = escSidebarLogoWidth(project.height);
+    const aspect = project.mainMenuUi?.logoAspect ?? 3;
+    titleLogo = { width, height: Math.round(width / aspect) };
+  }
   return {
     has,
     scale: project.height / 1080,
     height: project.height,
     colors: escColors(project.escMenuUi?.colors),
+    // 값이 있으면 항상 'gui.esc_text_font'(gui.rpy 의 define, escFont 는 그 define 을 실제로 냈다는
+    // 뜻 — guiRpy.ts 의 escFontLine 과 반드시 같은 게이트여야 없는 gui.* 변수를 참조하지 않는다).
+    font: escFont ? 'gui.esc_text_font' : undefined,
+    titleLogo,
   };
 }
 
@@ -1123,6 +1142,8 @@ interface FontFallback {
   menu?: boolean;
   /** 메인 메뉴 버튼 텍스트(부). */
   menuSub?: boolean;
+  /** ESC 메뉴 글꼴(escMenuUi.fontId). */
+  esc?: boolean;
 }
 
 /** Ren'Py 텍스트 파일 전체를 생성한다. */
@@ -1175,6 +1196,13 @@ export function generateRenpyFiles(
     : project.mainMenuUi?.menuSubFontId
       ? fontGamePath(project.mainMenuUi.menuSubFontId)
       : menuTextFont;
+  // ESC 메뉴 글꼴 — escMenuUi 전용 필드(guiOverrides 도 mainMenuUi 도 아님). 미지정이면 undefined 라
+  // guiRpy 가 gui.esc_text_font define 자체를 안 낸다(인터페이스 폰트를 그대로 따라간다, 회귀 0).
+  const escTextFont = fontFallback?.esc
+    ? 'DejaVuSans.ttf'
+    : project.escMenuUi?.fontId
+      ? fontGamePath(project.escMenuUi.fontId)
+      : undefined;
 
   const files: RenpyFile[] = [
     { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules, project.guiOverrides?.characterScale, project) },
@@ -1203,8 +1231,9 @@ export function generateRenpyFiles(
       hasCg: cgs.length > 0,
       mainMenu: buildMainMenuPlan(project, items.length > 0, cgs.length > 0),
       quickMenu: buildQuickMenuPlan(project),
-      escMenu: buildEscMenuPlan(project),
+      escMenu: buildEscMenuPlan(project, escTextFont),
       menuFonts: { main: menuTextFont, sub: menuSubTextFont },
+      escFont: escTextFont,
     }),
     { path: 'README.md', content: readme(theme) },
   ];

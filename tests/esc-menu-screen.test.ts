@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { generateRenpyFiles } from '../src/renpy/generate';
 import type { EscImageId, Line } from '../src/types';
 import { ESC_IMAGES, DEFAULT_ESC_COLORS } from '../src/types';
+import { fontGamePath } from '../src/fonts/fontCatalog';
 import { contentOf, scene, dialogue, projectWith } from './fixtures';
 
 /** screens.rpy 전체에서 buildEscMenuStyles 가 이어붙인 꼬리 부분만 잘라낸다(없으면 빈 문자열). */
@@ -36,6 +37,18 @@ function styleBlock(tail: string, name: string): string {
   if (start < 0) throw new Error(`esc-menu-screen.test: style ${name} 블록을 찾지 못함`);
   const next = tail.indexOf('\nstyle ', start + 1);
   return tail.slice(start + 1, next >= 0 ? next : undefined);
+}
+
+/**
+ * escFontStyles(작업 1) 가 낸 글꼴 블록만 잘라낸다 — styleBlock() 은 이름의 "첫 등장"만 잡는데,
+ * navigation_button_text 등 여러 이름이 위 색 블록에도 이미 나와서(escFontStyles 가 buildEscMenuStyles
+ * 의 맨 마지막에 push 되는 이유) 재사용할 수 없다. 전용 마커(escFontStyles 의 주석 문구)로 꼬리 전체를
+ * 잘라낸 뒤, 그 안에서 원하는 이름의 style 블록을 styleBlock() 과 같은 규칙으로 다시 잘라낸다.
+ */
+function escFontBlock(tail: string): string {
+  const marker = '## ESC 메뉴 이미지 GUI — 글꼴(escMenuUi.fontId 지정 시에만';
+  const start = tail.indexOf(marker);
+  return start >= 0 ? tail.slice(start) : '';
 }
 
 /** ids 각각에 `<id>_asset` assetId 를 매핑한 escMenuUi.images 픽스처. */
@@ -525,5 +538,137 @@ describe('generateRenpyFiles: ESC 저장 화면·좌측 내비 — 배치시안 
     // "has vbox…" 문구 자체가 회귀 0 임을 보장하므로 별도로 안 짚어도 된다.
     expect(sc).not.toContain('padding (0, 0)');
     expect(sc).not.toContain('xanchor 0.0');
+  });
+});
+
+// escFontStyles/escFontLine(guiRpy.ts) 이 내는 style 이름 24개 — buildEscMenuStyles 의 이유 주석과 동일.
+const ESC_FONT_STYLE_NAMES = [
+  'navigation_button_text',
+  'return_button_text',
+  'game_menu_label_text',
+  'page_label_text',
+  'page_button_text',
+  'slot_button_text',
+  'slot_time_text',
+  'slot_name_text',
+  'esc_slot_empty_text',
+  'radio_button_text',
+  'check_button_text',
+  'pref_label_text',
+  'esc_pref_title',
+  'esc_pref_sub',
+  'history_text',
+  'history_name_text',
+  'history_label_text',
+  'about_text',
+  'about_label_text',
+  'help_text',
+  'help_label_text',
+  'help_button_text',
+  'confirm_prompt_text',
+  'confirm_button_text',
+] as const;
+
+describe('generateRenpyFiles: ESC 메뉴 글꼴(escMenuUi.fontId, 작업 1) — mainMenuUi.menuFontId 와 같은 배선', () => {
+  it('fontId 미지정이면 gui.rpy·screens.rpy 어디에도 gui.esc_text_font 가 없다', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const { files } = generateRenpyFiles(p);
+    expect(contentOf(files, 'game/gui.rpy')).not.toContain('gui.esc_text_font');
+    expect(contentOf(files, 'game/screens.rpy')).not.toContain('gui.esc_text_font');
+  });
+
+  it('이미지가 하나도 없으면(escMenuUi 자체가 회귀 0) fontId 를 줘도 무시된다', () => {
+    // buildEscMenuPlan 은 images 가 비어 있으면 무조건 undefined 를 반환한다 — fontId 는 EscMenuPlan
+    // 필드가 아니라 project.escMenuUi 필드라 여기까지 값은 있지만, 플랜 자체가 없어 화면 출력엔
+    // 어차피 안 쓰인다. 다만 gui.rpy 의 escFont define 은 project.escMenuUi?.fontId 만 보고 독립적으로
+    // 나가므로(EscMenuPlan 게이트와 별개) 여기선 gui.rpy 쪽만 확인한다.
+    const p = projectWith([plainScene()], { escMenuUi: { fontId: 'custom-esc' } });
+    const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
+    expect(sc).not.toContain('ESC 메뉴 이미지 GUI'); // 회귀 0(images 없음) — 스타일 블록 자체가 없다.
+  });
+
+  it('fontId 를 지정하면 gui.rpy 에 define 이 나오고, 지정된 스타일 24개 전부에 font gui.esc_text_font 가 붙는다', () => {
+    const p = projectWith([plainScene()], {
+      escMenuUi: { images: escImages(['bg']), fontId: 'custom-esc' },
+    });
+    const { files } = generateRenpyFiles(p);
+    const gui = contentOf(files, 'game/gui.rpy');
+    expect(gui).toContain(`define gui.esc_text_font = "${fontGamePath('custom-esc')}"`);
+
+    const tail = escStylesBlock(contentOf(files, 'game/screens.rpy'));
+    const fontTail = escFontBlock(tail);
+    expect(fontTail).not.toBe('');
+    for (const name of ESC_FONT_STYLE_NAMES) {
+      expect(fontTail, `style ${name} 에 font gui.esc_text_font 가 없다`).toContain(`style ${name}:\n    font gui.esc_text_font`);
+    }
+  });
+
+  it('일본어(textLocales 에 ja)면 define 이 _font_jp(...) 로 감싸진다', () => {
+    const p = projectWith([plainScene()], {
+      escMenuUi: { images: escImages(['bg']), fontId: 'custom-esc' },
+      textLocales: ['ko', 'ja'],
+    });
+    const gui = contentOf(generateRenpyFiles(p).files, 'game/gui.rpy');
+    expect(gui).toContain(`define gui.esc_text_font = _font_jp("${fontGamePath('custom-esc')}")`);
+  });
+});
+
+describe('generateRenpyFiles: 기록(대사 로그) 행 간격(작업 2) — ESC 활성 여부로만 갈린다(escFont 와 별개)', () => {
+  it('ESC 이미지가 있으면(글꼴 미지정이어도) 행 높이가 None, 간격이 8, 모바일 변형도 None', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const gui = contentOf(generateRenpyFiles(p).files, 'game/gui.rpy');
+    expect(gui).toContain('define gui.history_height = None');
+    expect(gui).toContain('define gui.history_spacing = gui.scale(8)');
+    expect((gui.match(/history_height = None/g) ?? []).length).toBe(2); // 기본 + small 변형.
+    expect(gui).not.toContain('gui.history_height = gui.scale(140)');
+    expect(gui).not.toContain('gui.history_height = gui.scale(190)');
+  });
+
+  it('ESC 미사용이면 기존 고정값 그대로다(회귀 0)', () => {
+    const gui = contentOf(generateRenpyFiles(projectWith([plainScene()])).files, 'game/gui.rpy');
+    expect(gui).toContain('define gui.history_height = gui.scale(140)');
+    expect(gui).toContain('define gui.history_spacing = 0');
+    expect(gui).toContain('gui.history_height = gui.scale(190)');
+    expect(gui).not.toContain('history_height = None');
+  });
+});
+
+describe('generateRenpyFiles: 좌측 사이드바 타이틀 로고(작업 3) — mainMenuUi.logo 재사용', () => {
+  it('mainMenuUi.logo 가 없으면 navigation 화면에 title_logo 참조가 없다', () => {
+    const p = projectWith([plainScene()], { escMenuUi: { images: escImages(['bg']) } });
+    const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
+    expect(sc).not.toContain('title_logo.png');
+  });
+
+  it('로고가 있으면 screen navigation() 의 "if not main_menu:" 블록 안에만 참조가 나온다(메인메뉴 자체 로고와 별개)', () => {
+    const p = projectWith([plainScene()], {
+      escMenuUi: { images: escImages(['bg']) },
+      mainMenuUi: { logo: 'logo-asset-1', logoAspect: 2 },
+    });
+    const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
+    const navStart = sc.indexOf('screen navigation():');
+    const navEnd = sc.indexOf('style navigation_button is gui_button');
+    expect(navStart).toBeGreaterThan(-1);
+    expect(navEnd).toBeGreaterThan(navStart);
+    const navBlock = sc.slice(navStart, navEnd);
+    expect(navBlock).toContain('if not main_menu:\n        add Transform("gui/title_logo.png"');
+    // 메인 메뉴 화면 자체의 큰 로고(buildImageMainMenuScreen) 1개 + 사이드바 작은 로고 1개 = 총 2번.
+    expect((sc.match(/title_logo\.png/g) ?? []).length).toBe(2);
+  });
+
+  it('showSidebarLogo: false 면 로고가 있어도 사이드바엔 나오지 않는다(메인 메뉴 자체 로고는 유지)', () => {
+    const p = projectWith([plainScene()], {
+      escMenuUi: { images: escImages(['bg']), showSidebarLogo: false },
+      mainMenuUi: { logo: 'logo-asset-1' },
+    });
+    const sc = contentOf(generateRenpyFiles(p).files, 'game/screens.rpy');
+    const navStart = sc.indexOf('screen navigation():');
+    const navEnd = sc.indexOf('style navigation_button is gui_button');
+    const navBlock = sc.slice(navStart, navEnd);
+    // "elif not main_menu:"(기존 메인 메뉴 복귀 분기)도 부분 문자열로 "if not main_menu:" 를 포함해
+    // 오검출되므로, 사이드바 로고 삽입부의 정확한 들여쓰기(줄 시작 "    if not main_menu:")로 확인한다.
+    expect(navBlock).not.toContain('\n    if not main_menu:\n        add Transform(');
+    // 메인 메뉴 자체 로고(1개)는 showSidebarLogo 와 무관하게 그대로 남는다.
+    expect((sc.match(/title_logo\.png/g) ?? []).length).toBe(1);
   });
 });
