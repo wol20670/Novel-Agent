@@ -1119,8 +1119,31 @@ function px(plan: EscMenuPlan, value1080: number): number {
  * 걸면 프레임 자신이 `<prefix>_frame` 으로 바뀌어 카드 배경이 날아가고, 안쪽 vbox 에 걸면
  * `radio_hbox` 처럼 **정의된 적 없는 스타일**을 Ren'Py 가 찾다 죽는다.
  */
-function preferencesBody(escMenu: EscMenuPlan | undefined, locales: GuiLocales | undefined, languagePrefs: string): string {
+function preferencesBody(
+  escMenu: EscMenuPlan | undefined,
+  locales: GuiLocales | undefined,
+  languagePrefs: string,
+  playerName: boolean,
+): string {
   if (!escMenu) {
+    // 플레이어가 정하는 주인공 이름(project.playerName) — 디스플레이/스킵 hbox 바로 아래 vbox 한
+    // 칸. change_player_name 은 화면 액션 안에서 renpy.input 을 직접 못 불러 invoke_in_new_context
+    // 경유(characters.rpy 의 정의, generate.ts characterDefs 주석 참고)로 감싼다.
+    //
+    // ⚠️ 현재 이름을 내는 `text` 에 **반드시 style 을 명시**해야 한다. `style_prefix "check"` 아래의
+    // 맨 `text` 는 `check_text` 를 찾는데 그런 스타일은 정의된 적이 없다 — Ren'Py 가 죽지는 않고
+    // (radio_hbox 와 달리 자동 생성된다) **부모 없는 기본 스타일**이 돼서 글자색이 테마를 안 따라간다.
+    // 어두운 메뉴 배경에서 거의 안 보이는 색으로 찍힌다(실기 스크린샷으로 확인 — lint·테스트 둘 다
+    // 못 잡는 종류). 그래서 테마 색을 물려받는 `gui_text` 를 직접 지정한다.
+    const playerNameVbox = playerName
+      ? `            vbox:
+                style_prefix "check"
+                label _("주인공 이름")
+                text player_display_name() style "gui_text"
+                textbutton _("이름 변경") action Function(renpy.invoke_in_new_context, change_player_name)
+
+`
+      : '';
     return `        vbox:
 
             hbox:
@@ -1141,7 +1164,7 @@ function preferencesBody(escMenu: EscMenuPlan | undefined, locales: GuiLocales |
                     textbutton _("선택 후에도") action Preference("after choices", "toggle")
                     textbutton _("전환 효과") action InvertSelected(Preference("transitions", "toggle"))
 
-            null height (4 * gui.pref_spacing)
+${playerNameVbox}            null height (4 * gui.pref_spacing)
 
 ${languagePrefs}            hbox:
                 style_prefix "slider"
@@ -1244,6 +1267,17 @@ ${languagePrefs}            hbox:
       'check_button',
     ),
   );
+
+  if (playerName) {
+    // 현재 이름은 player_display_name()(characters.rpy, generate.ts characterDefs 가 낸다) 을 그대로
+    // text 로 보여준다 — 화면 언어의 text 는 식을 받으므로 함수 호출도 그대로 쓸 수 있다. 새 style
+    // 을 만들지 않고 다른 카드가 쓰는 esc_pref_sub/check_button 을 그대로 재사용한다(CLAUDE.md:
+    // 정의된 적 없는 스타일을 부르면 죽는다 — style_prefix 도 안 쓴다, card() 헬퍼와 같은 이유).
+    card('주인공 이름', [
+      `text player_display_name() style "esc_pref_sub"`,
+      `textbutton _("이름 변경") action Function(renpy.invoke_in_new_context, change_player_name) style "check_button"`,
+    ]);
+  }
 
   for (const group of languagePrefGroups(locales)) {
     card(group.label, pillRow(group.items, 'radio_button'));
@@ -2224,10 +2258,12 @@ interface ScreensRpyOptions {
   quickMenu?: QuickMenuPlan;
   /** 있으면(업로드된 ESC 이미지가 하나라도) 해당 화면들의 style 블록을 뒤에 이어붙인다. */
   escMenu?: EscMenuPlan;
+  /** true 면(project.playerName 활성화) 설정 화면에 현재 이름 표시 + "이름 변경" 버튼을 추가한다. */
+  playerName?: boolean;
 }
 
 export function screensRpy(opts?: ScreensRpyOptions): string {
-  const { locales, hasItems, hasCg, mainMenu, quickMenu, escMenu } = opts ?? {};
+  const { locales, hasItems, hasCg, mainMenu, quickMenu, escMenu, playerName } = opts ?? {};
   const languagePrefs = languagePrefsBlock(locales);
   // 아이템/CG 가 있을 때만 각각의 보관함 진입 버튼(내비)을 낸다.
   const galleryNav = [
@@ -2268,7 +2304,7 @@ export function screensRpy(opts?: ScreensRpyOptions): string {
   // 썸네일 칸+캡션 분리 배치로 바뀐다(fileSlotsBody 참고, 배경 style 분기도 이 함수가 흡수했다).
   const fileSlotsBodyText = fileSlotsBody(escMenu);
   // 설정 화면은 그룹을 카드로 감싸야 해서 본문 전체를 분기한다(escMenu 없으면 기존 텍스트 그대로).
-  const prefsBody = preferencesBody(escMenu, locales, languagePrefs);
+  const prefsBody = preferencesBody(escMenu, locales, languagePrefs, !!playerName);
   // 기록(대사 로그) 화면 본문 — escMenu 없으면 원본 그대로(byte-identical), 있으면 대사 한 줄마다
   // 구분선을 두는 배치로 바뀐다(historyBody 참고).
   const historyBodyText = historyBody(escMenu);

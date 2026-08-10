@@ -136,6 +136,7 @@ export default function AssetsTab() {
           ))}
         </div>
         <NarrationOnlyRow />
+        <PlayerNameRow />
       </section>
 
       <VoiceSection />
@@ -616,6 +617,71 @@ function NarrationOnlyRow() {
           {c.name} <span className="text-gray-600">↩ 스프라이트 사용</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * 플레이어가 직접 정하는 주인공 이름(project.playerName, opt-in) 토글 + 대상 화자 선택.
+ * NarrationOnlyRow 바로 아래 — 이 기능의 실제 대상은 대개 스프라이트 없는(내레이션 전용) 화자라
+ * 같은 자리에 둔다. BgmPlaybackToggles 와 같은 패턴 — 새 store 액션을 만들지 않고 이미 검증된
+ * updateProjectMeta 를 그대로 쓰고, onChange 안에서는 getState() 로 비반응 읽기.
+ */
+function PlayerNameRow() {
+  const characters = useStore((s) => s.project.characters);
+  const playerName = useStore((s) => s.project.playerName);
+  const updateProjectMeta = useStore((s) => s.updateProjectMeta);
+
+  if (characters.length === 0) {
+    return (
+      <label className="mt-3 flex items-start gap-2 text-xs text-gray-600 cursor-not-allowed">
+        <input type="checkbox" className="mt-0.5" disabled />
+        <span>
+          플레이어가 주인공 이름을 직접 정하게 하기
+          <span className="block text-[10px] text-gray-600 mt-0.5">등장 캐릭터가 없어 대상을 고를 수 없습니다.</span>
+        </span>
+      </label>
+    );
+  }
+
+  const enabled = !!playerName;
+  // 기본값 = 첫 isProtagonist 캐릭터, 없으면 첫 캐릭터(types.ts Character.isProtagonist 참고).
+  const defaultTarget = characters.find((c) => c.isProtagonist)?.name ?? characters[0].name;
+
+  return (
+    <div className="mt-3 flex flex-col gap-1.5">
+      <label className="flex items-start gap-2 text-xs text-gray-300 cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={enabled}
+          onChange={(e) => {
+            updateProjectMeta({ playerName: e.target.checked ? { character: defaultTarget } : undefined });
+          }}
+        />
+        <span>
+          플레이어가 주인공 이름을 직접 정하게 하기
+          <span className="block text-[10px] text-gray-500 mt-0.5">
+            게임을 처음 시작할 때 한 번 묻고, 그 뒤에는 설정 화면에서 언제든 바꿀 수 있습니다. 비워두면 대본에 적힌 이름을 씁니다.
+          </span>
+        </span>
+      </label>
+      {enabled && (
+        <select
+          className="field text-xs ml-6 w-auto"
+          value={playerName?.character ?? defaultTarget}
+          onChange={(e) => {
+            const prev = useStore.getState().project.playerName;
+            updateProjectMeta({ playerName: { ...prev, character: e.target.value } });
+          }}
+        >
+          {characters.map((c) => (
+            <option key={c.name} value={c.name}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }

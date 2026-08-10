@@ -93,6 +93,10 @@ export const UI_STRINGS: UiTr[] = [
   { ko: '테스트', en: 'Test', ja: 'テスト' },
   { ko: '자막 언어', en: 'Text Language', ja: '字幕言語' },
   { ko: '음성 언어', en: 'Voice Language', ja: 'ボイス言語' },
+  // 플레이어가 정하는 주인공 이름(project.playerName) — 첫 실행 입력 + 설정 화면 이름 변경.
+  { ko: '주인공의 이름을 입력하세요', en: "Enter the protagonist's name", ja: '主人公の名前を入力してください' },
+  { ko: '주인공 이름', en: 'Protagonist Name', ja: '主人公の名前' },
+  { ko: '이름 변경', en: 'Change', ja: '名前を変更' },
   // 기록/도움말 안내
   { ko: '대화 기록이 비어 있습니다.', en: 'The dialogue history is empty.', ja: '会話履歴は空です。' },
   // 도움말 - 입력 장치

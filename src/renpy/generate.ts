@@ -391,16 +391,64 @@ function makeResolver(refs: SceneAssetRef[]) {
   };
 }
 
+/**
+ * project.playerName(opt-in)이 가리키는 실제 캐릭터. 대본을 다시 파싱해 그 이름이 사라지면(캐릭터
+ * 삭제/개명) find 가 undefined 를 반환해 기능이 조용히 꺼진다 — 없는 캐릭터를 참조하지 않는다.
+ * characterDefs/scriptBody/generateGuiFiles 가 전부 이 함수 하나의 결과만 보고 게이트를 맞춘다
+ * (CLAUDE.md — 게이트가 두 곳에서 갈라지면 "참조는 있는데 정의가 없는" 종류의 버그가 된다).
+ */
+function resolvePlayerNameTarget(project: Project): Character | undefined {
+  const name = project.playerName?.character;
+  if (!name) return undefined;
+  return project.characters.find((c) => c.name === name);
+}
+
 function characterDefs(
   project: Project,
   ids: Map<string, string>,
   joints: Map<string, JointSpeaker>,
   dialogueBox: string,
+  playerNameTarget: Character | undefined,
 ): string {
   // 이름표 색은 캐릭터 고유색을 쓰되, 대사창 배경 대비 읽히도록 보정(어두운 창=밝게/밝은 창=어둡게).
   const nameColor = (hue: string) => enforceContrast(hue, dialogueBox, 4.5);
   const lines = ['# 자동 생성: 캐릭터 정의', ''];
   for (const c of project.characters) {
+    if (playerNameTarget && c.name === playerNameTarget.name) {
+      // 플레이어가 이름을 직접 정하는 캐릭터(project.playerName, opt-in) — Character 에 문자열 대신
+      // "함수"를 주고 dynamic=True 로 두면 대사를 낼 때마다(윈도우가 뜰 때마다) who() 를 다시 불러서
+      // (renpy/character.py:1541, __str__ 쪽은 :1391 — SDK 로 이미 확인) persistent 에 담긴 이름이
+      // 세이브를 이어서 불러온 게임에까지 즉시 반영된다(define 은 init 1회뿐이라 문자열 그대로는 불가능).
+      lines.push(
+        'default persistent.player_name = None',
+        'default persistent.player_name_asked = False',
+        '',
+        '## 플레이어가 정하는 주인공 이름 — persistent 라 세이브·새 게임을 넘어 유지된다.',
+        '## Character 에 함수를 주고 dynamic=True 로 두면 대사를 낼 때마다 다시 불려서(renpy/character.py),',
+        '## 설정에서 이름을 바꾸는 즉시 이미 저장된 게임까지 전부 새 이름으로 나온다.',
+        'init -1 python:',
+        '',
+        '    def player_display_name():',
+        '        # 비워두고 넘어갔으면 대본의 원래 이름. _() 라 자막 언어를 따라간다.',
+        `        return persistent.player_name or _("${esc(c.name)}")`,
+        '',
+        '    def change_player_name():',
+        '        # 설정 화면에서 부른다(renpy.invoke_in_new_context 경유 — 화면 액션 안에서는',
+        '        # renpy.input 을 바로 못 부른다). exclude 로 {}[]% 를 막는 이유: who 는',
+        '        # renpy.substitutions.substitute() 를 거치므로(renpy/character.py:1400, SDK 확인) 안',
+        '        # 막으면 플레이어가 넣은 [·% 가 CLAUDE.md 이스케이프 함정을 플레이어 손으로 재현한다',
+        '        # (엔진 기본 exclude 는 "{}" 뿐이라 [·% 는 그대로 통과한다).',
+        '        persistent.player_name = renpy.input(',
+        '            _("주인공의 이름을 입력하세요"),',
+        '            default=(persistent.player_name or ""),',
+        '            length=12,',
+        '            exclude="{}[]%",',
+        '        ).strip()',
+        '',
+        `define ${ids.get(c.name)} = Character(player_display_name, dynamic=True, color="${nameColor(c.color)}")`,
+      );
+      continue;
+    }
     // _() 로 감싸야 translationFiles() 가 내보내는 이름표 번역(old/new)이 자막 언어 전환 시 적용된다
     // (define 은 init 시 1회 실행이라, 감싸지 않으면 언어를 바꿔도 이름표는 원문에 고정됨).
     lines.push(`define ${ids.get(c.name)} = Character(_("${esc(c.name)}"), color="${nameColor(c.color)}")`);
@@ -500,6 +548,7 @@ function scriptBody(
   outfitRules: OutfitRule[] | undefined,
   characterScale: number | undefined,
   project: Project,
+  playerNameActive: boolean,
 ): string {
   const resolve = makeResolver(refs);
   // BGM 재생 방식(project.bgmPlayback, types.ts 주석 참고) — 장면 루프 밖에서 한 번만 계산.
@@ -559,6 +608,25 @@ function scriptBody(
   out.push(`${indent(1)}align (0.5, 0.5)`);
   out.push('');
   out.push('label start:');
+  if (playerNameActive) {
+    // 묻는 조건이 player_name(문자열) 이 아니라 별도 플래그 player_name_asked 인 게 핵심 —
+    // 빈 입력("")을 그대로 저장해야 player_display_name() 이 "그때그때의 자막 언어"로 기본 이름을
+    // 만든다. 기본 이름을 여기서 persistent 에 구워 넣으면 나중에 언어를 바꿔도 첫 실행 시점 언어의
+    // 이름이 그대로 남는다 — 플래그가 없으면 빈 입력이 "미설정"과 구분 안 돼 매번 다시 묻게 된다.
+    out.push('    if not persistent.player_name_asked:');
+    // 입력창이 검은 화면에 뜨는 걸 막는 용도 — gui.main_menu_background 는 guiRpy 가 항상 define
+    // 하고 buildZip 이 항상 game/gui/main_menu.png 를 넣으므로(zip 불변식) 참조가 항상 안전하다.
+    out.push(
+      `${indent(2)}scene expression Transform(gui.main_menu_background, fit="cover", xysize=(config.screen_width, config.screen_height))`,
+    );
+    // exclude="{}[]%" — 함정 방어. renpy.input() 이 채우는 값도 결국 who() 를 통해 substitute() 를
+    // 거치므로(characterDefs 의 change_player_name 과 동일 이유), 여기서도 반드시 걸어야 한다.
+    out.push(
+      `${indent(2)}$ persistent.player_name = renpy.input(_("주인공의 이름을 입력하세요"), default="", length=12, exclude="{}[]%").strip()`,
+    );
+    out.push(`${indent(2)}$ persistent.player_name_asked = True`);
+    out.push('');
+  }
   if (refs.length > 0) out.push(`    jump ${refs[0].label}`);
   else out.push('    "승인된 장면이 없습니다."', '    return');
   out.push('');
@@ -1218,6 +1286,10 @@ export function generateRenpyFiles(
   const plan = expressionPlan(project, ids);
   const sprites = resolveSprites(project, ids, plan);
   const joints = resolveJointSpeakers(project);
+  // 대상 판정은 여기 한 곳에서만 — characterDefs(characters.rpy)·scriptBody(label start)·
+  // generateGuiFiles(설정 화면)에 전부 이 결과(또는 그 boolean)만 넘긴다. 못 찾으면(캐릭터
+  // 삭제/개명) undefined 라 세 곳 모두 자동으로 "꺼짐"과 같은 출력이 된다(게이트 단일화).
+  const playerNameTarget = resolvePlayerNameTarget(project);
   let theme = withGuiOverrides(resolveTheme(project.genre, project.guiTheme), project.guiOverrides);
   if (fontFallback?.body) {
     // 본문 폰트를 아무것도 못 구한 경우(폰트 프로바이더 전면 실패) — gui.rpy 가 game/fonts/ 에 없는
@@ -1256,8 +1328,8 @@ export function generateRenpyFiles(
       : undefined;
 
   const files: RenpyFile[] = [
-    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules, project.guiOverrides?.characterScale, project) },
-    { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox) },
+    { path: 'game/script.rpy', content: scriptBody(refs, ids, sprites, theme.sceneTransition, joints, project.height, items, sideById, project.outfitRules, project.guiOverrides?.characterScale, project, !!playerNameTarget) },
+    { path: 'game/characters.rpy', content: characterDefs(project, ids, joints, theme.dialogueBox, playerNameTarget) },
     { path: 'game/assets.rpy', content: assetDefs(refs, sprites, items) },
     { path: 'game/options.rpy', content: optionsRpy(project) },
     { path: 'game/credits.rpy', content: creditsRpy(project) },
@@ -1285,6 +1357,7 @@ export function generateRenpyFiles(
       escMenu: buildEscMenuPlan(project, escTextFont),
       menuFonts: { main: menuTextFont, sub: menuSubTextFont },
       escFont: escTextFont,
+      playerName: !!playerNameTarget,
     }),
     { path: 'README.md', content: readme(theme) },
   ];

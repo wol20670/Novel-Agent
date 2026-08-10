@@ -357,6 +357,16 @@ export interface Project {
    * 우선순위는 resolveOutfit 참고(장면 직접 지정 > 규칙 첫 일치 > '기본').
    */
   outfitRules?: OutfitRule[];
+  /**
+   * 플레이어가 직접 정하는 주인공 이름(선택, opt-in). 미지정이면 대본에 적힌 이름 고정(= 기존 동작,
+   * 회귀 0 — generate.ts characterDefs 가 이 필드 유무로 분기한다).
+   * character = 대상 화자의 project.characters[].name. 대본을 다시 파싱해 그 이름이 사라지면
+   * (캐릭터 삭제/개명) 생성기가 조용히 이 기능을 끈다 — 없는 캐릭터를 참조하지 않는다(characterDefs 의
+   * `project.characters.find(c => c.name === playerName.character)` 게이트, 못 찾으면 undefined 와 동일 출력).
+   * Ren'Py 쪽 구현은 `Character(<callable>, dynamic=True)` — 대사를 낼 때마다 who() 를 다시 불러서
+   * (renpy/character.py) persistent 에 담긴 이름이 세이브를 넘어서도 즉시 반영된다.
+   */
+  playerName?: { character: string };
   /** 메인 메뉴 이미지 GUI(업로드 전용). 비어 있으면 기존 텍스트 메뉴 그대로 나간다(회귀 0). */
   mainMenuUi?: {
     buttons?: Partial<Record<MenuButtonSlot, Partial<Record<MenuButtonState, string>>>>; // assetId
