@@ -93,7 +93,8 @@ try {
   log('  --- script.rpy 앞부분 ---\n' + pre.split('\n').slice(0, 14).map((l) => '    ' + l).join('\n'));
   assert(/label scene_1\b/.test(pre), "script.rpy 에 label scene_1 존재");
   assert(/menu:/.test(pre), 'script.rpy 에 menu 블록 존재');
-  assert(/show c_\d+ \w+ at /.test(pre), 'script.rpy 에 캐릭터 show 문 존재');
+  // 의상(복장) 기능이 들어온 뒤 show 문 속성이 둘(`<의상> <표정>`)이라 `\w+` 하나로는 안 맞는다.
+  assert(/show c_\d+ [\w ]+ at /.test(pre), 'script.rpy 에 캐릭터 show 문 존재');
   await page.screenshot({ path: join(shotDir, '3-renpy.png'), fullPage: true });
 
   // 6) ZIP 생성 → 다운로드 → 내용물 검증
@@ -154,7 +155,8 @@ try {
 
   // 초기화(confirm 수락) → 장면 0
   page.once('dialog', (d) => d.accept());
-  await page.getByTitle('모두 초기화').click();
+  // 버튼 title 은 "전체 초기화 (대본·설정 포함 모두 삭제)" — getByTitle 은 기본이 완전일치라 정규식으로 찾는다.
+  await page.getByTitle(/전체 초기화/).click();
   await page.waitForTimeout(500);
   const afterReset = await page.locator('input.field.font-semibold').count();
   assert(afterReset === 0, `초기화 후 장면 0 (실제 ${afterReset})`);

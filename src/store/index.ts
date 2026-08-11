@@ -1,23 +1,15 @@
 import { create } from 'zustand';
 import type {
-  Project,
-  Scene,
-  AssetMeta,
-  Character,
-  Expression,
   Locale,
-  TranslateMode,
+  Expression,
+  Character,
   MenuButtonSlot,
   MenuButtonState,
-  MainMenuLayout,
-  MainMenuPresetId,
-  OrphanAsset,
   QuickButtonSlot,
   QuickButtonState,
-  QuickMenuLayout,
   EscImageId,
-  EscColors,
-} from './types';
+  OrphanAsset,
+} from '../types';
 import {
   emptyProject,
   effectiveExpressions,
@@ -39,35 +31,34 @@ import {
   QUICK_BUTTON_STATES,
   matchEscImageFile,
   ESC_IMAGES,
-} from './types';
-import { collectUntranslated } from './generators/translate/collect';
-import { translateBatch, chunkItems, isFatalTranslateError } from './generators/translate';
-import { sleep } from './generators/shared/retry';
-import { collectVoiceTargets, type VoiceBatchItem } from './generators/voice/collectByCharacter';
-import { typecastTTS, getSubscription } from './generators/voice/typecastProvider';
-import { estimateVoiceCostForProject, type VoiceEstimate } from './generators/voice/estimate';
-import { collectEmotionTargets, selectEmotionsBatch } from './generators/emotion/aiSelect';
-import { estimateEmotionCost } from './generators/emotion/estimate';
-import { buildSynopsis } from './generators/theme';
-import { aiConfig } from './config/aiConfig';
-import type { ScriptMeta, BuildResult } from './parser';
-import { mergeScenes, type AnalyzeMode } from './project/mergeScenes';
-import { applyAssetToGroup, clearAssetFromGroup } from './project/sceneAssets';
-import { putAsset, getAsset, deleteAsset, deleteAssets, clearAssets, getAllAssetKeys, getAssetInfos } from './storage/assetStore';
-import { collectReferencedAssetIds, diffOrphanIds, diffRemoteOrphans, DEFAULT_REMOTE_GRACE_MS } from './assetRefs';
-import { saveProject, loadProject, clearProject } from './storage/projectStore';
-import { SAMPLE_STORY } from './sample';
-import { exportProjectFile, importProjectFile } from './project/transfer';
-import { downloadBlob } from './zip/buildZip';
-import { generateTheme } from './generators/theme';
-import { backgroundKey, bgmKey, extFromMime } from './renpy/generate';
+} from '../types';
+import { collectUntranslated } from '../generators/translate/collect';
+import { translateBatch, chunkItems, isFatalTranslateError } from '../generators/translate';
+import { sleep } from '../generators/shared/retry';
+import { collectVoiceTargets, type VoiceBatchItem } from '../generators/voice/collectByCharacter';
+import { typecastTTS, getSubscription } from '../generators/voice/typecastProvider';
+import { estimateVoiceCostForProject } from '../generators/voice/estimate';
+import { collectEmotionTargets, selectEmotionsBatch } from '../generators/emotion/aiSelect';
+import { estimateEmotionCost } from '../generators/emotion/estimate';
+import { buildSynopsis } from '../generators/theme';
+import { aiConfig } from '../config/aiConfig';
+import { mergeScenes } from '../project/mergeScenes';
+import { applyAssetToGroup, clearAssetFromGroup } from '../project/sceneAssets';
+import { getAsset, deleteAsset, deleteAssets, clearAssets, getAllAssetKeys, getAssetInfos } from '../storage/assetStore';
+import { collectReferencedAssetIds, diffOrphanIds, diffRemoteOrphans, DEFAULT_REMOTE_GRACE_MS } from '../assetRefs';
+import { saveProject, loadProject, clearProject } from '../storage/projectStore';
+import { SAMPLE_STORY } from '../sample';
+import { exportProjectFile, importProjectFile } from '../project/transfer';
+import { downloadBlob } from '../zip/buildZip';
+import { generateTheme } from '../generators/theme';
+import { backgroundKey, bgmKey, extFromMime } from '../renpy/generate';
 import {
   isFolderSyncSupported,
   connectProjectFolder,
   getConnectedFolderName,
   disconnectFolder as fsDisconnectFolder,
   syncProjectToFolder,
-} from './project/folderSync';
+} from '../project/folderSync';
 import {
   startCollab,
   stopCollab,
@@ -75,568 +66,30 @@ import {
   persistCollabConfig,
   pushProject as collabPushProject,
   pushAsset as collabPushAsset,
-  takeDroppedRemoteCount,
-  updatePresence,
   isCollabReady,
   listRemoteAssets,
   collectRemoteReferencedIds,
   removeRemoteAssets,
-  type CollabStatus,
-  type PeerPresence,
-  type CollabHooks,
-} from './collab';
-import { sanitizeWindowsPath } from './project/safeName';
-
-export type Tab = 'scenes' | 'assets' | 'renpy';
-
-let assetCounter = 0;
-function assetId(): string {
-  assetCounter += 1;
-  return `a_${Date.now().toString(36)}_${assetCounter}`;
-}
-
-/** 업로드 파일명에 쓸 안전한 파일명(특수문자 제거·공백을 밑줄로, 최대 50자). */
-/**
- * 일괄 업로드 실패 목록을 토스트에 넣을 짧은 문구로 — "a.png, b.png, c.png 외 5개".
- * 메뉴 버튼·퀵메뉴·스프라이트 세 곳이 같은 문구를 쓰는데 각자 지역 함수로 복붙돼 있던 걸 모았다.
- */
-function describeNames(names: string[]): string {
-  const shown = names.slice(0, 3).join(', ');
-  const rest = names.length > 3 ? ` 외 ${names.length - 3}개` : '';
-  return `${shown}${rest}`;
-}
-
-function safeFileName(s: string): string {
-  return sanitizeWindowsPath(s, 50, 'asset');
-}
-
-// scenes 배열 identity 별로 id→Scene 인덱스를 캐싱한다. zustand는 set() 마다 구독 중인 모든
-// 셀렉터를 다시 돌리므로(렌더가 아니라!), SceneCard/RightPanel 처럼 `scenes.find(id===...)` 를
-// 셀렉터 안에 두면 카드 N개 × 장면 N개 = O(N²) 비교가 키 입력마다 반복된다(150장면 기준
-// 22,500회, 800장면이면 640,000회+배열 640,000회 스캔). setScenes(store.ts)가 변경 안 된 장면의
-// 객체 identity를 보존하므로, 배열 자체가 안 바뀌면 이 캐시는 항상 유효하다 — WeakMap 키가
-// 배열이라 새 scenes 배열이 생기면 자동으로 새 캐시 항목이 되어(스테일 가능성 없음) 재구축은
-// "장면 배열이 실제로 바뀐 시점" 딱 1번, O(N)이다(구독자 수와 무관).
-const sceneIndexCache = new WeakMap<Scene[], Map<string, Scene>>();
-export function sceneById(scenes: Scene[], id: string | null | undefined): Scene | undefined {
-  if (!id) return undefined;
-  let idx = sceneIndexCache.get(scenes);
-  if (!idx) {
-    idx = new Map(scenes.map((sc) => [sc.id, sc]));
-    sceneIndexCache.set(scenes, idx);
-  }
-  return idx.get(id);
-}
-
-/** 보이스 일괄 생성 중 attachVoiceQuiet 가 즉시 커밋하지 않고 모아두는 항목 하나. */
-interface VoiceAttachUpdate {
-  sceneId: string;
-  lineIndex: number;
-  locale: Locale;
-  assetId: string;
-}
-
-/**
- * attachVoiceQuiet 가 모아둔 항목들을 scenes 에 한 번에 반영하는 순수 함수(부수효과 없음) —
- * 배치 중 매 줄마다 전체 scenes 를 재빌드하던 것을 배치 끝에 1회로 줄인다(autoTranslateAll 의
- * updates Map 누적 → 단일 커밋 패턴과 동일). voiceLocales 에 새로 추가할 로케일 집합도 함께 반환.
- */
-function applyVoiceUpdates(scenes: Scene[], updates: VoiceAttachUpdate[]): { scenes: Scene[]; locales: Locale[] } {
-  if (!updates.length) return { scenes, locales: [] };
-  const bySceneLine = new Map<string, Map<number, Partial<Record<Locale, string>>>>();
-  const localeSet = new Set<Locale>();
-  for (const u of updates) {
-    localeSet.add(u.locale);
-    let lineMap = bySceneLine.get(u.sceneId);
-    if (!lineMap) {
-      lineMap = new Map();
-      bySceneLine.set(u.sceneId, lineMap);
-    }
-    lineMap.set(u.lineIndex, { ...lineMap.get(u.lineIndex), [u.locale]: u.assetId });
-  }
-  const nextScenes = scenes.map((sc) => {
-    const lineMap = bySceneLine.get(sc.id);
-    if (!lineMap) return sc;
-    return {
-      ...sc,
-      lines: sc.lines.map((l, i) => {
-        const lineUpdate = lineMap.get(i);
-        if (!lineUpdate || l.kind !== 'dialogue') return l;
-        return { ...l, voiced: true, voiceAssetIds: { ...l.voiceAssetIds, ...lineUpdate } };
-      }),
-    };
-  });
-  return { scenes: nextScenes, locales: [...localeSet] };
-}
-
-/**
- * autoAssignEmotionAll 이 모아둔 (sceneId → lineIndex → 배정된 표정) 결과를 scenes 에 한 번에
- * 반영하는 순수 함수 — applyVoiceUpdates 와 같은 절충(배치 중 매 줄마다 scenes 를 재빌드하지 않고
- * 끝에 1회)이다. 단위테스트는 없다(autoTranslateAll 의 커밋도 액션 안에 인라인이라 같은 처지).
- */
-function applyEmotionUpdates(scenes: Scene[], updates: Map<string, Map<number, Expression>>): Scene[] {
-  if (!updates.size) return scenes;
-  return scenes.map((sc) => {
-    const lineMap = updates.get(sc.id);
-    if (!lineMap) return sc;
-    return {
-      ...sc,
-      lines: sc.lines.map((l, i) => {
-        const expr = lineMap.get(i);
-        if (!expr || l.kind !== 'dialogue') return l;
-        return { ...l, emotionAuto: expr };
-      }),
-    };
-  });
-}
-
-interface State {
-  project: Project;
-  assets: Record<string, AssetMeta>;
-  activeTab: Tab;
-  selectedSceneId: string | null;
-  busy: Record<string, boolean>; // `batch:translate` 등 진행 중 표시 키
-  toast: string | null;
-  toastType: 'info' | 'success' | 'error';
-  /**
-   * 가장 최근 자동저장 실패 메시지(성공하면 null) — toast 는 3.5초면 사라져 그 뒤엔 저장이 계속
-   * 실패해도 화면이 멀쩡해 보인다. 이건 실패가 이어지는 동안 계속 떠 있는 배너용(LeftPanel 상단).
-   */
-  saveError: string | null;
-
-  // 입력/분석
-  setRawInput: (text: string) => void;
-  loadSample: () => void;
-  /**
-   * 파서(parseText/parseWorkbook) 결과를 프로젝트에 적용한다 — 실제 파싱은 LeftPanel 이 먼저
-   * 수행해 병합 미리보기(previewMerge)를 계산한 뒤 이 액션을 호출한다. mode 로 기존 장면과의
-   * 병합 방식을 고른다(merge=스마트 병합/append=뒤에 추가/replace=전체 교체). rawText 는 텍스트
-   * 분석 경로에서만 project.rawInput 갱신용으로 넘긴다(엑셀 경로는 미지정).
-   */
-  applyAnalysis: (parsed: BuildResult, mode: AnalyzeMode, rawText?: string) => void;
-
-  // 장면 편집
-  updateScene: (id: string, patch: Partial<Scene>) => void;
-  /** 대사 한 줄의 표정을 수동 지정(undefined = 자동 추론으로 되돌림). */
-  setLineEmotion: (sceneId: string, lineIndex: number, emotion: Expression | undefined) => void;
-  /**
-   * 대사/지문 한 줄부터 스프라이트 숨김을 override(3-state: true=숨김/false=표시/undefined=이전
-   * 줄 상태 상속). 판정 단일 소스는 spriteHiddenFlags(types.ts) — 이 액션은 그 입력값만 바꾼다.
-   */
-  setLineHideSprites: (sceneId: string, lineIndex: number, hide: boolean | undefined) => void;
-  /** 대사/지문 한 줄의 원문(base) 텍스트를 실시간 수정한다(대사·지문 공통). */
-  setLineText: (sceneId: string, lineIndex: number, text: string) => void;
-  /** 대사/지문 한 줄의 로케일 번역(i18n)을 수정한다. 빈 값이면 그 로케일을 제거(원문 폴백). */
-  setLineTranslation: (sceneId: string, lineIndex: number, locale: Locale, text: string) => void;
-  /** 자동 번역 모드 변경(off/fast/quality). off 면 자동 번역 버튼이 숨겨진다. */
-  setTranslateMode: (mode: TranslateMode) => void;
-  /** 번역이 빈 대사·지문을 GPT 로 en·ja 채운다(빈 칸만). off/키없음이면 no-op/에러. */
-  autoTranslateAll: () => Promise<void>;
-  /** 자동 번역 진행 상황(장면 기준) — null = 실행 중 아님. CenterPanel 이 "N/M 장면" 으로 표시. */
-  translateProgress: { done: number; total: number } | null;
-  /**
-   * AI 문맥 표정 배정(GPT) — emotion(작가 수동)·emotionAuto(AI) 가 둘 다 없고 실제 업로드된
-   * 스프라이트가 있는 대사만 채운다(증분: 이미 채운 줄은 재실행해도 다시 API 를 안 태움).
-   * autoTranslateAll 과 같은 구조(busy 키·진행률·PACE_MS·outer 루프·단일 커밋) — 실행 전 비용
-   * 견적(estimateEmotionCost)을 window.confirm 으로 보여준다. off/키없음이면 no-op/에러.
-   */
-  autoAssignEmotionAll: () => Promise<void>;
-  /** AI 표정 배정 진행 상황(장면 기준) — null = 실행 중 아님. translateProgress 와 동일한 표시 계약. */
-  emotionProgress: { done: number; total: number } | null;
-  setSceneStatus: (id: string, status: Scene['status']) => void;
-  /**
-   * 이 장면을 스프라이트 숨김 상태로 시작할지(장면 카드 헤더 토글). 차량 내부처럼 인물이 서 있는
-   * 구도가 어색한 장면 전체에 쓴다 — 줄 단위로만 숨기려면 setLineHideSprites 를 쓸 것.
-   */
-  setSceneHideSprites: (sceneId: string, hide: boolean) => void;
-  approveAll: () => void;
-  selectScene: (id: string | null) => void;
-  setActiveTab: (t: Tab) => void;
-
-  // 프로젝트 메타
-  updateProjectMeta: (patch: Partial<Project>) => void;
-  updateCharacter: (name: string, patch: Partial<Character>) => void;
-
-  // GUI 테마 (AI/오프라인 생성)
-  aiThemeBusy: boolean;
-  generateAiTheme: () => Promise<void>;
-  clearAiTheme: () => void;
-
-  // 캐릭터 의상(복장) — 의상마다 표정 세트를 따로 가진다. #복장 태그로 장면별 지정.
-  addOutfit: (charName: string, name: string) => void;
-  removeOutfit: (charName: string, name: string) => Promise<void>;
-  /**
-   * 배경 이름 키워드 → 캐릭터 의상 자동 지정 규칙(프로젝트 단위). 53개 장면에 일일이 #복장을
-   * 안 적어도 배경 이름으로 의상이 자동 결정되게 — resolveOutfit(types.ts)이 우선순위를 정한다.
-   */
-  addOutfitRule: (charName: string, outfit: string, keyword: string) => void;
-  removeOutfitRule: (index: number) => void;
-  /** 이 캐릭터의 모든 업로드 입화를 비운다(표정 세트는 유지, 다시 업로드 가능). */
-  clearCharacterSprites: (name: string) => Promise<void>;
-  /** 캐릭터 이름표의 언어별 번역 설정(에셋 탭 캐릭터 카드). 비우면(value='') 그 언어 번역을 지운다. */
-  setCharacterI18nName: (charName: string, locale: Locale, value: string) => void;
-
-  // 표정 세트 편집 (추가 / 이름변경 / 삭제). '기본'은 고정(이름변경·삭제 불가).
-  addExpression: (name: string) => void;
-  renameExpression: (oldName: string, newName: string) => void;
-  removeExpression: (name: string) => Promise<void>;
-  /** 표정 이름 → 한 줄 설명(project.expressionNotes, AI 표정 배정 프롬프트 전용) 편집. 빈 값이면 그 표정의 설명을 지운다. */
-  setExpressionNote: (name: string, value: string) => void;
-
-  /** 아이템(소품) 팝업 이미지 업로드 — 이름 기준 공유(project.itemAssetIds). */
-  uploadItem: (name: string, file: File) => Promise<void>;
-
-  // 외부 제작 에셋 업로드 (ChatGPT/Suno 등에서 만든 파일을 그대로 적용)
-  importBackground: (sceneId: string, file: File) => Promise<void>;
-  importSprite: (name: string, expr: Expression, file: File, outfit?: string) => Promise<void>;
-  /**
-   * 스프라이트 일괄 업로드 — 파일명에 든 표정 이름으로 자동 매칭해 선택된 의상 세트에 넣는다.
-   * 표정 24종 × 캐릭터를 한 칸씩 올리는 걸 대체한다(메뉴 버튼 일괄 업로드와 같은 관용구).
-   */
-  importSpritesBatch: (name: string, outfit: string, files: File[]) => Promise<void>;
-  importCg: (sceneId: string, index: number, file: File) => Promise<void>;
-  clearCg: (sceneId: string, index: number) => Promise<void>;
-  /** BGM 오디오 업로드 — 같은 BGM 이름(#BGM)을 쓰는 모든 장면에 함께 적용. */
-  importBgm: (sceneId: string, file: File) => Promise<void>;
-  /** 이 장면(그룹)의 BGM 업로드 해제. */
-  clearBgm: (sceneId: string) => Promise<void>;
-
-  /**
-   * VoiceLab(🎙)에서 생성한 음성을 이 대사·언어에 매단다(voices.rpy 의 vo() 가 내보내기 때
-   * game/voices/{lang}/*.mp3 로 실제 반영). project.voiceLocales 에 해당 언어가 없으면 자동 추가.
-   */
-  attachLineVoice: (sceneId: string, lineIndex: number, locale: Locale, blob: Blob, charName: string) => Promise<void>;
-  /** 이 대사·언어의 매단 음성을 해제. */
-  detachLineVoice: (sceneId: string, lineIndex: number, locale: Locale) => Promise<void>;
-  /**
-   * 캐릭터의 저장된 보이스 프리셋(char.voice)으로, 이 캐릭터가 말하는(합동 제외) 이 언어 음성이
-   * 아직 없는 대사를 전부 순차 생성·적용한다(이미 있는 줄은 건너뜀 — 개별 미세조정 보존). 대본이
-   * 수백 줄이어도 하나하나 손으로 안 해도 되게 하는 일괄 기능. 진행 중엔 busy['batch:voice:'+charName].
-   */
-  batchVoiceCharacter: (charName: string, locale: Locale) => Promise<void>;
-  /** 보이스 프리셋이 저장된 모든 캐릭터에 대해 batchVoiceCharacter 를 순차 실행(확인창은 총합으로 한 번만). */
-  batchVoiceAll: (locale: Locale) => Promise<void>;
-
-  /**
-   * 글자수 기반 즉시 계산(1글자=1크레딧, API 호출 0회)한 프로젝트 전체 보이스 예상 비용.
-   * estimateVoiceCost() 로 채워지고, batchVoiceCharacter/batchVoiceAll 의 진행 전 확인창에 표시된다.
-   * null = 아직 계산 안 함.
-   */
-  voiceEstimate: VoiceEstimate | null;
-  /** 저장된 보이스 프리셋 기준으로 프로젝트 전체 예상 크레딧을 계산(base 로케일 고정, 키 불필요·즉시). */
-  estimateVoiceCost: () => void;
-
-  // 에셋 라이브러리 (이름 그룹 단위 — 같은 이름 장면 전체에 한 번에 적용)
-  renameBackgroundGroup: (key: string, name: string) => void;
-  /** 이 배경 그룹(같은 이름 쓰는 모든 장면)의 업로드 해제 — Canvas 임시로 복귀. */
-  clearBackgroundGroup: (key: string) => Promise<void>;
-  /** CG 컷 설명(라벨) 편집. */
-  renameCgGroup: (oldDesc: string, newDesc: string) => void;
-  importCgGroup: (desc: string, file: File) => Promise<void>;
-  clearCgGroup: (desc: string) => Promise<void>;
-  /** 이 이름의 아이템 이미지 업로드 해제 — Canvas 임시로 복귀. */
-  removeItem: (name: string) => Promise<void>;
-  /** 이 BGM 그룹(같은 이름 쓰는 모든 장면)의 업로드 해제. */
-  clearBgmGroup: (key: string) => Promise<void>;
-  importMenuArt: (file: File) => Promise<void>;
-  clearMenuArt: () => Promise<void>;
-  /** 타이틀(메인 메뉴) 화면 BGM 업로드 — config.main_menu_music. Project.titleBgm JSDoc 참고. */
-  importTitleBgm: (file: File) => Promise<void>;
-  clearTitleBgm: () => Promise<void>;
-  /**
-   * 게임 아이콘 업로드. which='ico' 는 Windows exe 아이콘(.ico, 프로젝트 루트로 나감),
-   * which='window' 는 실행 중 창 아이콘(PNG). 자세한 차이는 Project.gameIcon JSDoc 참고.
-   */
-  importGameIcon: (which: 'ico' | 'window', file: File) => Promise<void>;
-  clearGameIcon: (which: 'ico' | 'window') => Promise<void>;
-
-  // 메인 메뉴 이미지 GUI(업로드 전용) — 버튼 슬롯×상태별 이미지 + 로고 + 좌표 오버라이드.
-  /** 버튼 한 장(슬롯·상태) 업로드. */
-  importMenuButton: (slot: MenuButtonSlot, state: MenuButtonState, file: File) => Promise<void>;
-  /** 버튼 한 장(슬롯·상태) 업로드 해제. */
-  clearMenuButton: (slot: MenuButtonSlot, state: MenuButtonState) => Promise<void>;
-  /** 파일명 자동 매칭 일괄 업로드(예: GUI_처음부터_기본.png). 매칭 실패 파일은 토스트로 안내. */
-  importMenuButtons: (files: File[]) => Promise<void>;
-  /** 타이틀 로고 업로드. */
-  importTitleLogo: (file: File) => Promise<void>;
-  /** 타이틀 로고 업로드 해제. */
-  clearTitleLogo: () => Promise<void>;
-  /** 메인 메뉴 좌표 오버라이드(x/y/gap/hoverShiftX/... 부분 갱신). */
-  setMainMenuLayout: (patch: Partial<MainMenuLayout>) => void;
-  /**
-   * 메인 메뉴 배치 프리셋 변경 — layout·labels 오버라이드를 함께 비운다(새 프리셋 기본값이 그대로
-   * 보이게 하기 위함). 이전 값이 사라지는 것에 대한 확인창은 UI 담당이 처리(스토어는 무조건 비움).
-   */
-  setMainMenuPreset: (preset: MainMenuPresetId) => void;
-  /** 메인 메뉴 버튼 라벨 편집(주/부). 빈 문자열이면 그 슬롯의 오버라이드를 지워 프리셋 기본값으로 되돌린다. */
-  setMenuLabel: (slot: MenuButtonSlot, part: 'main' | 'sub', value: string) => void;
-  /** 메인 메뉴 버튼 텍스트 폰트(주/부) 지정. undefined 면 폴백 규칙(주=본문 폰트, 부=주 폰트)으로 복귀. */
-  setMenuFont: (which: 'main' | 'sub', fontId: string | undefined) => void;
-
-  // 인게임 우측 퀵메뉴 이미지 GUI(업로드 전용) — mainMenuUi 와 동일 계약(버튼 슬롯×상태 + 보조 패널).
-  /** 버튼 한 장(슬롯·상태) 업로드. */
-  importQuickButton: (slot: QuickButtonSlot, state: QuickButtonState, file: File) => Promise<void>;
-  /** 버튼 한 장(슬롯·상태) 업로드 해제. */
-  clearQuickButton: (slot: QuickButtonSlot, state: QuickButtonState) => Promise<void>;
-  /** 파일명 자동 매칭 일괄 업로드(예: GUI_기록_기본.png). 매칭 실패 파일은 토스트로 안내. */
-  importQuickButtons: (files: File[]) => Promise<void>;
-  /** 퀵메뉴 보조 패널(버튼 뒤 판) 업로드. */
-  importQuickPanel: (file: File) => Promise<void>;
-  /** 퀵메뉴 보조 패널 업로드 해제. */
-  clearQuickPanel: () => Promise<void>;
-  /** 퀵메뉴 좌표 오버라이드(panelX/panelY/btnX/menuY/listY/listStep 부분 갱신). */
-  setQuickMenuLayout: (patch: Partial<QuickMenuLayout>) => void;
-
-  // ESC(게임 중) 메뉴 이미지 GUI(업로드 전용) — mainMenuUi/quickMenuUi 와 달리 슬롯×상태 격자가
-  // 아니라 역할(EscImageId)마다 파일 1장인 평평한 맵이라 액션도 그만큼 단순하다.
-  /** 이미지 한 장(역할) 업로드. */
-  importEscImage: (id: EscImageId, file: File) => Promise<void>;
-  /** 이미지 한 장(역할) 업로드 해제. */
-  clearEscImage: (id: EscImageId) => Promise<void>;
-  /** 파일명 자동 매칭 일괄 업로드(예: GUI_좌측메뉴_기본.png). 매칭 실패 파일은 토스트로 안내. */
-  importEscImages: (files: File[]) => Promise<void>;
-  /** ESC 메뉴 글자색(본문/제목/강조/보조/선택배경). 빈 값을 주면 그 롤은 기본값(밝은 아트 기준)으로. */
-  setEscColors: (patch: Partial<EscColors>) => void;
-  /** ESC 메뉴 글꼴 지정. undefined/빈 값이면 필드를 지워 인터페이스 폰트로 복귀. */
-  setEscFont: (fontId: string | undefined) => void;
-
-  // 설정/저장
-  /**
-   * OpenAI 키(선택) — 텍스트 작업용(gpt-4o-mini): 대본 자동번역 + AI 테마 생성.
-   * 이미지·오디오는 이제 앱이 생성하지 않는다(외부 도구→업로드).
-   */
-  openaiKey: string;
-  setOpenaiKey: (key: string) => void;
-
-  /** Typecast 키(선택) — 성우 TTS 테스트용. 브라우저에만 저장, /api/typecast 프록시로만 통과. */
-  typecastKey: string;
-  setTypecastKey: (key: string) => void;
-
-  /**
-   * 협업(실시간 공유, 가벼운 버전) — 2인 전제. Supabase 접속 정보(URL·anon key)는 빌드에
-   * 내장되어 있어 사용자는 "방 코드"(6자리)와 이름만 다룬다. ⚠️ 보안 경계 아님: 방 코드를 아는
-   * 사람은 누구나 읽고 쓸 수 있다. 저장 시점(자동저장)마다 전체 프로젝트가 동기화되고, 같은
-   * 순간 서로 다른 값을 저장하면 나중 저장이 이긴다(last-write-wins) — 프레즌스로 충돌을 피한다.
-   */
-  collabEnabled: boolean;
-  collabRoom: string;
-  collabName: string;
-  collabStatus: CollabStatus;
-  /** 지금 같은 방에 있는 상대방들(나 자신 제외, 저장 대상 아님). */
-  collabPeers: PeerPresence[];
-  setCollabConfig: (patch: Partial<{ room: string; displayName: string; enabled: boolean }>) => Promise<void>;
-
-  save: () => void;
-  hydrate: () => void;
-  resetAll: () => void;
-  /** 업로드한 에셋(배경·입화·CG·메뉴·BGM·아이템)을 모두 비운다. 대본·캐릭터 설정은 유지. */
-  clearGeneratedAssets: () => Promise<void>;
-  /**
-   * 어디서도 참조되지 않는 IndexedDB 에셋 blob 목록을 조회한다(옛 업로드 교체·삭제된 캐릭터/장면
-   * 등으로 남은 고아 데이터). 성우 음성도 참조 집합에 포함해 실수로 고아 판정하지 않는다. 삭제는
-   * 하지 않는다 — 무엇이 지워질지 사용자가 미리 보고 골라야 해서 목록 조회와 삭제를 분리했다.
-   */
-  findOrphanAssets: () => Promise<OrphanAsset[]>;
-  /** findOrphanAssets 가 돌려준 항목 중 사용자가 고른 id 만 되돌릴 수 없이 삭제한다. */
-  deleteOrphanAssets: (ids: string[]) => Promise<void>;
-  /**
-   * Supabase Storage `assets` 버킷 전체에서, 어느 방의 프로젝트 JSON 도 참조하지 않고 유예 기간도
-   * 지난 오브젝트만 골라 돌려준다(조회만, 삭제는 별도). collab 미준비면 빈 배열.
-   * 로컬 findOrphanAssets 와는 대상이 다르다 — 이쪽은 "다른 방을 포함한 원격 전체"가 기준.
-   * graceMs 미지정 = DEFAULT_REMOTE_GRACE_MS(7일). UI 가 REMOTE_GRACE_OPTIONS 로 골라 넘긴다.
-   *
-   * 반환값 구분에 주의: `[]` 는 "정말 지울 게 없음", **`null` 은 "조회 실패라 판정 불가"**(에러
-   * 토스트는 이 액션이 이미 띄운다). 둘 다 `[]` 로 뭉갰더니 호출부가 빈 배열을 보고 "정리할 서버
-   * 파일이 없습니다"를 덮어씌워, 네트워크·정책 실패가 성공처럼 보이는 버그가 있었다(실브라우저 확인).
-   */
-  findRemoteOrphanAssets: (graceMs?: number) => Promise<OrphanAsset[] | null>;
-  /** findRemoteOrphanAssets 가 돌려준 항목 중 사용자가 고른 id 만 원격에서 되돌릴 수 없이 삭제한다. */
-  deleteRemoteOrphanAssets: (ids: string[]) => Promise<void>;
-  setToast: (msg: string | null) => void;
-
-  // 프로젝트 파일 (기기 간 이동)
-  exportProject: () => Promise<void>;
-  importProject: (file: File) => Promise<void>;
-
-  // Ren'Py 폴더 직접 쓰기 (반복 테스트용)
-  folderSupported: boolean;
-  folderName: string | null;
-  syncToFolder: () => Promise<void>;
-  changeFolder: () => Promise<void>;
-  disconnectFolder: () => Promise<void>;
-}
+} from '../collab';
+import type { State } from './types';
+import {
+  sceneById,
+  describeNames,
+  safeFileName,
+  applyVoiceUpdates,
+  applyEmotionUpdates,
+  localeMeta,
+  withSpriteAsset,
+  unionChars,
+  mergeChars,
+  type VoiceAttachUpdate,
+} from './helpers';
+import { createStoreContext } from './context';
+import { createUiSlice } from './uiSlice';
 
 export const useStore = create<State>((set, get) => {
-  // 디바운스 자동저장
-  let saveTimer: ReturnType<typeof setTimeout> | null = null;
-  // applyRemoteProject 전용 디바운스 타이머(아래) — saveTimer 와 절대 공유하면 안 된다. 이유는
-  // applyRemoteProject 정의부 주석 참고.
-  let remoteSaveTimer: ReturnType<typeof setTimeout> | null = null;
-  // 같은 저장 실패 메시지를 매 디바운스마다 반복해서 띄우지 않도록 1회만 알린다.
-  let warnedSaveQuota = false;
-  // 저장 용량이 한도에 근접했다는 경고도 세션당 1회만(매 자동저장마다 뜨면 시끄럽다).
-  let warnedSize = false;
-  const autoSave = () => {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      saveTimer = null; // ⚠️ 먼저 비워야 함 — 안 그러면 "저장 대기 중" 상태(hasPendingLocalSave)가 영원히 true 로 남아 원격 갱신이 계속 막힘.
-      const { project, assets } = get();
-      try {
-        const nearQuota = saveProject(project, assets);
-        warnedSaveQuota = false;
-        if (get().saveError !== null) set({ saveError: null });
-        if (nearQuota && !warnedSize) {
-          warnedSize = true;
-          flash('저장 용량이 브라우저 한도에 가까워졌습니다 — "📤 내보내기"로 백업해두는 걸 권장합니다.', 'error');
-        }
-      } catch (e) {
-        const message = (e as Error).message;
-        set({ saveError: message });
-        // 배너(saveError)는 실패가 이어지는 동안 계속 보이지만, 방금 저장을 시도했다는 즉시 신호로
-        // 토스트도 1회 함께 띄운다(반복 플래시는 warnedSaveQuota 로 계속 억제).
-        if (!warnedSaveQuota) {
-          warnedSaveQuota = true;
-          flash(message, 'error');
-        }
-      }
-      // 협업이 켜져 있으면 같은 저장 시점에 상대방에게도 반영(가벼운 공유 — 키 입력마다 아님).
-      if (get().collabEnabled) {
-        void collabPushProject(project);
-        // 방금 끝난 디바운스 대기 동안 hasPendingLocalSave() 가드로 버려진 원격 갱신이 있었는지
-        // 확인한다 — 진짜 병합은 안 하지만(범위 밖), 최소한 놓쳤을 수 있다고 알려서 새로고침을 권한다.
-        if (takeDroppedRemoteCount() > 0) {
-          flash('상대의 변경을 받지 못했을 수 있습니다 — 새로고침하면 최신 상태를 받습니다.', 'error');
-        }
-      }
-    }, 600);
-  };
-
-  // 협업 프레즌스로 방송할 "나 지금 여기 봄" 스냅샷.
-  const presenceSelf = (): Omit<PeerPresence, 'clientId'> => {
-    const s = get();
-    const scene = s.project.scenes.find((sc) => sc.id === s.selectedSceneId);
-    return {
-      name: s.collabName.trim() || '익명',
-      activeTab: s.activeTab,
-      selectedSceneId: s.selectedSceneId,
-      sceneTitle: scene?.title,
-    };
-  };
-
-  // 협업 라이프사이클(startCollab/stopCollab)이 store 를 건드릴 때 쓰는 훅 묶음.
-  const collabHooks = (): CollabHooks => ({
-    getProject: () => get().project,
-    applyRemoteProject: (project) => {
-      // 상태 반영(set) 자체는 반드시 동기여야 한다 — withApplyingRemoteGuard(index.ts) 가 이 함수
-      // 호출을 감싸는 동안만 applyingRemote 플래그가 true 라, 화면 반영이 비동기로 밀리면 그 사이
-      // 다른 코드 경로가 이미 guard 밖으로 나간 상태를 관찰할 수 있다.
-      set((s) => {
-        const stillExists = project.scenes.some((sc) => sc.id === s.selectedSceneId);
-        return { project, selectedSceneId: stillExists ? s.selectedSceneId : (project.scenes[0]?.id ?? null) };
-      });
-      // 로컬 캐시(localStorage) 저장은 autoSave() 를 그대로 재사용하면 안 된다 — 확인해본 두 가지 이유:
-      //  ① autoSave() 는 collabEnabled 면 collabPushProject(project) 도 함께 호출한다. 그 실행이
-      //     600ms 뒤로 밀리면 withApplyingRemoteGuard 의 동기 구간(applyingRemote=true)은 이미
-      //     끝나 있어 pushProject 의 에코 가드(applyingRemote 체크, collab/sync.ts)를 통과 —
-      //     방금 "받은" 원격 데이터를 "내 변경"인 양 다시 밀어넣어 참가자끼리 핑퐁이 반복되는
-      //     무한 루프가 생긴다.
-      //  ② autoSave() 는 saveTimer 를 세우는데, hasPendingLocalSave()(위)가 그 타이머로 "로컬 편집
-      //     저장 대기 중"을 판정해 그 사이 들어온 원격 갱신을 버린다. 원격 반영을 같은 타이머로
-      //     묶으면 방금 반영한 이 원격 갱신 자체 때문에 그다음 진짜 원격 갱신이 부당하게 버려진다.
-      // 그래서 별도의 remoteSaveTimer 로 "로컬 캐시 쓰기"만 디바운스한다(원격 이벤트가 짧은 간격
-      //으로 연달아 오면 그때마다 JSON.stringify 두 번(project+assets)을 반복하던 비용을 묶어낸다).
-      // 콜백 안에서 항상 get().project 를 다시 읽는 이유: 이 타이머가 아직 대기 중일 때 사용자가
-      // 로컬에서 편집하면(그 편집은 자기 autoSave 로 이미 최신 상태가 반영됨) 여기서 클로저의 옛
-      // project 를 그대로 저장해 방금 만든 최신 로컬 편집을 도로 덮어쓰는 사고를 막기 위함이다.
-      if (remoteSaveTimer) clearTimeout(remoteSaveTimer);
-      remoteSaveTimer = setTimeout(() => {
-        remoteSaveTimer = null;
-        try {
-          saveProject(get().project, get().assets);
-        } catch {
-          /* ignore */
-        }
-      }, 600);
-    },
-    setStatus: (status) => set({ collabStatus: status }),
-    setPeers: (peers) => set({ collabPeers: peers }),
-    getPresenceSelf: presenceSelf,
-    // 디바운스 저장(600ms) 대기 중인지 — 대기 중이면 곧 내 push 가 더 높은 version 으로 이길 것이므로
-    // 그 사이 들어온 원격 갱신은 반영을 유예한다(수신 즉시 덮으면 방금 한 내 편집이 순간적으로 사라져 보임).
-    hasPendingLocalSave: () => saveTimer !== null,
-  });
-
-  const setScenes = (scenes: Scene[]) => {
-    set((s) => ({ project: { ...s.project, scenes } }));
-    autoSave();
-  };
-
-  const flash = (msg: string, type?: 'info' | 'success' | 'error') => {
-    // 타입 미지정 시 메시지 키워드로 추론.
-    const inferred: 'info' | 'success' | 'error' = type
-      ? type
-      : /실패|없습니다|확인하세요|찾지 못/.test(msg)
-        ? 'error'
-        : /완료|했습니다|생성했|적용했/.test(msg)
-          ? 'success'
-          : 'info';
-    set({ toast: msg, toastType: inferred });
-    setTimeout(() => {
-      if (get().toast === msg) set({ toast: null });
-    }, 3500);
-  };
-
-  // 업로드→이전 assetId 교체→정리의 공통 골격(에셋 스왑 관용구, import*/clear*/uploadItem/removeItem
-  // 등 약 20개 액션이 공유). 순서를 "set → autoSave → delete" 로 통일한다(과거엔 액션마다 순서가
-  // 갈렸으나 delete 실패는 전부 .catch 로 삼켜 관측 가능한 차이가 없어 안전하게 통일 가능).
-  // keepId 를 주면 prevIds 에서 그 id 는 제외(새로 적용한 id 를 실수로 지우지 않는 방어 — 지금은
-  // 항상 새로 생성한 고유 id 라 사실상 no-op 이지만 모든 경로에 가드를 일관 적용한다).
-  const commitAssetSwap = async (
-    patch: Partial<State> | ((s: State) => Partial<State>),
-    prevIds: string[],
-    keepId?: string,
-  ): Promise<void> => {
-    set(patch);
-    autoSave();
-    await deleteAssets(prevIds.filter((id) => id !== keepId)).catch(() => {});
-  };
-
-  // 외부 업로드 파일을 에셋으로 저장하고 id 반환. bgm/voice 는 오디오, 그 외는 이미지만 허용.
-  // opts.mime 은 브라우저가 type 을 못 알아본 파일(대표적으로 .ico — OS 에 MIME 이 등록 안 돼 있으면
-  // File.type 이 빈 문자열로 온다)을 호출측이 확장자로 판정해 넘겨줄 때 쓴다. 넘어오면 타입 검사를
-  // 건너뛰고 이 값을 메타 mime 으로 저장한다(빈 mime 을 그대로 두면 내보내기 확장자·썸네일이 다 깨진다).
-  const uploadAsset = async (
-    file: File,
-    kind: AssetMeta['kind'],
-    filename: string,
-    opts?: { mime?: string },
-  ): Promise<string> => {
-    const isAudioKind = kind === 'bgm' || kind === 'voice';
-    const okType = opts?.mime
-      ? true
-      : isAudioKind
-        ? file.type.startsWith('audio/')
-        : file.type.startsWith('image/');
-    if (!okType) {
-      throw new Error(
-        isAudioKind ? '오디오 파일(MP3/WAV 등)만 업로드할 수 있습니다.' : '이미지 파일(PNG/JPG 등)만 업로드할 수 있습니다.',
-      );
-    }
-    const id = assetId();
-    await putAsset(id, file);
-    if (get().collabEnabled) void collabPushAsset(id, file); // 상대방이 필요할 때 받아가도록 Storage 에도 올림
-    const meta: AssetMeta = {
-      id,
-      kind,
-      prompt: '(직접 업로드)',
-      mime: opts?.mime ?? file.type,
-      source: 'upload',
-      filename,
-      createdAt: Date.now(),
-    };
-    set((s) => ({ assets: { ...s.assets, [id]: meta } }));
-    return id;
-  };
+  const ctx = createStoreContext(set, get);
+  const { autoSave, collabHooks, setScenes, flash, commitAssetSwap, uploadAsset } = ctx;
 
   // attachLineVoice 의 핵심 로직만 분리(autoSave/flash 없음) — 일괄 생성(batchVoiceCharacter)이
   // 수백 줄을 반복 호출할 때 매번 저장·토스트가 튀지 않도록, 루프 안에선 이걸로 조용히 누적하고
@@ -788,6 +241,8 @@ export const useStore = create<State>((set, get) => {
     saveError: null,
     folderSupported: isFolderSyncSupported(),
     folderName: null,
+
+    ...createUiSlice(set, get, ctx),
 
     setRawInput: (text) => {
       set((s) => ({ project: { ...s.project, rawInput: text } }));
@@ -1132,15 +587,6 @@ export const useStore = create<State>((set, get) => {
     approveAll: () => {
       setScenes(get().project.scenes.map((sc) => ({ ...sc, status: 'approved' as const })));
       flash('모든 장면을 승인했습니다.');
-    },
-
-    selectScene: (id) => {
-      set({ selectedSceneId: id });
-      updatePresence(presenceSelf()); // collab 꺼져 있으면 내부적으로 no-op
-    },
-    setActiveTab: (t) => {
-      set({ activeTab: t });
-      updatePresence(presenceSelf());
     },
 
     updateProjectMeta: (patch) => {
@@ -2751,11 +2197,6 @@ export const useStore = create<State>((set, get) => {
       flash(`원격 고아 에셋 ${removed}개를 삭제했습니다.`, 'success');
     },
 
-    setToast: (msg) => {
-      if (msg === null) return set({ toast: null });
-      flash(msg);
-    },
-
     exportProject: async () => {
       const { project, assets } = get();
       if (project.scenes.length === 0) {
@@ -2859,69 +2300,5 @@ export const useStore = create<State>((set, get) => {
   };
 });
 
-/**
- * 대본 메타(#설정_글언어/#설정_목소리언어)로 지정된 다국어 설정을 프로젝트에 병합할 부분 패치.
- * 지정된 값만 덮어쓴다(대본에 없으면 기존 프로젝트 설정 유지).
- */
-function localeMeta(meta?: ScriptMeta): Partial<Pick<Project, 'baseLocale' | 'textLocales' | 'voiceLocales'>> {
-  if (!meta) return {};
-  const patch: Partial<Pick<Project, 'baseLocale' | 'textLocales' | 'voiceLocales'>> = {};
-  if (meta.baseLocale) patch.baseLocale = meta.baseLocale;
-  if (meta.textLocales) patch.textLocales = meta.textLocales;
-  if (meta.voiceLocales) patch.voiceLocales = meta.voiceLocales;
-  return patch;
-}
-
-/**
- * 캐릭터의 (의상, 표정) 슬롯에 스프라이트 assetId 를 박은 새 characters 배열을 돌려준다.
- * '기본' 의상은 Character.expressions, 그 외는 해당 Outfit.expressions 에 기록한다.
- */
-function withSpriteAsset(
-  characters: Character[],
-  name: string,
-  outfit: string,
-  expr: Expression,
-  id: string,
-): Character[] {
-  return characters.map((c) => {
-    if (c.name !== name) return c;
-    if (outfit === '기본') return { ...c, expressions: { ...c.expressions, [expr]: id } };
-    return {
-      ...c,
-      outfits: (c.outfits ?? []).map((o) =>
-        o.name === outfit ? { ...o, expressions: { ...o.expressions, [expr]: id } } : o,
-      ),
-    };
-  });
-}
-
-/**
- * append(뒤에 추가) 전용 캐릭터 병합 — 기존 캐릭터는 전부 그대로 유지하고(설정·순서 불변),
- * 새 분석 결과에만 있는 이름만 뒤에 추가한다. 기존 장면의 화자가 캐릭터 목록에서 사라지면
- * 안 되므로 mergeChars(next 기준)와 달리 prev 를 기준으로 union 한다.
- */
-function unionChars(prev: Character[], next: Character[]): Character[] {
-  const known = new Set(prev.map((c) => c.name));
-  return [...prev, ...next.filter((c) => !known.has(c.name))];
-}
-
-/** 기존 캐릭터의 표정/색 설정을 유지하면서 새 분석 결과와 병합. */
-function mergeChars(prev: Character[], next: Character[]): Character[] {
-  const byName = new Map(prev.map((c) => [c.name, c]));
-  return next.map((c) => {
-    const old = byName.get(c.name);
-    // 색·스프라이트뿐 아니라 사용자가 입력한 내레이션 설정도 보존
-    // (재분석/대본 수정 시 캐릭터 설정이 날아가지 않도록).
-    return old
-      ? {
-          ...c,
-          color: old.color,
-          expressions: old.expressions,
-          outfits: old.outfits ?? c.outfits,
-          isProtagonist: old.isProtagonist ?? c.isProtagonist,
-          i18nName: old.i18nName ?? c.i18nName,
-          voice: old.voice ?? c.voice,
-        }
-      : c;
-  });
-}
+export { sceneById } from './helpers';
+export type { Tab } from './types';
