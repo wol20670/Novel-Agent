@@ -169,3 +169,38 @@ export function mergeChars(prev: Character[], next: Character[]): Character[] {
       : c;
   });
 }
+
+/**
+ * 삭제되는 의상을 가리키던 장면 참조를 걷어낸다(removeOutfit 전용 — 범용 정리 시스템이 아니다).
+ * 의상 참조는 두 자리에 있다:
+ *  ① 장면 시작 의상 Scene.outfits[charName]
+ *  ② 줄 단위 전환 Line.outfits[charName] (대사·지문만 가짐)
+ * 둘 다 그 캐릭터 키만 지운다 — 같은 레코드에 든 **다른 캐릭터의 전환은 반드시 보존**해야 한다.
+ * ②는 키를 지워 레코드가 비면 undefined 로 정리하고(파서가 안 만드는 빈 레코드를 남기지 않는다),
+ * ①은 기존 동작대로 빈 객체를 그대로 둔다(장면 카드가 그 형태를 이미 다룬다).
+ * 참조가 없는 장면은 **객체 identity 를 그대로 반환**한다(sceneById 캐시·불필요한 리렌더 방지).
+ */
+export function stripOutfitRefs(scenes: Scene[], charName: string, outfit: string): Scene[] {
+  return scenes.map((sc) => {
+    const sceneRef = sc.outfits?.[charName] === outfit;
+    const lineRef = sc.lines.some(
+      (l) => (l.kind === 'dialogue' || l.kind === 'narration') && l.outfits?.[charName] === outfit,
+    );
+    if (!sceneRef && !lineRef) return sc;
+    let outfits = sc.outfits;
+    if (sceneRef) {
+      const m = { ...sc.outfits };
+      delete m[charName];
+      outfits = m;
+    }
+    const lines = lineRef
+      ? sc.lines.map((l) => {
+          if ((l.kind !== 'dialogue' && l.kind !== 'narration') || l.outfits?.[charName] !== outfit) return l;
+          const m = { ...l.outfits };
+          delete m[charName];
+          return { ...l, outfits: Object.keys(m).length ? m : undefined };
+        })
+      : sc.lines;
+    return { ...sc, outfits, lines };
+  });
+}

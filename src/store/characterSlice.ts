@@ -1,4 +1,5 @@
 import { effectiveExpressions } from '../types';
+import { stripOutfitRefs } from './helpers';
 import type { State } from './types';
 import type { SliceCreator } from './context';
 
@@ -240,13 +241,9 @@ export const createCharacterSlice: SliceCreator<
             characters: s.project.characters.map((c) =>
               c.name === charName ? { ...c, outfits: (c.outfits ?? []).filter((x) => x.name !== name) } : c,
             ),
-            // 이 의상을 가리키던 장면 #복장 참조도 제거(기본 의상으로 복귀).
-            scenes: s.project.scenes.map((sc) => {
-              if (!sc.outfits || sc.outfits[charName] !== name) return sc;
-              const m = { ...sc.outfits };
-              delete m[charName];
-              return { ...sc, outfits: m };
-            }),
+            // 이 의상을 가리키던 장면 참조도 제거(기본 의상으로 복귀) — 장면 시작 의상(#복장)과
+            // 줄 단위 전환(Line.outfits) 두 자리 모두. stripOutfitRefs 단일 소스.
+            scenes: stripOutfitRefs(s.project.scenes, charName, name),
             // 이 의상을 가리키던 배경 키워드 규칙도 함께 제거(가리키는 대상이 사라짐).
             outfitRules: s.project.outfitRules?.filter((r) => !(r.charName === charName && r.outfit === name)),
           },
