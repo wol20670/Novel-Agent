@@ -38,6 +38,7 @@ export const useStore = create<State>((set, get) => {
     saveError: null,
     folderSupported: isFolderSyncSupported(),
     folderName: null,
+    aiThemeBusy: false,
 
     ...createUiSlice(set, get, ctx),
     ...createScriptSlice(set, get, ctx),
@@ -49,8 +50,6 @@ export const useStore = create<State>((set, get) => {
     ...createVoiceSlice(set, get, ctx),
     ...createCollabSlice(set, get, ctx),
     ...createPersistenceSlice(set, get, ctx),
-
-    aiThemeBusy: false,
   };
 });
 
