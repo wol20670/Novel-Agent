@@ -4,7 +4,7 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- (비어 있음 — 다음 지시 대기)
+- **타이틀 BGM 실기 청취 확인**(사용자) — 에셋 탭 🎵 BGM 맨 위에서 곡을 올리고 내보내 ① 타이틀에서 나오는지 ② "처음부터" 시작하면 첫 장면 곡으로 넘어가는지 ③ ESC→타이틀 복귀 때 다시 나오는지.
 
 ## 📌 알아둘 것 (지속)
 - **Supabase Storage 경고는 무시**(대시보드 "Remove policy" 절대 누르지 말 것 — 에셋 동기화가 400으로 깨진다). 에셋 버킷의 실제 노출 범위는 "배포 URL 아는 사람 = 전부 열람·업로드 가능"이며 감수한 선택(2026-08-05). 상세는 `supabase/setup.sql` 머리 주석.
@@ -15,6 +15,4 @@
 - 미착수(계속 의도적으로 뺌): `store.ts`(2857줄) 슬라이스 분리, 탭 컴포넌트 코드 스플리팅.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **플레이어가 정하는 주인공 이름**(`project.playerName`, opt-in — 에셋 탭 캐릭터 섹션 토글 + 대상 화자 select). `Character(<callable>, dynamic=True)` 라 say 문이 실행될 때마다 `who()` 를 다시 불러(`renpy/character.py:1541`) 세이브를 넘어서도 따라온다 — **단 "즉시"가 아니라 "다음 대사부터"**(화면에 떠 있는 줄·기록의 옛 항목은 그대로. 엔진 한계, 우회로 없음 — 실기 확인 후 CLAUDE.md 에 근거 기록). 첫 실행에만 `label start` 에서 묻고(가드는 `player_name_asked` 플래그 — 빈 입력 `""` 을 그대로 저장해야 기본 이름이 그때그때 자막 언어를 따라간다), 이후엔 설정 화면에서 변경. ⚠️ **`renpy.input(exclude="{}[]%")` 이 이 기능의 핵심 방어** — `who` 가 `substitute()` 를 거쳐서(`character.py:1400`) 안 막으면 플레이어가 친 `[`·`%` 가 CLAUDE.md 이스케이프 크래시를 재현한다(엔진 기본 exclude 는 `{}` 뿐). test 463→471 · lint 3구성 무경고 · playerName 미사용 구성 회귀 0(i18n 구성만 `tl/*/ui.rpy` 에 새 UI 문자열 3쌍 추가 — 설계상 정상). **실기 스크린샷으로 설정 화면 렌더까지 확인**(스톡·ESC 양쪽).
-- **BGM 연속 재생 — 같은 곡이면 안 끊기게**(`play music … if_changed`, 기본 켜짐). 장면 라벨마다 무조건 `play music` 을 내서 **같은 곡이어도 장면·선택분기가 바뀌면 처음부터 다시 재생**되던 문제. Ren'Py 가 "재생 중 파일명 == 요청 파일명"이면 dequeue·fadeout 을 건너뛰고 fadein 을 0 으로 강제하는 키워드(`renpy/audio/music.py`)를 쓴다 — 곡이 다르면 기존 경로(fadeout→fadein 1.0) 그대로. 토글 2개 신설(`project.bgmPlayback`, 에셋 탭 🎵 BGM 섹션): ① `restartSameBgm`(끊고 처음부터 = 옛 동작) ② `stopWhenUnset`(BGM 미지정 장면에서 `stop music fadeout 1.0` — **판정은 `hasBgm(scene)`**, "#BGM 을 안 적었다"와 "적었지만 업로드 전"은 다르게 취급). test 457→463 · lint 무경고(기본·stopWhenUnset 두 구성) · **회귀 diff 는 `play music` 줄의 ` if_changed` 하나뿐**(17구성 대조). ⚠️ **실기 청취 확인은 아직 안 함** — 곡이 실제로 안 끊기는지는 사용자가 들어봐야 한다.
-- **게임 메뉴 배경 업로드 슬롯 제거 + 검증된 문제 4건 정리**. `game/gui/game_menu.png` 를 채우는 자리가 에셋 탭 `menuArt.game` 과 ESC `공통 배경` 둘이라 중복이었다 → `menuArt.game` 을 타입·store·assetRefs·UI·buildZip 폴백까지 **완전 제거**(ESC `bg` → 테마 그라데이션 2단계만 남음, 자동 이관 안 함 — `bg` 를 채우면 ESC GUI 전체가 켜지므로). 같이: ① 테마 미리보기 제목이 렌더 중 `getState()` 비반응 읽기라 갱신 안 되던 버그 ② CG 없는 프로젝트에도 굽던 `cg_thumb_mask.png` 를 `hasCg` 게이트로 ③ 안 쓰이는 export 3개 ④ 사실과 어긋난 주석 3곳. test 456→457 · typecheck 통과 · **회귀 0**(12구성 `.rpy` 바이트 동일 — 생성기 쪽 변경은 주석·export 키워드뿐) · lint 무경고.
+- **타이틀(메인 메뉴) 화면 BGM**(`project.titleBgm`, opt-in — 에셋 탭 🎵 BGM 섹션 맨 위 업로드 카드 + 미리듣기). 엔진 공식 변수 `config.main_menu_music`(+`_fadein 1.0`)로만 나가고 `screens.rpy` 는 안 건드린다 — `label _main_menu` 가 타이틀 진입마다 `if_changed=True` 로 재생하므로 타이틀↔메뉴 이동에도 안 끊긴다. `label start` 에서 곡을 멈추지 않는 건 **사용자 결정**(첫 장면에 `#BGM` 이 없을 때 곡이 이어지는 걸 끊는 수단은 기존 `stopWhenUnset` 토글뿐이라, 그 토글이 꺼져 있으면 카드에 안내문을 띄운다). 파일 경로는 `titleBgmFile()` 단일 소스, blob 없으면 `resolveTitleBgm` 이 생성 전에 가지쳐 없는 파일 참조를 막는다. test 471→479 · typecheck 통과 · **회귀 0**(19구성 `.rpy` 바이트 동일) · lint 무경고 · **실기에서 `config.main_menu_music='audio/title_bgm.mp3'` · `loadable=True` 확인**. ⚠️ **실제 청취 확인은 사용자 몫**(37ab2ee 와 같은 취급).

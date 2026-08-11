@@ -30,6 +30,7 @@ import {
   QUICK_BUTTON_STATES,
   quickMenuLayout,
   WINDOW_ICON_FILE,
+  titleBgmFile,
   ESC_IMAGES,
   escColors,
 } from '../types';
@@ -849,6 +850,17 @@ function optionsRpy(project: Project): string {
     //  그걸 config 로 옮겨주는 코드가 엔진 어디에도 없어 조용히 무시된다. 실행 검증으로 확인).
     // 업로드가 있을 때만 낸다 — 없는 파일을 참조하면 zip 불변식이 깨진다(buildZip 이 미리 가지친다).
     ...(project.gameIcon?.window ? [`define config.window_icon = "${WINDOW_ICON_FILE}"`] : []),
+    // 타이틀(메인 메뉴) BGM. 엔진 renpy/common/00start.rpy 의 label _main_menu 가 메인 메뉴에
+    // 들어올 때마다 renpy.music.play(config.main_menu_music, if_changed=True, fadein=...) 를
+    // 부른다 — 스톡 템플릿도 같은 자리(gui/game/options.rpy)에 둔다. 고정 경로라 esc 대상 아님.
+    // 업로드가 있을 때만 낸다(없는 파일 참조는 zip 불변식 위반 — buildZip 이 미리 가지친다).
+    // fadein 1.0 은 장면 BGM 의 `play music … fadein 1.0` 과 맞춘 값(엔진 기본은 0.0=즉시 전환).
+    ...(project.titleBgm?.assetId
+      ? [
+          `define config.main_menu_music = "${titleBgmFile(project.titleBgm.ext)}"`,
+          'define config.main_menu_music_fadein = 1.0',
+        ]
+      : []),
     `define gui.about = _("제작: ${esc(project.author)}")`,
     '',
     '## 스킵 버튼이 첫 플레이(아직 안 읽은 대사)에서도 동작하도록 기본 허용.',

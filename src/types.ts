@@ -308,6 +308,15 @@ export interface Project {
    * 게임 중 ESC 메뉴 배경은 여기 없다 — `escMenuUi.images.bg` 가 그 자리다(아래 `escMenuUi` 참고). */
   menuArt?: { main?: string };
   /**
+   * 타이틀(메인 메뉴) 화면 BGM(선택). 비어 있으면 options.rpy 가 `config.main_menu_music`
+   * 자체를 안 낸다(회귀 0) — 엔진 기본값이 None 이라 타이틀은 무음으로 남는다.
+   * `ext` 는 업로드 시점 실제 MIME 기준(`extFromMime`). 장면 BGM 은 파일 확장자를 `.mp3` 로
+   * 고정하지만(generate.ts), 성우 파일에서 wav 를 .mp3 로 라벨링해 무음이 됐던 전례
+   * (buildZip.ts 주석 참고) 때문에 이 경로는 실제 MIME 을 따라간다. 미지정(옛 데이터)은
+   * 'mp3' 로 폴백.
+   */
+  titleBgm?: { assetId: string; ext?: 'mp3' | 'wav' };
+  /**
    * 게임 아이콘(선택) — 둘은 Ren'Py 안에서 쓰이는 자리가 완전히 다르다.
    *  · ico    : 프로젝트 **루트**의 `icon.ico`. 배포 빌드 때 Ren'Py 런처가 exe 의 리소스를 다시 써
    *             박아 넣는다(launcher/game/distribute.rpy 가 `<프로젝트경로>/icon.ico` 를 읽는다).
@@ -930,6 +939,14 @@ export const GAME_ICON_FILE = 'icon.ico';
 
 /** 실행 중 창·작업표시줄 아이콘(game/ 기준). gui.window_icon 이 가리킨다. */
 export const WINDOW_ICON_FILE = 'gui/window_icon.png';
+
+/**
+ * 타이틀 화면 BGM 경로(game/ 기준). 참조 쪽(generate.ts)과 배치 쪽(buildZip.ts)이 각자
+ * 문자열을 만들면 어긋난 순간 없는 파일 참조로 런타임에 죽는다 — 단일 소스로만 만들 것.
+ */
+export function titleBgmFile(ext: 'mp3' | 'wav' = 'mp3'): string {
+  return `audio/title_bgm.${ext}`;
+}
 
 /**
  * text 안에서 entries 의 키워드 중 가장 긴 것부터 순서대로 찾아 첫 매치의 id 를 반환한다.

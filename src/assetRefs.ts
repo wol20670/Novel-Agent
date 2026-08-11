@@ -91,6 +91,7 @@ export function collectReferencedAssetIds(project: Project, opts?: { includeVoic
   }
   Object.values(project.itemAssetIds ?? {}).forEach(add);
   add(project.menuArt?.main);
+  add(project.titleBgm?.assetId);
   add(project.mainMenuUi?.logo);
   for (const states of Object.values(project.mainMenuUi?.buttons ?? {})) {
     Object.values(states ?? {}).forEach(add);
@@ -145,6 +146,7 @@ export function collectReferencedAssetKinds(project: Project): Map<string, Asset
   }
   Object.values(project.itemAssetIds ?? {}).forEach((id) => add(id, 'item'));
   add(project.menuArt?.main, 'cg');
+  add(project.titleBgm?.assetId, 'bgm'); // 메뉴 아트와 달리 진짜 오디오라 'cg' 우회가 필요 없다.
   add(project.mainMenuUi?.logo, 'cg');
   for (const states of Object.values(project.mainMenuUi?.buttons ?? {})) {
     Object.values(states ?? {}).forEach((id) => add(id, 'cg'));

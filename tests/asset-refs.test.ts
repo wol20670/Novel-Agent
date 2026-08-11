@@ -187,3 +187,22 @@ describe('collectReferencedAssetKinds', () => {
     expect(new Set(kinds.keys())).toEqual(ids);
   });
 });
+
+describe('titleBgm — 타이틀 화면 BGM (별도 fixture, 기존 describe 의 exact-match 스냅샷을 건드리지 않기 위해 분리)', () => {
+  const project: Project = { ...emptyProject(), titleBgm: { assetId: 'title_bgm1' } };
+
+  it('참조 집합에 titleBgm.assetId 가 들어간다', () => {
+    expect(collectReferencedAssetIds(project).has('title_bgm1')).toBe(true);
+    expect(collectReferencedAssetIds(project, { includeVoice: true }).has('title_bgm1')).toBe(true);
+  });
+
+  it("kind 맵에서 titleBgm.assetId 는 'bgm'(메뉴 아트의 'cg' 우회와 달리 진짜 오디오)", () => {
+    expect(collectReferencedAssetKinds(project).get('title_bgm1')).toBe('bgm');
+  });
+
+  it('titleBgm 이 없으면 참조·kind 어디에도 안 걸린다', () => {
+    const empty = emptyProject();
+    expect(collectReferencedAssetIds(empty).size).toBe(0);
+    expect(collectReferencedAssetKinds(empty).size).toBe(0);
+  });
+});

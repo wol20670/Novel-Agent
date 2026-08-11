@@ -224,6 +224,7 @@ export default function AssetsTab() {
         <p className="text-xs text-gray-500 mb-3">
           BGM 이름이 같으면 한 번만 업로드해 모든 장면에 적용됩니다. Suno 등에서 만든 mp3 를 올리세요.
         </p>
+        <TitleBgmRow />
         <BgmPlaybackToggles />
         {bgms.length === 0 ? (
           <p className="text-gray-600 text-sm">BGM 지정 장면 없음</p>
@@ -238,6 +239,48 @@ export default function AssetsTab() {
 
       <CleanupSection />
       <RemoteCleanupSection />
+    </div>
+  );
+}
+
+/**
+ * 타이틀(메인 메뉴) 화면 BGM 한 줄 — BgmGroupRow(장면 BGM)와 MenuArtRow(메뉴 아트 슬롯 하나짜리
+ * 카드)를 섞은 모양. 엔진 공식 변수 config.main_menu_music 으로 나간다(types.ts Project.titleBgm,
+ * generate.ts optionsRpy 참고) — screens.rpy 는 건드리지 않는다.
+ */
+function TitleBgmRow() {
+  const importTitleBgm = useStore((s) => s.importTitleBgm);
+  const clearTitleBgm = useStore((s) => s.clearTitleBgm);
+  const assetId = useStore((s) => s.project.titleBgm?.assetId);
+  const stopWhenUnset = useStore((s) => s.project.bgmPlayback?.stopWhenUnset ?? false);
+  const url = useAssetUrl(assetId);
+  return (
+    <div className="card border-edge p-3 flex flex-col gap-2 mb-3">
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-300 flex-1">
+          타이틀 화면 BGM
+          <span className="block text-[10px] text-gray-500 mt-0.5">
+            게임을 켰을 때 타이틀 화면에서 흐르는 곡입니다.
+          </span>
+        </span>
+        <UploadButton
+          onFile={(f) => importTitleBgm(f)}
+          label={url ? '↥ 교체' : '↥ 업로드'}
+          className="btn-ghost shrink-0"
+          accept="audio/*"
+        />
+        {url && (
+          <button className="text-[10px] text-gray-500 hover:text-rose-600 shrink-0" onClick={() => clearTitleBgm()}>
+            해제
+          </button>
+        )}
+      </div>
+      {url && <audio src={url} controls className="w-full h-8" />}
+      {url && !stopWhenUnset && (
+        <p className="text-[10px] text-amber-500">
+          첫 장면에 #BGM 이 없으면 타이틀 곡이 게임으로 이어집니다 — 아래 "지정하지 않은 장면에서는 음악 정지"를 켜세요.
+        </p>
+      )}
     </div>
   );
 }

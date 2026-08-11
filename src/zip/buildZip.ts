@@ -16,6 +16,7 @@ import {
   QUICK_PANEL_FILE,
   GAME_ICON_FILE,
   WINDOW_ICON_FILE,
+  titleBgmFile,
   ESC_IMAGES,
   escImageFile,
   ESC_SAVE_THUMB_MASK_FILE,
@@ -152,12 +153,16 @@ export async function collectProjectFiles(
   // 게임 아이콘도 같은 이유로 미리 가지치기한다 — 특히 창 아이콘은 blob 이 있어야만 gui.rpy 가
   // `define gui.window_icon` 을 내보내도 되기 때문에(없는 파일을 참조하면 zip 불변식이 깨진다).
   const { gameIcon: effectiveGameIcon, blobs: iconBlobs } = await resolveGameIcon(project.gameIcon);
+  // 타이틀 BGM 도 같은 이유로 미리 가지치기한다 — blob 이 있어야만 options.rpy 가
+  // `define config.main_menu_music` 을 내보내도 되기 때문에(없는 파일 참조는 zip 불변식 위반).
+  const { titleBgm: effectiveTitleBgm, blob: titleBgmBlob } = await resolveTitleBgm(project.titleBgm);
   const effectiveProject: Project =
     effectiveGuiOverrides === project.guiOverrides &&
     effectiveMainMenuUi === project.mainMenuUi &&
     effectiveQuickMenuUi === project.quickMenuUi &&
     effectiveEscMenuUi === project.escMenuUi &&
-    effectiveGameIcon === project.gameIcon
+    effectiveGameIcon === project.gameIcon &&
+    effectiveTitleBgm === project.titleBgm
       ? project
       : {
           ...project,
@@ -166,6 +171,7 @@ export async function collectProjectFiles(
           quickMenuUi: effectiveQuickMenuUi,
           escMenuUi: effectiveEscMenuUi,
           gameIcon: effectiveGameIcon,
+          titleBgm: effectiveTitleBgm,
         };
 
   // fontResult.unresolved: 커스텀 폰트뿐 아니라 대체용 기본 폰트(나눔고딕)까지 못 구한 경우 —
@@ -246,6 +252,11 @@ export async function collectProjectFiles(
   for (const [file, p] of bgmByFile) {
     const bgm = await blobForBgm(p.assetId);
     if (bgm) out.push({ path: `game/audio/${file}`, data: bgm }); // 없으면 건너뜀(방어적 — 정상 경로에선 항상 있음)
+  }
+  // 타이틀 BGM — effectiveTitleBgm 은 이미 resolveTitleBgm 이 blob 없는 경우를 가지치기한 뒤라
+  // 여기 남아있으면 항상 titleBgmBlob 이 있다(같은 assetId 로 getAsset 을 또 부르지 않고 재사용).
+  if (effectiveTitleBgm?.assetId && titleBgmBlob) {
+    out.push({ path: `game/${titleBgmFile(effectiveTitleBgm.ext)}`, data: titleBgmBlob });
   }
 
   // 성우 음성(VoiceLab 로 매단 언어별 파일) — voices.rpy 의 vo() 가 런타임에 찾는 결정적 경로
@@ -702,6 +713,21 @@ async function resolveGameIcon(
     kept[which] = assetId;
   }
   return { gameIcon: kept, blobs };
+}
+
+/**
+ * 타이틀(메인 메뉴) BGM blob 을 generate 전에 확보하고, blob 이 없으면 titleBgm 자체를 가지치기
+ * 한다 — resolveGameIcon 과 같은 패턴(assetId 는 있는데 blob 이 없는 경우, 없는 파일을 참조하는
+ * zip 이 나가 메인 메뉴 진입 때 크래시한다). blob 은 파일 목록 조립부가 재사용한다(같은 assetId 로
+ * getAsset 을 두 번 안 부르려고).
+ */
+async function resolveTitleBgm(
+  titleBgm: Project['titleBgm'],
+): Promise<{ titleBgm: Project['titleBgm']; blob?: Blob }> {
+  if (!titleBgm?.assetId) return { titleBgm: undefined };
+  const blob = await getAsset(titleBgm.assetId);
+  if (!blob) return { titleBgm: undefined }; // 고아 참조(blob 소실) — 없는 파일 참조를 막는다.
+  return { titleBgm, blob };
 }
 
 /**

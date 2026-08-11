@@ -340,6 +340,9 @@ interface State {
   clearBgmGroup: (key: string) => Promise<void>;
   importMenuArt: (file: File) => Promise<void>;
   clearMenuArt: () => Promise<void>;
+  /** 타이틀(메인 메뉴) 화면 BGM 업로드 — config.main_menu_music. Project.titleBgm JSDoc 참고. */
+  importTitleBgm: (file: File) => Promise<void>;
+  clearTitleBgm: () => Promise<void>;
   /**
    * 게임 아이콘 업로드. which='ico' 는 Windows exe 아이콘(.ico, 프로젝트 루트로 나감),
    * which='window' 는 실행 중 창 아이콘(PNG). 자세한 차이는 Project.gameIcon JSDoc 참고.
@@ -2011,6 +2014,33 @@ export const useStore = create<State>((set, get) => {
       flash('타이틀 배경 업로드를 해제했습니다(테마 그라데이션으로 복귀).');
     },
 
+    importTitleBgm: async (file) => {
+      try {
+        // ext 는 실제 MIME 기준(extFromMime) — 장면 BGM 처럼 파일명 확장자를 그대로 믿지 않는다
+        // (types.ts Project.titleBgm JSDoc 의 wav→mp3 오라벨링 전례 참고).
+        const ext = extFromMime(file.type);
+        const id = await uploadAsset(file, 'bgm', `title_bgm.${ext}`);
+        const prev = get().project.titleBgm?.assetId;
+        await commitAssetSwap(
+          (s) => ({ project: { ...s.project, titleBgm: { assetId: id, ext } } }),
+          prev ? [prev] : [],
+          id,
+        );
+        flash('타이틀 BGM을 업로드했습니다.');
+      } catch (e) {
+        flash((e as Error).message);
+      }
+    },
+
+    clearTitleBgm: async () => {
+      const prev = get().project.titleBgm?.assetId;
+      await commitAssetSwap(
+        (s) => ({ project: { ...s.project, titleBgm: undefined } }),
+        prev ? [prev] : [],
+      );
+      flash('타이틀 BGM 업로드를 해제했습니다.');
+    },
+
     importGameIcon: async (which, file) => {
       const isIco = which === 'ico';
       // .ico 는 OS 에 MIME 이 등록 안 돼 있으면 File.type 이 빈 문자열로 온다(Windows 에서 흔함).
@@ -2613,6 +2643,7 @@ export const useStore = create<State>((set, get) => {
               outfits: c.outfits?.map((o) => ({ ...o, expressions: {} })),
             })),
             menuArt: undefined,
+            titleBgm: undefined,
             itemAssetIds: undefined,
             // mainMenuUi.logo/buttons 의 blob 도 위 ids 에 포함돼 아래에서 IndexedDB 에서 실제로
             // 지워진다 — 여기서 같이 비우지 않으면 프로젝트가 방금 삭제한 파일을 계속 참조해

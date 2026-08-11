@@ -112,3 +112,32 @@ describe('generateRenpyFiles: project.bgmPlayback — 재생 방식 토글', () 
     expect(s).not.toContain('stop music');
   });
 });
+
+describe('generateRenpyFiles: project.titleBgm — 타이틀(메인 메뉴) 화면 BGM', () => {
+  it('titleBgm 이 없으면 options.rpy 에 main_menu_music 문자열이 아예 없다(회귀 0)', () => {
+    const { files } = generateRenpyFiles(projectWith([scene({ lines: [dialogue('민주', '안녕')] })]));
+    const s = contentOf(files, 'game/options.rpy');
+    expect(s).not.toContain('main_menu_music');
+  });
+
+  it('titleBgm 이 있으면 define config.main_menu_music 과 fadein 이 정확히 나온다', () => {
+    const { files } = generateRenpyFiles(
+      projectWith([scene({ lines: [dialogue('민주', '안녕')] })], {
+        titleBgm: { assetId: 'tb1' },
+      }),
+    );
+    const s = contentOf(files, 'game/options.rpy');
+    expect(s).toContain('define config.main_menu_music = "audio/title_bgm.mp3"');
+    expect(s).toContain('define config.main_menu_music_fadein = 1.0');
+  });
+
+  it("ext:'wav' 면 .wav 경로로 나온다", () => {
+    const { files } = generateRenpyFiles(
+      projectWith([scene({ lines: [dialogue('민주', '안녕')] })], {
+        titleBgm: { assetId: 'tb1', ext: 'wav' },
+      }),
+    );
+    const s = contentOf(files, 'game/options.rpy');
+    expect(s).toContain('define config.main_menu_music = "audio/title_bgm.wav"');
+  });
+});

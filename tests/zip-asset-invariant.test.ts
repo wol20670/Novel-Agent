@@ -22,6 +22,7 @@ import {
   QUICK_PANEL_FILE,
   ESC_IMAGES,
   escImageFile,
+  titleBgmFile,
   type Character,
   type EscImageId,
   type MainMenuPresetId,
@@ -318,6 +319,13 @@ describe('zip 에셋 불변식 매트릭스', () => {
     expect(sc!.data as string).toContain('    add Transform("gui/title_logo.png"');
     expect(sc!.data as string).not.toContain('if not main_menu:\n        add Transform("gui/title_logo.png"');
   });
+
+  it('12) 타이틀(메인 메뉴) 화면 BGM 업로드 — options.rpy 참조 파일이 실제로 있다', async () => {
+    const project = kitchenSinkProject({ titleBgm: { assetId: 'asset-title-bgm-1' } });
+    await expectNoDangling(project);
+    const { files } = await collectProjectFiles(project);
+    expect(files.some((f) => f.path === `game/${titleBgmFile('mp3')}`)).toBe(true);
+  });
 });
 
 // ── 타겟 회귀 3건 ────────────────────────────────────────────────────────────
@@ -469,6 +477,22 @@ describe('회귀 (e): ESC 메뉴 이미지 assetId 는 있지만 실제 blob 이
     // 지금은 blob 없는 역할만 조용히 빠지고, blob 있는 역할(nav_hover)은 정상적으로 살아남는다.
     expect(written.has(`game/${escImageFile('nav_idle')}`)).toBe(false);
     expect(written.has(`game/${escImageFile('nav_hover')}`)).toBe(true);
+    await expectNoDangling(project);
+  });
+});
+
+describe('회귀 (i): 타이틀 화면 BGM assetId 는 있지만 실제 blob 이 사라진 경우(고아 참조)', () => {
+  it('resolveTitleBgm 이 blob 없는 titleBgm 을 gui.rpy 생성 전에 가지치기한다 — options.rpy 가 main_menu_music 을 아예 안 낸다', async () => {
+    vi.mocked(getAsset).mockImplementation(async (id: string) =>
+      id === 'asset-title-bgm-missing' ? undefined : fakeBlob(id),
+    );
+    const project = kitchenSinkProject({ titleBgm: { assetId: 'asset-title-bgm-missing' } });
+    const { files } = await collectProjectFiles(project);
+    const written = new Set(files.map((f) => f.path));
+    expect(written.has(`game/${titleBgmFile('mp3')}`)).toBe(false);
+    const options = files.find((f) => f.path === 'game/options.rpy');
+    expect(typeof options?.data).toBe('string');
+    expect(options!.data as string).not.toContain('main_menu_music');
     await expectNoDangling(project);
   });
 });
