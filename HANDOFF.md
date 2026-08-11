@@ -12,7 +12,9 @@
 - **표정 AI 배정 실키 검증도 최후순위로 연기**(2026-08-10, TTS와 같은 취급) — OpenAI 키로 후보 밖 라벨·연속성·미소 계열 분화·토큰 견적을 볼 항목이었으나 당분간 안 한다. 코드는 이미 있으니 재개할 땐 `src/generators/emotion/` 부터.
 - **TTS(Typecast)는 최후순위로 연기**(2026-08-09) — 실키 검증·Vercel Edge 배포 확인 모두 당분간 안 한다. 코드는 이미 들어와 있으니 재개할 땐 `src/config/aiConfig.ts`·`api/typecast.ts` 부터.
 - **메뉴 아트는 언어별로 만들지 않는다**(2026-08-09) — 글자가 구워진 버튼이 영어·일본어에서도 한글로 남지만 감수. 다국어는 **텍스트 번역 + 폰트 교체**로만 간다(Ren'Py `tl/<언어>/` 이미지 치환은 CLAUDE.md에 방법만 남겨둔다).
-- 미착수(계속 의도적으로 뺌): `store.ts`(2857줄) 슬라이스 분리, 탭 컴포넌트 코드 스플리팅.
+- 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **타이틀(메인 메뉴) 화면 BGM**(`project.titleBgm`, opt-in — 에셋 탭 🎵 BGM 섹션 맨 위 업로드 카드 + 미리듣기). 엔진 공식 변수 `config.main_menu_music`(+`_fadein 1.0`)로만 나가고 `screens.rpy` 는 안 건드린다 — `label _main_menu` 가 타이틀 진입마다 `if_changed=True` 로 재생하므로 타이틀↔메뉴 이동에도 안 끊긴다. `label start` 에서 곡을 멈추지 않는 건 **사용자 결정**(첫 장면에 `#BGM` 이 없을 때 곡이 이어지는 걸 끊는 수단은 기존 `stopWhenUnset` 토글뿐이라, 그 토글이 꺼져 있으면 카드에 안내문을 띄운다). 파일 경로는 `titleBgmFile()` 단일 소스, blob 없으면 `resolveTitleBgm` 이 생성 전에 가지쳐 없는 파일 참조를 막는다. test 471→479 · typecheck 통과 · **회귀 0**(19구성 `.rpy` 바이트 동일) · lint 무경고 · **실기에서 `config.main_menu_music='audio/title_bgm.mp3'` · `loadable=True` 확인**. ⚠️ **실제 청취 확인은 사용자 몫**(37ab2ee 와 같은 취급).
+- **구조 리팩터(동작 변경 0)** — `store.ts`(2927줄) → `src/store/` 14파일(index=조립+초기 state 55줄, types=State 계약, context=공유 클로저, helpers=순수 함수, 슬라이스 10개), `LeftPanel.tsx`(1063→358줄) → `components/left/` 6파일, `types.ts`(1131줄) → `types/{project,menu,index}.ts`. **외부 API 무변경**(`from '../store'` 의 useStore·sceneById·Tab, `from '../types'` 그대로 — 컴포넌트·테스트 한 줄도 안 고침). 슬라이스끼리 import 금지(교차 호출은 `get().액션()`), 값 import 기준 순환 0(99파일 검사). 5커밋으로 나눠 진행했고 매 단계 **import 를 걷어낸 정렬 대조로 "로직 줄 동일"을 증명**했다.
+- ⚠️ **store 액션엔 단위 테스트가 여전히 없다** — 479개는 전부 생성기·파서·zip 쪽이라 이번 안전망은 typecheck(State 인터페이스) + e2e + 정렬 대조뿐이었다. 협업 push·자동저장 디바운스처럼 e2e 가 안 건드리는 경로는 사용자가 실제로 써봐야 확인된다.
+- `scripts/e2e.mjs`: 오래돼 깨져 있던 단언 2건 수정(show 문 속성 2개 정규식, 초기화 버튼 title 변경). 이제 e2e 전체 통과가 기준선이다.
