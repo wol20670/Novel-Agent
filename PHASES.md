@@ -23,7 +23,37 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | Phase | 내용 | 상태 | 커밋 | 검증 |
 |---|---|---|---|---|
 | 0 | store/LeftPanel/types 모듈화(기준 상태) | ✅ 확정 | `9f936b6`…`e4dbe6a` | typecheck·test 479·build·e2e |
-| 1 | (대기 — 프롬프트 수령 전) | ⏳ | | |
+| 1 | 복장 시스템 분석 + 장면 내 의상 전환 설계(**코드 변경 없음**) | ✅ 확정 (3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
+| 2 | (대기 — 프롬프트 수령 전) | ⏳ | | |
+
+## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
+
+**목표**: 한 장면 안에서 같은 캐릭터가 여러 의상으로 갈아입을 수 있게. 기존 배경 키워드 heuristic·`resolveOutfit`은 **그대로 유지**.
+
+**데이터**: `Line`(dialogue·narration)에 `outfits?: Record<캐릭터, 의상>` — "이 줄부터", 적힌 캐릭터만 변경(`hideSprites`의 줄 단위 override와 같은 관용구). 별도 event 배열/timeline 금지(줄 밖에 두면 index를 저장하게 돼 stable ID가 필요해진다).
+
+**판정 단일 소스**: `outfitFlags(scene, rules, charName): string[]`(`types/project.ts`, `spriteHiddenFlags` 옆, **동기·순수**). 시작값은 기존 `resolveOutfit` 호출. 우선순위 = 줄 override > (후일 줄 AI 값) > `Scene.outfits` > 배경 키워드 규칙 > `기본`. **(장면,캐릭터)당 한 번 계산해 재사용**(줄마다 재fold 금지).
+
+**생성기 emit 순서**(줄마다): ① 숨김 전이(복원 시 **의상은 fold 값**, 표정은 `lastShown.attr`) → ② **의상 동기화 = `revealedOrder` − 이번 줄 speakerIds** → ③ 기존 dialogue speaker 처리(의상값만 fold로).
+- ②가 speaker를 제외하는 이유: ③이 어차피 최신 의상으로 show한다. 포함하면 **없던 show가 생겨 회귀 0이 깨진다**. 숨김 해제 줄에서 복원+화자 show가 2회 나가는 **현행 동작은 그대로 둔다**(1회로 줄이려 하지 말 것).
+- 상태는 `lastShown: Map<charId, {outfitAttr, attr, wanted}>` **한 곳**. `outfitAttr/attr`=실제 화면, `wanted`=마지막 요청 의상(재발행 판정). **속성 없는 재배치 `show id at vn_char(x)`(`generate.ts:753`)는 이 상태를 건드리지 않는다.**
+- 폴백은 기존 `generate.ts:765-771` 순서를 `pickSpriteAttrs(charId, wantedOutfit, currentAttr)`로 **추출만** 해서 ②③이 공유(새 규칙 금지).
+
+**미리보기**: 같은 `outfitFlags`를 `useMemo`로 계산해 `PreviewSprite`에 전달 → 전이 시점이 생성기와 일치.
+
+**파서 라이프사이클**: `#복장`이 장면 맨 앞이면 기존대로 `Scene.outfits`, 도중이면 `pendingOutfits`(캐릭터별 **merge**, overwrite 아님) → 다음 dialogue/narration이 소비하며 `appliedOutfits`에도 반영. **명시 `#S`는 상태를 끊고(폐기), 자동 `splitBeat`는 잇는다**(`startScene` 리셋 **전에** 스냅샷 → 새 장면 시작 의상 = `appliedOutfits` + 미소비 pending). heuristic 결과는 `appliedOutfits`에 담지 않는다.
+
+**merge**: `carryLineMeta`의 dialogue·narration 두 갈래에 `outfits: next.outfits ?? prev.outfits`(whole-record 교체 — 캐릭터별 merge는 대본에서 지운 지정이 좀비로 남는다). 변경 감지는 `tagFieldsChanged` **한 곳만** 확장하되 **`linesIdentical`일 때만** 인덱스별로 `prev.outfits` vs `next.outfits ?? prev.outfits`(= 실제 병합 결과와 동일 semantics) 비교 → 다르면 `affectsGame`. **`lineKey`·`pairLines`는 불변**, `emotion`/`hideSprites` 감지는 이번에 안 건드림.
+
+**known limitations(이번에 고치지 않음, 기록만)**
+- Preview는 "기본 의상 + 현재 표정", Export는 "그 의상 + neutral"로 폴백이 **비대칭**(`spriteAssetId` vs `generate.ts:765-771`) — 오늘도 존재하나 줄 단위 전환으로 마주칠 확률이 는다.
+- `pairLines`는 FIFO라 **동일 speaker+text 줄이 여럿이면** 메타가 다른 동일 줄에 붙을 수 있다(emotion·voice·hideSprites가 공유하는 기존 한계).
+- 재분석 시 `next.outfits` 부재가 "태그 삭제"인지 "앱 수동값 유지"인지 구분할 **provenance가 없다** — origin 필드/시스템 추가 금지.
+- AI 표정 후보가 **장면 단위** 의상으로 계산된다(`aiSelect.ts:71-73` → `availableExpressions`) — 줄 단위 전환과 어긋날 수 있는 cross-system 의존. 별도 검토 대상.
+- 음성 파일명이 줄 index를 굳힌다(`voiceBaseName`) — 무관한 선행 부채, 별도 Phase.
+
+**구현 순서**: 타입+`outfitFlags`+테스트 → 생성기(추출→②→①→`wanted`) → 미리보기 → 파서 → merge → (선택) 줄 UI.
+**필수 검증**: override 없는 프로젝트 **출력 회귀 0**(덤프 `diff -r`) · 장면 내 2회 전환 · 타 화자 줄/narration 줄 전환 · hide 중 전환 후 복원 · 전환+show 같은 줄(show 개수 동일) · `splitBeat` 승계 및 `#S` 비승계 · 미등장 캐릭터 선변경 후 등장 · 의상에 그 표정 없음(문서화된 폴백 재현) · save/load · `.npproj.zip` · 재분석 후 유지 + **줄 의상만 바뀐 재분석에서 승인 리셋** · 미리보기/export 전이 시점 대조 · typecheck/test/빌드.
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
