@@ -25,7 +25,8 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 0 | store/LeftPanel/types 모듈화(기준 상태) | ✅ 확정 | `9f936b6`…`e4dbe6a` | typecheck·test 479·build·e2e |
 | 1 | 복장 시스템 분석 + 장면 내 의상 전환 설계(**코드 변경 없음**) | ✅ 확정 (3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
 | 2 | 장면 내 수동 의상 전환 구현 | ✅ 확정 | `7dbfaaa` (보정 `ec7bc04`) | typecheck · vitest 42파일/517 · 기존 `.rpy` 21구성 바이트 회귀 0 + 신규 `outfits-line` 정상 · 스크래치 빌드+e2e · Ren'Py lint 에러 0 · save/load·`.npproj.zip` 왕복 |
-| 3 | (대기 — 프롬프트 수령 전) — 기존 표정 AI 시스템 audit | ⏳ | | |
+| 3 | 기존 표정 AI end-to-end audit(**코드 변경 없음**) | ✅ 확정 (3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
+| 4 | 표정 AI correctness — F1(줄 시점 의상) + F4(표정 설명 identity) | ⏳ | | |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -59,6 +60,27 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 - `npm run dump:rpy -- <스크래치>/before` 를 **코드 손대기 전에** 한 번 돌려둘 것(21구성 · 결정론적). 작업 후 같은 명령으로 `after` 를 만들어 `diff -r` → 줄 override 를 안 쓴 구성은 **한 구성도 달라지면 안 된다**. 이미 `outfits` 구성(장면 단위 의상 + 배경 키워드 규칙)이 들어 있어 기존 heuristic 보존도 함께 대조된다.
 - 빌드 확인은 `npx vite build --outDir <스크래치>/dist --emptyOutDir`(리포 안 `dist/` 는 조용히 죽는다), e2e 는 그 dist 로 `npx vite preview --outDir <스크래치>/dist --port 4173` 후 `npm run test:e2e`.
 **필수 검증**: override 없는 프로젝트 **출력 회귀 0**(덤프 `diff -r`) · 장면 내 2회 전환 · 타 화자 줄/narration 줄 전환 · hide 중 전환 후 복원 · 전환+show 같은 줄(show 개수 동일) · `splitBeat` 승계 및 `#S` 비승계 · 미등장 캐릭터 선변경 후 등장 · 의상에 그 표정 없음(문서화된 폴백 재현) · save/load · `.npproj.zip` · 재분석 후 유지 + **줄 의상만 바뀐 재분석에서 승인 리셋** · 미리보기/export 전이 시점 대조 · typecheck/test/빌드.
+
+## Phase 3 확정 — 기존 표정 AI audit 결과 (구현은 Phase 4)
+
+**코드 변경 없음.** 표정 AI는 이미 end-to-end로 동작하는 시스템이며, 아래 결론은 코드 근거는 `파일 · 함수명`으로만 기록한다(줄 번호는 정본으로 안 쓴다 — 리팩터에 바로 어긋난다).
+
+**A — 이미 충분, 재설계하지 않는다**: `Line.emotion`/`Line.emotionAuto` 분리 · 작가/수동 > AI > 휴리스틱 > 기본 우선순위 · `resolveEmotion`/`resolveEmotionDetailed` 단일 판정 · `availableExpressions` 기반 후보 제한 · 응답 파싱/검증 · 🤖 표시 + 수동 override · 프롬프트 수준 표정 연속성(smoothing) 지시 · 증분 대상 선정 · 배치(견적·진행률·재시도·치명 오류 중단·단일 커밋) · save/load · `.npproj.zip` · 협업 · 재분석의 `emotionAuto` 승계와 `emotionLoss` · 미리보기/Ren'Py export 판정 경로. **새 provenance 시스템·review modal·smoothing 엔진·범용 AI framework를 만들지 않는다.**
+
+**B — correctness 2건(Phase 4 필수)**
+- **F1 — 줄 시점 의상 ↔ AI 후보 불일치**: 후보가 `resolveOutfit`(장면 단위)로 계산돼 speaker 단위로 장면 전체에 공유되는데(`generators/emotion/aiSelect.ts · collectEmotionTargets`), Phase 2 이후 줄 시점 판정 단일 소스는 `types/project.ts · outfitFlags`다. 한 장면에서 A→B→C 전환이 일어나면 전환 이후 후보가 실제 의상과 어긋난다(그림 없는 표정이 배정돼 플레이스홀더가 게임에 실리거나, 그림 있는 표정이 후보에서 빠진다).
+  **계약**: *각 AI target 줄은 자신의 줄 시점 effective outfit에 맞는 후보 집합으로 LLM에 제시되고, 동일 후보 집합으로 응답 검증된다.*
+  **제약**: `outfitFlags` 단일 소스 재사용 · 표정 AI 전용 의상 계산기 금지 · `candidatesBySpeaker` 캐시 키 변경만으로 끝난다고 선결정하지 않음(**같은 speaker가 같은 청크 안에서 여러 의상을 쓸 수 있다** — payload도 검증도 speaker 단위 후보를 전제하고 있다) · stable Line ID 등 대형 abstraction 금지.
+- **F4 — `expressionNotes` 후보 identity 불일치**: payload는 설명이 있으면 `표정명(설명)`을 후보로 보내고(`aiSelect.ts · buildUserPayload`), 프롬프트는 후보 문자열을 정확히 복사하라고 요구하는데(`aiSelect.ts · SYSTEM_PROMPT`), 파서는 canonical `project.expressions` 이름과만 일치를 인정한다(`aiSelect.ts · parseEmotionResponse`). 모델이 지시를 따를수록 결과가 폐기된다.
+  **계약**: *`expressionNotes`가 있어도 prompt/payload와 parser가 동일한 canonical Expression identity를 쓰고, 성공 결과는 `project.expressions` 원문으로 저장되며, 후보 밖 응답은 계속 거부된다.* 구현 방식(설명을 별도 필드로 분리 / 파서에서 canonical 매핑 등)은 Phase 4 Plan에서 최소 변경으로 정한다.
+
+**C — 품질(Phase 5로 이관)**: **F2/F3 — 대사 문맥 커버리지 결손.** target에서 빠진 줄은 LLM 문맥에서도 통째로 사라진다(주인공 대사·지문·합동 대사·이미 배정된 줄과 그 표정 값). `prevContext`도 실제 직전 대사가 아니라 **직전 청크의 마지막 target 3개**이고 장면마다 초기화된다 — **target 줄과 문맥 전용 줄이 분리돼 있지 않다.** 장면 메타데이터(제목·배경·연출·CG·시놉시스) 배관 자체는 이미 있으므로 재구축 대상이 아니다.
+
+**Phase 4 범위 = F1 + F4 correctness만.** 제외: F2/F3 문맥 품질 · 실행 중 취소 UX · 장면 단위 재실행 · `emotionAuto`만 비우는 UI · review modal · suggestion staging · provenance · deterministic smoothing/state machine · stable Line ID · timeline/event 엔진 · 범용 AI 인프라 리팩터 · 표정 AI 전면 재작성 · 의상 AI · 미리보기/export 폴백 통일 · merge 재설계.
+
+**Phase 4 검증**: 같은 장면·**같은 청크**에서 동일 화자가 A→B→C로 갈아입는 케이스로 ① 줄별 effective outfit ② 줄별 허용 후보 ③ 이전 의상 전용 후보 제외 ④ 새 의상 전용 후보 포함 ⑤ 파싱이 줄별 올바른 후보로 검증 — 다섯을 직접 검증한다. F4는 구현 중립으로 ① 설명이 있는 프로젝트에서 정상 배정 성립 ② 저장값이 `project.expressions` 원문과 일치 ③ 후보 밖은 여전히 거부 ④ 설명이 없으면 기존 동작 불변. `npm run dump:rpy` before/after `diff -r` 은 **전체 회귀 안전망**으로 유지하되 **F1 의 직접 증명이 아니다**(위 단위 테스트가 증명한다).
+
+**Phase 5 재정의**: 기존의 smoothing/표정 state-machine 성격 Phase 는 **진행하지 않는다.** 남긴다면 **"표정 AI 문맥 품질 개선"**(F2/F3 전용)으로 축소한다. 위의 구조적 사실은 이미 확정됐으니 다시 재평가하지 말고, **어디까지 문맥을 넣을지(지문 포함 여부·기존 표정 값 포함 여부·창 크기)와 토큰·비용 대비 품질 향상이 있는지**만 실측으로 정한다. deterministic smoothing 은 문맥 개선 뒤에도 필요성이 입증될 때만 다시 본다. 실키 검증이 최후순위 연기 상태라 착수 시점은 보류 가능.
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
