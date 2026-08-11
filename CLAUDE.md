@@ -1,6 +1,7 @@
 # CLAUDE.md
 
 > 🔵 **세션 시작 시 [`HANDOFF.md`](./HANDOFF.md) 먼저 확인** — 짧은 살아있는 상태 문서(🎯 다음 할 일 + ✅ 방금 반영됨). 관리 규칙은 아래 워크플로우.
+> 🟣 **여러 세션에 걸친 대형 작업(복장·표정 LLM 추론)은 [`PHASES.md`](./PHASES.md)** — 작업 루프(Claude 계획 → GPT 검토 → 구현 → 확정)와 Phase 로그, 계획 전에 알아야 할 기존 코드 사실이 거기 있다.
 
 Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite + React + TS + zustand + Tailwind). BYO 키, 한국어 코드베이스.
 이미지·BGM은 **앱이 생성하지 않음** — 외부 도구에서 만들어 에셋 탭에 업로드. 앱의 AI는 텍스트·보이스 전용(OpenAI `gpt-4o-mini`): 대본 번역(영/일), GUI 테마, Typecast TTS.
