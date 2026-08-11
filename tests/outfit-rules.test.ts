@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { resolveOutfit } from '../src/types';
-import type { Scene, OutfitRule } from '../src/types';
+import { resolveOutfit, outfitFlags } from '../src/types';
+import type { Scene, OutfitRule, Line } from '../src/types';
 
 function scene(patch: Partial<Scene> = {}): Scene {
   return {
@@ -72,5 +72,66 @@ describe('resolveOutfit: 배경 키워드 규칙 우선순위(장면 직접 지�
     const rules: OutfitRule[] = [{ keyword: '   ', charName: '한지수', outfit: '카페복' }];
     const sc = scene({ background: '아무 배경' });
     expect(resolveOutfit(rules, sc, '한지수')).toBe('기본');
+  });
+});
+
+/** 대사 한 줄(줄 의상 override 를 붙일 수 있게 한 축약). */
+function dlg(speaker: string, text: string, outfits?: Record<string, string>): Line {
+  return { kind: 'dialogue', speaker, text, ...(outfits ? { outfits } : {}) };
+}
+
+describe('outfitFlags: 장면 내 줄 단위 의상 전환(판정 단일 소스)', () => {
+  it('줄 override 가 하나도 없으면 전 줄이 resolveOutfit 결과와 같다(회귀 0)', () => {
+    const rules: OutfitRule[] = [{ keyword: '카페', charName: '한지수', outfit: '카페복' }];
+    const sc = scene({ background: '아침 카페', lines: [dlg('한지수', 'a'), dlg('한지수', 'b')] });
+    expect(outfitFlags(sc, rules, '한지수')).toEqual(['카페복', '카페복']);
+  });
+
+  it('줄 override 는 그 줄부터 적용되고 다음 override 까지 유지된다(같은 장면 2회 전환)', () => {
+    const sc = scene({
+      outfits: { 한지수: '교복' },
+      lines: [
+        dlg('한지수', '0'),
+        dlg('한지수', '1', { 한지수: '카페복' }),
+        dlg('한지수', '2'),
+        dlg('한지수', '3', { 한지수: '사복' }),
+        dlg('한지수', '4'),
+      ],
+    });
+    expect(outfitFlags(sc, undefined, '한지수')).toEqual(['교복', '카페복', '카페복', '사복', '사복']);
+  });
+
+  it('지문(narration) 줄에서도 전환되고, 적히지 않은 캐릭터는 앞 상태를 유지한다', () => {
+    const sc = scene({
+      lines: [
+        dlg('한지수', '0'),
+        { kind: 'narration', text: '지문', outfits: { 한지수: '사복' } },
+        dlg('강민주', '2', { 강민주: '교복' }),
+      ],
+    });
+    expect(outfitFlags(sc, undefined, '한지수')).toEqual(['기본', '사복', '사복']);
+    expect(outfitFlags(sc, undefined, '강민주')).toEqual(['기본', '기본', '교복']);
+  });
+
+  it('줄 override 는 장면 직접 지정·배경 키워드 규칙보다 우선한다(그 줄 이후로만)', () => {
+    const rules: OutfitRule[] = [{ keyword: '카페', charName: '한지수', outfit: '카페복' }];
+    const sc = scene({
+      background: '아침 카페',
+      outfits: { 한지수: '교복' },
+      lines: [dlg('한지수', '0'), dlg('한지수', '1', { 한지수: '수영복' })],
+    });
+    expect(outfitFlags(sc, rules, '한지수')).toEqual(['교복', '수영복']);
+  });
+
+  it('의상 마커가 아닌 라인(item/cg/bgm)도 자리를 차지해 인덱스가 lines 와 1:1 로 맞는다', () => {
+    const sc = scene({
+      lines: [
+        dlg('한지수', '0'),
+        { kind: 'cg', desc: '컷' },
+        dlg('한지수', '2', { 한지수: '사복' }),
+        { kind: 'item', name: '편지' },
+      ],
+    });
+    expect(outfitFlags(sc, undefined, '한지수')).toEqual(['기본', '기본', '사복', '사복']);
   });
 });

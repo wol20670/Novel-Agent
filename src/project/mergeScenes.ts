@@ -95,6 +95,9 @@ function carryLineMeta(next: Line, prev: Line): Line {
       // emotion 과 같은 규칙 — 대본 태그(#인물숨김/#인물표시)가 있으면 그게 정본, 없으면 장면 카드
       // 줄 버튼으로 지정한 값을 유지(재분석마다 UI 토글이 풀리면 안 된다).
       hideSprites: next.hideSprites ?? prev.hideSprites,
+      // 줄 단위 의상 전환(#복장)도 같은 규칙이되 **레코드 통째로** 갈아끼운다 — 캐릭터별로 머지하면
+      // 대본에서 지운 지정이 좀비처럼 살아남는다(next 에 레코드가 있으면 그게 정본).
+      outfits: next.outfits ?? prev.outfits,
     };
   }
   if (next.kind === 'narration' && prev.kind === 'narration') {
@@ -103,6 +106,7 @@ function carryLineMeta(next: Line, prev: Line): Line {
       i18n: mergeI18n(prev.i18n, next.i18n),
       voiced: prev.voiced,
       hideSprites: next.hideSprites ?? prev.hideSprites,
+      outfits: next.outfits ?? prev.outfits, // dialogue 쪽과 동일(whole-record replacement)
     };
   }
   return next;
@@ -212,9 +216,33 @@ function tagFieldsChanged(prev: Scene, next: Scene): { any: boolean; affectsGame
     prevOutfitKeys.length !== nextOutfitKeys.length ||
     !prevOutfitKeys.every((k, i) => k === nextOutfitKeys[i] && prev.outfits![k] === next.outfits![k]);
   const directionChanged = prev.direction.join('\n') !== next.direction.join('\n');
+  // 줄 단위 의상 전환(Line.outfits) — 줄 텍스트가 그대로여도 전환 지점·의상이 바뀌면 게임 출력이
+  // 달라지므로 승인이 풀려야 한다. 비교는 **실제 병합 결과와 같은 의미**(carryLineMeta 의
+  // `next.outfits ?? prev.outfits`)로 해야 오탐이 없다 — next 에 레코드가 아예 없으면 prev 가
+  // 그대로 살아남으니 "변경 없음"이다. 줄 배열이 다르면 index 대응이 무의미하고, 그 경우
+  // sceneContentEqual 이 어차피 linesIdentical 에서 false 를 내므로 여기선 동일할 때만 본다.
+  const lineOutfitsChanged =
+    linesIdentical(prev.lines, next.lines) &&
+    prev.lines.some((l, i) => {
+      const p = lineOutfits(l);
+      const n = lineOutfits(next.lines[i]) ?? p;
+      return !sameOutfitRecord(p, n);
+    });
 
-  const affectsGame = jumpChanged || choicesChanged || outfitsChanged;
+  const affectsGame = jumpChanged || choicesChanged || outfitsChanged || lineOutfitsChanged;
   return { any: affectsGame || directionChanged, affectsGame };
+}
+
+/** dialogue/narration 라인의 줄 의상 레코드(그 외 kind 는 undefined). */
+function lineOutfits(line: Line): Record<string, string> | undefined {
+  return line.kind === 'dialogue' || line.kind === 'narration' ? line.outfits : undefined;
+}
+
+/** 의상 레코드 동일성(키 집합 + 값). 둘 다 없으면 같다. */
+function sameOutfitRecord(a?: Record<string, string>, b?: Record<string, string>): boolean {
+  const ak = Object.keys(a ?? {}).sort();
+  const bk = Object.keys(b ?? {}).sort();
+  return ak.length === bk.length && ak.every((k, i) => k === bk[i] && a![k] === b![k]);
 }
 
 /**

@@ -18,7 +18,7 @@ import {
   baseLocaleOf,
   effectiveTextLocales,
   effectiveVoiceLocales,
-  resolveOutfit,
+  outfitFlags,
   spriteHiddenFlags,
   MAIN_MENU_SLOTS,
   MENU_BUTTON_STATES,
@@ -252,6 +252,29 @@ function resolveSprites(
     }
   }
   return out;
+}
+
+/**
+ * 한 캐릭터를 화면에 세울 때 쓸 (의상, 표정) 속성 — **기존 폴백 사다리를 그대로 옮긴 것**이다
+ * (새 규칙 아님). 화자 show·비화자 의상 동기화·숨김 복원 세 곳이 같은 폴백을 써야 하므로 추출했다.
+ *   ① 원하는 의상 → ② '기본' 의상 → ③ 전체 (pool 선택)
+ *   ④ 선택된 pool 안에 원하는 표정이 있으면 그것 → ⑤ 없으면 neutral → ⑥ 그것도 없으면 pool[0]
+ * wantAttr 은 "가능하면 유지하려는 표정"이지 강제값이 아니다 — 새 의상에 그 표정 스프라이트가
+ * 없으면 ⑤⑥으로 내려간다(없는 이미지를 참조하면 런타임에 죽는다).
+ */
+function pickSpriteAttrs(
+  owned: SpriteRef[],
+  wantedOutfit: string,
+  wantAttr: string,
+): { outfitAttr: string; attr: string } {
+  let pool = owned.filter((o) => o.outfit === wantedOutfit);
+  if (!pool.length) pool = owned.filter((o) => o.outfit === '기본');
+  if (!pool.length) pool = owned;
+  const outfitAttr = pool[0].outfitAttr;
+  const attr =
+    (pool.some((o) => o.attr === wantAttr) && wantAttr) ||
+    (pool.some((o) => o.attr === 'neutral') ? 'neutral' : pool[0].attr);
+  return { outfitAttr, attr };
 }
 
 /** "감상한 CG" 갤러리 항목 — 태그(assets.rpy/script.rpy 와 공유) + 갤러리 표시용 캡션. */
@@ -643,7 +666,25 @@ function scriptBody(
     // 판단하되, cgActive 중엔 scene 문이 이미 다 지웠으므로 hide/복원 자체를 생략한다(아래 루프 참고).
     const hiddenFlags = spriteHiddenFlags(s);
     // hide 뒤엔 태그의 속성(의상/표정) 기억이 사라지므로, 다시 보여줄 때 쓸 마지막 속성을 기록해둔다.
-    const lastShown = new Map<string, { outfitAttr: string; attr: string }>();
+    // outfitAttr/attr = 실제로 화면에 나간 속성, wanted = 마지막으로 "요청한" 논리 의상 이름.
+    // wanted 를 따로 두는 이유: 요청한 의상의 스프라이트가 없어 base 로 폴백해도(outfitAttr='base')
+    // 요청 자체는 그 의상이므로, 같은 의상을 다시 요청했을 때 show 를 또 내지 않기 위해서다.
+    const lastShown = new Map<string, { outfitAttr: string; attr: string; wanted: string }>();
+    // 줄마다의 유효 의상(outfitFlags 단일 소스) — (장면,캐릭터)당 한 번만 계산해 재사용한다.
+    const outfitFlagsByChar = new Map<string, string[]>();
+    const outfitAt = (charName: string, lineIdx: number): string => {
+      let flags = outfitFlagsByChar.get(charName);
+      if (!flags) {
+        flags = outfitFlags(s, outfitRules, charName);
+        outfitFlagsByChar.set(charName, flags);
+      }
+      return flags[lineIdx];
+    };
+    /** charId → 그 캐릭터의 스프라이트 목록(없으면 undefined) + 이름. 의상 판정은 이름 기준이다. */
+    const ownedOf = (id: string): SpriteRef[] | undefined => {
+      const owned = spritesByChar.get(id);
+      return owned && owned.length ? owned : undefined;
+    };
     let hiddenNow = false; // 지금까지 반영된 "유효 숨김" 상태(장면 시작은 항상 false — 아직 아무도 안 섰으므로 hide 대상이 없다).
     out.push(`# ── ${commentSafe(s.title)} ──`);
     out.push(`label ${r.label}:`);
@@ -713,26 +754,56 @@ function scriptBody(
       // 뒤라 우리가 또 hide/show 를 낼 필요가 없다(오히려 없는 상태를 잘못 만짐).
       const hidden = hiddenFlags[lineIdx];
       const effHidden = hidden || cgActive;
+      // 이번 줄의 화자(지문이면 빈 배열) — 아래 의상 동기화가 화자를 제외해야 해서 dialogue 분기보다
+      // 먼저 구한다(순수 함수라 위치를 옮겨도 출력은 그대로다).
+      const speakerIds = lineSpeakerIds(line, ids);
       if (!cgActive && effHidden !== hiddenNow) {
         if (effHidden) {
           // 서 있던 스프라이트를 전부 내린다. hide 뒤엔 태그의 속성 기억이 사라지므로, 다시 보여줄 때는
           // 반드시 lastShown 에 적어둔 속성으로 show 를 다시 내야 한다(속성 없는 show 는 크래시).
           for (const id of revealedOrder) out.push(`${indent(1)}hide ${id}`);
         } else {
-          // 숨기기 직전 그 자리·그 표정으로 복원(lastShown). 숨김 구간에서 처음 말한 캐릭터는 애초에
+          // 숨기기 직전 그 자리로 복원(lastShown). 숨김 구간에서 처음 말한 캐릭터는 애초에
           // revealedOrder 에 들어간 적이 없으므로(아래 newlyRevealed 가 숨김 중엔 항상 빈 배열) 여기서
           // 유령처럼 튀어나오지 않는다 — 다음에 말할 때 정상적으로 새로 등장한다.
+          // 의상은 "숨기기 직전 값"이 아니라 **지금 줄의 fold 값**이다 — 숨어 있는 동안 #복장이
+          // 바뀌었으면 다시 나타날 때 새 옷을 입고 나와야 한다. 표정은 마지막 표정(shown.attr)을
+          // 유지하되, 새 의상에 그 표정이 없으면 pickSpriteAttrs 가 neutral/pool[0] 로 내려준다.
           for (const id of revealedOrder) {
             const shown = lastShown.get(id);
             if (!shown) continue;
-            out.push(`${indent(1)}show ${id} ${shown.outfitAttr} ${shown.attr} at vn_char(${currentPos.get(id) ?? 50})`);
+            const owned = ownedOf(id);
+            const wanted = owned ? outfitAt(owned[0].charName, lineIdx) : shown.wanted;
+            const picked = owned
+              ? pickSpriteAttrs(owned, wanted, shown.attr)
+              : { outfitAttr: shown.outfitAttr, attr: shown.attr };
+            out.push(`${indent(1)}show ${id} ${picked.outfitAttr} ${picked.attr} at vn_char(${currentPos.get(id) ?? 50})`);
+            lastShown.set(id, { ...picked, wanted });
           }
         }
       }
       hiddenNow = effHidden;
 
+      // 의상 동기화 — 이미 서 있는 캐릭터 중 **이번 줄 화자가 아닌** 쪽의 의상이 바뀌었으면 여기서
+      // 갈아입힌다(지문 줄·다른 사람이 말하는 줄에서도 옷이 바뀔 수 있어야 한다). 화자를 제외하는
+      // 이유는 아래 dialogue 처리가 어차피 최신 의상으로 show 를 내기 때문 — 포함하면 같은 줄에
+      // show 가 두 번 나간다(회귀). 요청 의상이 그대로면 아무것도 내지 않으므로, 줄 의상을 안 쓰는
+      // 프로젝트에서는 이 블록이 단 한 줄도 출력하지 않는다(회귀 0).
+      if (!effHidden && !cgActive) {
+        for (const id of revealedOrder) {
+          if (speakerIds.includes(id)) continue;
+          const shown = lastShown.get(id);
+          const owned = ownedOf(id);
+          if (!shown || !owned) continue;
+          const wanted = outfitAt(owned[0].charName, lineIdx);
+          if (wanted === shown.wanted) continue;
+          const picked = pickSpriteAttrs(owned, wanted, shown.attr);
+          out.push(`${indent(1)}show ${id} ${picked.outfitAttr} ${picked.attr} at vn_char(${currentPos.get(id) ?? 50})`);
+          lastShown.set(id, { ...picked, wanted });
+        }
+      }
+
       if (line.kind === 'dialogue') {
-        const speakerIds = lineSpeakerIds(line, ids);
         // 이번 줄에서 처음 등장하는(스프라이트 보유) 화자를 한 번에 모아 추가 — 합동 대사로 여럿이
         // 동시에 처음 등장해도 재배치가 한 번만 일어나게. 새 등장이 있으면 전체를 다시 배치하고,
         // 이번 줄 화자가 아니면서 이미 서 있던 캐릭터 중 위치가 바뀐 쪽만 스냅 이동시킨다(속성 생략
@@ -759,18 +830,13 @@ function scriptBody(
         for (const sid of effHidden ? [] : speakerIds) {
           const owned = spritesByChar.get(sid);
           if (!owned || !owned.length) continue;
-          // 이 장면에서 입을 의상 — 장면 직접 지정 > 배경 키워드 규칙 > 기본(resolveOutfit 우선순위).
-          // 해당 의상 스프라이트가 없으면 기본 의상으로 폴백.
-          const wantedOutfit = resolveOutfit(outfitRules, s, owned[0].charName);
-          let pool = owned.filter((o) => o.outfit === wantedOutfit);
-          if (!pool.length) pool = owned.filter((o) => o.outfit === '기본');
-          if (!pool.length) pool = owned;
-          const outfitAttr = pool[0].outfitAttr;
-          const attr =
-            (pool.some((o) => o.attr === want) && want) ||
-            (pool.some((o) => o.attr === 'neutral') ? 'neutral' : pool[0].attr);
+          // 이 줄에서 입을 의상 — outfitFlags 단일 소스(줄 override > 장면 직접 지정 > 배경 키워드
+          // 규칙 > 기본). 해당 의상 스프라이트가 없으면 기본 의상으로 폴백(pickSpriteAttrs 사다리).
+          const wantedOutfit = outfitAt(owned[0].charName, lineIdx);
+          const { outfitAttr, attr } = pickSpriteAttrs(owned, wantedOutfit, want);
           out.push(`${indent(1)}show ${sid} ${outfitAttr} ${attr} at vn_char(${currentPos.get(sid) ?? 50})`);
-          lastShown.set(sid, { outfitAttr, attr }); // 다음 숨김→표시 전환 때 이 속성으로 복원한다.
+          // 다음 숨김→표시 전환 때 이 속성으로 복원한다(wanted 는 재발행 판정용 논리 의상 이름).
+          lastShown.set(sid, { outfitAttr, attr, wanted: wantedOutfit });
         }
         // 말하는 주체: 합동이면 묶음 Character, 아니면 단일 화자.
         const voiceId =

@@ -644,3 +644,70 @@ describe('mergeScenes: 인물 숨김(hideSprites) 승계 — outfits 와 같은 
     expect(l1.hideSprites).toBe(false);
   });
 });
+
+describe('mergeScenes: 줄 단위 의상 전환(Line.outfits) 승계와 변경 감지', () => {
+  const dlg = (text: string, outfits?: Record<string, string>): Line => ({
+    kind: 'dialogue',
+    speaker: '민주',
+    text,
+    ...(outfits ? { outfits } : {}),
+  });
+
+  it('next 에 줄 의상이 없으면 prev 값이 승계된다(앱에서 유지하던 값 보존)', () => {
+    const prev: Scene[] = [scene('s1', '장면1', { lines: [dlg('하나', { 민주: '교복' }), dlg('둘')] })];
+    const next: Scene[] = [scene('n1', '장면1', { lines: [dlg('하나'), dlg('둘')] })];
+    const result = mergeScenes(prev, next, 'merge');
+    const [l1] = result[0].lines as Line[];
+    expect((l1 as Extract<Line, { kind: 'dialogue' }>).outfits).toEqual({ 민주: '교복' });
+  });
+
+  it('next 에 줄 의상이 있으면 레코드 통째로 그게 정본이다(캐릭터별 머지 금지 — 좀비 방지)', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', { lines: [dlg('하나', { 민주: '교복', 히로인: '사복' })] }),
+    ];
+    const next: Scene[] = [scene('n1', '장면1', { lines: [dlg('하나', { 민주: '수영복' })] })];
+    const result = mergeScenes(prev, next, 'merge');
+    const [l1] = result[0].lines as Line[];
+    // 히로인 지정은 대본에서 지운 것이므로 살아남으면 안 된다.
+    expect((l1 as Extract<Line, { kind: 'dialogue' }>).outfits).toEqual({ 민주: '수영복' });
+  });
+
+  it('지문 줄에서도 같은 규칙으로 승계된다', () => {
+    const narr = (text: string, outfits?: Record<string, string>): Line => ({
+      kind: 'narration',
+      text,
+      ...(outfits ? { outfits } : {}),
+    });
+    const prev: Scene[] = [scene('s1', '장면1', { lines: [narr('지문', { 민주: '사복' })] })];
+    const next: Scene[] = [scene('n1', '장면1', { lines: [narr('지문')] })];
+    const result = mergeScenes(prev, next, 'merge');
+    expect((result[0].lines[0] as Extract<Line, { kind: 'narration' }>).outfits).toEqual({ 민주: '사복' });
+  });
+
+  it('줄 텍스트가 같아도 줄 의상만 실제로 바뀌면 승인이 검토중으로 리셋된다', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', { status: 'approved', lines: [dlg('하나', { 민주: '교복' }), dlg('둘')] }),
+    ];
+    const next: Scene[] = [scene('n1', '장면1', { lines: [dlg('하나', { 민주: '수영복' }), dlg('둘')] })];
+    const result = mergeScenes(prev, next, 'merge');
+    expect(result[0].status).toBe('review');
+    expect(previewMerge(prev, next).statusReset).toBe(1);
+    expect(diffMatchedScene(prev[0], next[0]).tagChanged).toBe(true);
+  });
+
+  it('줄 의상이 새로 생기거나 사라져도(대본에서 제거) 변경으로 잡힌다', () => {
+    const approved = (lines: Line[]) => [scene('s1', '장면1', { status: 'approved', lines })];
+    // 새로 생김: prev 없음 → next 있음
+    expect(mergeScenes(approved([dlg('하나')]), [scene('n1', '장면1', { lines: [dlg('하나', { 민주: '교복' })] })], 'merge')[0].status).toBe('review');
+    // ⚠️ 사라짐: next 에 레코드가 없으면 병합 결과는 prev 값 그대로라 "변경 없음"이 맞다(승인 유지).
+    expect(mergeScenes(approved([dlg('하나', { 민주: '교복' })]), [scene('n1', '장면1', { lines: [dlg('하나')] })], 'merge')[0].status).toBe('approved');
+  });
+
+  it('줄 의상을 아무도 안 쓰면 기존 판정과 완전히 동일하다(회귀 0)', () => {
+    const prev: Scene[] = [scene('s1', '장면1', { status: 'approved', lines: [dlg('하나'), dlg('둘')] })];
+    const next: Scene[] = [scene('n1', '장면1', { lines: [dlg('하나'), dlg('둘')] })];
+    const result = mergeScenes(prev, next, 'merge');
+    expect(result[0].status).toBe('approved');
+    expect(diffMatchedScene(prev[0], next[0]).tagChanged).toBe(false);
+  });
+});

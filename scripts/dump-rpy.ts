@@ -89,6 +89,29 @@ function withOutfits(): Project {
   };
 }
 
+// 줄 단위 의상 전환(Line.outfits) 구성 — 장면 단위 의상만 쓰는 위 withOutfits() 와 달리, 같은
+// 캐릭터가 장면 도중 두 번 갈아입는 경로(생성기의 화자 show·비화자 동기화·숨김 복원)를 굳힌다.
+// 이 구성만 줄 override 를 쓰므로, 나머지 구성이 전부 동일해야 "안 켠 프로젝트 회귀 0"이 증명된다.
+function withLineOutfits(): Project {
+  const p = withOutfits();
+  const target = p.characters.find((c) => c.outfits?.length);
+  if (!target) return p;
+  const scIdx = p.scenes.findIndex((s) => s.lines.filter((l) => l.kind === 'dialogue').length >= 2);
+  if (scIdx < 0) return p;
+  let seen = 0;
+  const lines = p.scenes[scIdx].lines.map((l) => {
+    if (l.kind !== 'dialogue' && l.kind !== 'narration') return l;
+    seen += 1;
+    // 2번째 줄에서 기본으로, 3번째 줄에서 다시 교복으로 — 한 장면 안 2회 전환.
+    // (시작 의상이 규칙·장면 지정으로 이미 교복이라, 먼저 기본으로 갈아입어야 두 번 다 emit 된다 —
+    //  같은 의상을 재지정하면 생성기가 일부러 show 를 안 낸다. CLAUDE.md "덤프가 plain 과 같아지는" 함정.)
+    if (seen === 2) return { ...l, outfits: { [target.name]: '기본' } };
+    if (seen === 3) return { ...l, outfits: { [target.name]: '교복' } };
+    return l;
+  });
+  return { ...p, scenes: p.scenes.map((s, i) => (i === scIdx ? { ...s, lines } : s)) };
+}
+
 const configs: Record<string, Project> = {
   plain: base(),
   'genre-thriller': { ...base(), genre: 'thriller' },
@@ -111,6 +134,7 @@ const configs: Record<string, Project> = {
   'game-icon': { ...base(), gameIcon: { ico: 'a-ico', window: 'a-win' } },
   'menu-art': { ...base(), menuArt: { main: 'a-main' } },
   outfits: withOutfits(),
+  'outfits-line': withLineOutfits(),
 };
 for (const id of Object.keys(MAIN_MENU_PRESETS) as MainMenuPresetId[]) {
   configs[`preset-${id}`] = { ...base(), mainMenuUi: { preset: id } };

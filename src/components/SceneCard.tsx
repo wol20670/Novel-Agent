@@ -409,6 +409,15 @@ function LineRow({
                 </p>
               ) : null,
             )}
+            {/* 이 줄부터 갈아입는 의상(#복장 이 장면 도중에 나온 경우) — 대본이 만든 상태라 여기선
+                표시만 한다(편집은 장면 단위 👗 드롭다운, 줄 단위는 대본 태그로). CG/아이템 마커 칩과 같은 표현. */}
+            {line.outfits && Object.keys(line.outfits).length > 0 && (
+              <p className="text-[11px] pl-1">
+                <span className="rounded px-1.5 py-0.5 border border-teal-500/40 text-teal-500 bg-teal-500/5">
+                  👗 {Object.entries(line.outfits).map(([nm, o]) => `${nm}→${o}`).join(', ')}
+                </span>
+              </p>
+            )}
           </div>
         )}
 

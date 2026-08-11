@@ -65,3 +65,35 @@ describe('loadProject: project/assets 파싱 독립성(P0-4)', () => {
     expect(result!.assets).toEqual(assets);
   });
 });
+
+describe('save/load: 줄 단위 의상 전환(Line.outfits) 보존', () => {
+  it('저장 → 로드 후에도 줄 의상이 그대로 남는다(별도 마이그레이션 불필요)', () => {
+    const project: Project = {
+      ...emptyProject(),
+      scenes: [
+        {
+          id: 's1',
+          title: '카페',
+          direction: [],
+          cg: [],
+          choices: [],
+          status: 'approved',
+          outfits: { 히로인: '교복' },
+          lines: [
+            { kind: 'dialogue', speaker: '히로인', text: '하나' },
+            { kind: 'dialogue', speaker: '히로인', text: '둘', outfits: { 히로인: '사복' } },
+            { kind: 'narration', text: '지문', outfits: { 히로인: '수영복' } },
+          ],
+        },
+      ],
+    };
+    saveProject(project, {} as never);
+
+    const loaded = loadProject()!.project;
+    const lines = loaded.scenes[0].lines;
+    expect(loaded.scenes[0].outfits).toEqual({ 히로인: '교복' });
+    expect((lines[0] as { outfits?: unknown }).outfits).toBeUndefined();
+    expect((lines[1] as { outfits?: unknown }).outfits).toEqual({ 히로인: '사복' });
+    expect((lines[2] as { outfits?: unknown }).outfits).toEqual({ 히로인: '수영복' });
+  });
+});

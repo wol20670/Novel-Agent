@@ -82,6 +82,19 @@ export class SceneBuilder {
    * 장면이 그대로 끝나거나 새 장면이 시작되면(startScene) 소비되지 못한 채 조용히 버려진다.
    */
   private pendingHide?: boolean;
+  /**
+   * #복장 이 장면 도중(이미 대사/지문이 나온 뒤)에 나오면 여기 모았다가 다음에 push 되는
+   * dialogue/narration 줄이 소비한다(pendingHide 와 같은 관용구). 캐릭터별로 **머지**한다 —
+   * 다음 줄 전에 #복장 이 여러 번 나오면 누적되고, 같은 캐릭터를 다시 적으면 마지막 값이 이긴다.
+   * ⚠️ #아이템/#CG/#BGM 마커 라인은 이걸 소비하지 않는다(소비는 addDialogue/addNarration 두 곳뿐).
+   */
+  private pendingOutfits?: Record<string, string>;
+  /**
+   * 이 장면에서 지금까지 **소비된** 줄 전환의 누적 상태. 자동 분할(splitBeat)로 새 비트를 열 때
+   * "시각적 연속성"을 위해 새 장면의 시작 의상(Scene.outfits)으로 접어 넣는다.
+   * 배경 키워드 heuristic 의 결과는 여기 담지 않는다 — 그건 계속 resolveOutfit 이 판정한다.
+   */
+  private appliedOutfits: Record<string, string> = {};
 
   /** #S 가 나오기 전 본문이 들어오면 자동으로 도입 장면을 연다. */
   private ensureScene(): Scene {
@@ -108,6 +121,10 @@ export class SceneBuilder {
     this.current = this.newScene(title);
     this.scenes.push(this.current);
     this.pendingHide = undefined; // 새 장면으로 넘어가면 이전 장면에서 못 쓴 예약값은 버린다.
+    // 의상 줄 전환도 장면 경계에서 끊긴다(명시 #S 는 승계 없음 — 장면 독립성).
+    // 자동 분할(splitBeat)만 예외로, startScene 을 부르기 **전에** 값을 스냅샷해 새 장면에 접어 넣는다.
+    this.pendingOutfits = undefined;
+    this.appliedOutfits = {};
   }
 
   /** 분할 장면의 표시 제목 루트(기존 " · 배경" 접미를 떼어 원 #S 제목만). */
@@ -123,11 +140,18 @@ export class SceneBuilder {
    */
   private splitBeat(label: string, carryBackground?: string) {
     const root = this.current ? this.rootTitle(this.current.title) : '장면';
-    const carryOutfits = this.current?.outfits;
+    // startScene 이 줄 전환 상태를 리셋하므로 **호출 전에** 스냅샷을 뜬다. 새 비트의 시작 의상은
+    // "장면 시작 의상 + 지금까지 소비된 줄 전환 + 아직 소비 안 된 예약분"을 이 순서로 덮은 값
+    // (뒤가 이긴다) — 자동 분할은 시각적 연속이라 옷이 원상복귀하면 안 된다.
+    const carryOutfits = {
+      ...(this.current?.outfits ?? {}),
+      ...this.appliedOutfits,
+      ...(this.pendingOutfits ?? {}),
+    };
     this.startScene(`${root} · ${label}`);
     if (carryBackground) this.current!.background = carryBackground;
     // 의상은 명시 변경 전까지 유지(분할 비트에 이어받음).
-    if (carryOutfits) this.current!.outfits = { ...carryOutfits };
+    if (Object.keys(carryOutfits).length) this.current!.outfits = carryOutfits;
   }
 
   /** pendingHide 를 한 번만 소비(읽고 비움) — dialogue/narration 두 갈래가 공유. */
@@ -137,10 +161,28 @@ export class SceneBuilder {
     return v;
   }
 
+  /**
+   * pendingOutfits 를 한 번만 소비(읽고 비움) — dialogue/narration 두 갈래가 공유.
+   * 소비한 값은 appliedOutfits 에도 반영해 자동 분할 시 승계 대상이 되게 한다.
+   */
+  private consumePendingOutfits(): Record<string, string> | undefined {
+    const v = this.pendingOutfits;
+    this.pendingOutfits = undefined;
+    if (!v) return undefined;
+    this.appliedOutfits = { ...this.appliedOutfits, ...v };
+    return v;
+  }
+
+  /** 이 장면에 이미 대사/지문이 나왔는지 — #복장 의 "장면 맨 앞" 판정 기준. */
+  private hasSpokenLine(sc: Scene): boolean {
+    return sc.lines.some((l) => l.kind === 'dialogue' || l.kind === 'narration');
+  }
+
   addDialogue(speaker: string, text: string, emotion?: string, i18n?: I18nText) {
     const sc = this.ensureScene();
     const tr = normalizeI18n(i18n);
     const hideSprites = this.consumePendingHide();
+    const outfits = this.consumePendingOutfits();
 
     // 합동 대사: "한지수, 강민주" / "한지수 & 강민주" 처럼 둘 이상이 동시에 말하는 줄.
     // 멤버(실제 등록 이름) 각각을 캐릭터로 등록하고, 표시 라벨은 " & " 로 묶는다(유령 캐릭터 없음).
@@ -154,6 +196,7 @@ export class SceneBuilder {
         members,
         i18n: tr,
         hideSprites,
+        outfits,
       });
       return;
     }
@@ -169,12 +212,18 @@ export class SceneBuilder {
     // 표정 이름은 자유 문자열(사용자 커스텀 가능) → 비어있지 않으면 그대로 채택(작가 신뢰).
     const valid: Expression | undefined = emo ? emo : undefined;
     this.speakers.add(name);
-    sc.lines.push({ kind: 'dialogue', speaker: name, text: text.trim(), emotion: valid, i18n: tr, hideSprites });
+    sc.lines.push({ kind: 'dialogue', speaker: name, text: text.trim(), emotion: valid, i18n: tr, hideSprites, outfits });
   }
 
   addNarration(text: string, i18n?: I18nText) {
     const sc = this.ensureScene();
-    sc.lines.push({ kind: 'narration', text: text.trim(), i18n: normalizeI18n(i18n), hideSprites: this.consumePendingHide() });
+    sc.lines.push({
+      kind: 'narration',
+      text: text.trim(),
+      i18n: normalizeI18n(i18n),
+      hideSprites: this.consumePendingHide(),
+      outfits: this.consumePendingOutfits(),
+    });
   }
 
   /** #아이템 <이름> = 팝업 표시, #아이템끝 = 빈 이름(hide 마커). 라인 흐름 "그 위치"에 꽂힌다. */
@@ -223,18 +272,31 @@ export class SceneBuilder {
       sc.bgm = v;
     }
   }
-  /** #복장 "캐릭터:의상[, 캐릭터2:의상2]" — 이 장면에서 캐릭터별 의상을 지정. */
+  /**
+   * #복장 "캐릭터:의상[, 캐릭터2:의상2]" — 캐릭터별 의상 지정.
+   * 위치에 따라 두 갈래다(setBgm 의 위치 마커와 같은 문제의식):
+   *  · 장면 맨 앞(아직 대사/지문이 하나도 없음) → 장면 시작 의상 sc.outfits 에 머지(기존 동작).
+   *  · 장면 도중                                → pendingOutfits 에 머지 → 다음 대사/지문 줄이
+   *    소비해 Line.outfits 로 얹힌다(= 그 줄부터 갈아입는다).
+   * ⚠️ 판정 기준이 setBgm/setHideSprites 의 `lines.length` 와 다른 이유: #아이템·#CG·#BGM 은
+   * 마커 라인을 push 하므로 lines.length 로 재면 "#CG → #복장 → 첫 대사" 가 줄 전환으로 잘못
+   * 분류돼 기존 대본의 출력이 바뀐다. 여기만 "대사/지문이 나왔는지"로 잰다(다른 태그는 무변경).
+   */
   setOutfit(spec: string) {
     const sc = this.ensureScene();
-    const map = { ...(sc.outfits ?? {}) };
+    const parsed: Record<string, string> = {};
     for (const part of spec.split(',')) {
       const idx = part.search(/[:：]/);
       if (idx < 0) continue;
       const ch = part.slice(0, idx).trim();
       const outfit = part.slice(idx + 1).trim();
-      if (ch && outfit) map[ch] = outfit;
+      if (ch && outfit) parsed[ch] = outfit;
     }
-    sc.outfits = map;
+    if (this.hasSpokenLine(sc)) {
+      this.pendingOutfits = { ...(this.pendingOutfits ?? {}), ...parsed };
+    } else {
+      sc.outfits = { ...(sc.outfits ?? {}), ...parsed };
+    }
   }
   /**
    * #인물숨김/#인물표시 — setBgm 과 같은 규칙: 장면 맨 앞(아직 대사/지문 없음)이면 장면 시작 상태

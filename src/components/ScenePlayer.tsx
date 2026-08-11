@@ -21,7 +21,7 @@ import { gradientAlphaAt } from '../generators/image/canvasMenu';
 import {
   emojiFor,
   spriteAssetId,
-  resolveOutfit,
+  outfitFlags,
   spriteHiddenFlags,
   type Scene,
   type Character,
@@ -223,6 +223,17 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
   // 기존 동작과 동일.
   const hiddenFlags = useMemo(() => spriteHiddenFlags(scene), [scene]);
 
+  // 줄마다의 의상 — generate.ts(scriptBody)와 공유하는 단일 판정 소스(outfitFlags). 장면 단위
+  // resolveOutfit 을 직접 부르면 장면 도중의 #복장(줄 전환)을 미리보기가 놓쳐 실제 게임과 어긋난다.
+  // (장면,캐릭터)당 한 번만 계산해 재사용한다 — 생성기의 outfitAt 캐시와 같은 이유.
+  const outfitsByChar = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const c of characters) {
+      if (!c.isProtagonist) m.set(c.name, outfitFlags(scene, outfitRules, c.name));
+    }
+    return m;
+  }, [scene, characters, outfitRules]);
+
   // 현재 줄까지 각 캐릭터의 "최신 표정"(Ren'Py 처럼 마지막 표정 유지). 숨김 구간(hiddenFlags[k])에
   // 등장한 화자는 생성기(revealedOrder)와 동일하게 목록에 넣지 않는다 — 그래야 다시 표시로 돌아왔을
   // 때 숨김 중 처음 말한 캐릭터가 유령처럼 튀어나오지 않는다. 숨기기 전에 이미 서 있던 캐릭터는 이
@@ -282,7 +293,7 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
         {activeCgIdx < 0 && !hiddenFlags[i] && [...visible].map(([nm, ex]) => {
           const c = charByName.get(nm);
           return c ? (
-            <PreviewSprite key={nm} char={c} expr={ex} outfit={resolveOutfit(outfitRules, scene, nm)} xpct={positions.get(nm) ?? 50} k={charK} />
+            <PreviewSprite key={nm} char={c} expr={ex} outfit={outfitsByChar.get(nm)?.[i]} xpct={positions.get(nm) ?? 50} k={charK} />
           ) : null;
         })}
         {cur && (

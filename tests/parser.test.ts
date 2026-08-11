@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseText } from '../src/parser';
+import type { Line } from '../src/types';
 
 describe('parser: #아이템 / #아이템끝', () => {
   it('아이템 태그를 인라인 item 라인으로 파싱한다', () => {
@@ -125,5 +126,107 @@ describe('parser: #인물숨김 / #인물표시 (setBgm 과 같은 위치 마커
     expect(scenes[1].hideSprites).toBeUndefined();
     const line2 = scenes[1].lines[0] as Extract<(typeof scenes)[0]['lines'][number], { kind: 'dialogue' }>;
     expect(line2.hideSprites).toBeUndefined();
+  });
+});
+
+describe('parser: #복장 위치 의미(장면 시작 의상 vs 줄 단위 전환)', () => {
+  /** dialogue/narration 줄만 뽑아 (본문, 줄 의상) 쌍으로. */
+  function outfitLines(lines: readonly Line[]): [string, Record<string, string> | undefined][] {
+    return lines
+      .filter((l): l is Extract<Line, { kind: 'dialogue' | 'narration' }> =>
+        l.kind === 'dialogue' || l.kind === 'narration',
+      )
+      .map((l) => [l.text, l.outfits]);
+  }
+
+  it('장면 맨 앞의 #복장 은 기존처럼 장면 시작 의상(Scene.outfits)이 된다', () => {
+    const { scenes } = parseText(['#S 카페', '#복장 히로인:교복', '히로인: 안녕'].join('\n'));
+    expect(scenes[0].outfits).toEqual({ 히로인: '교복' });
+    expect(outfitLines(scenes[0].lines)).toEqual([['안녕', undefined]]);
+  });
+
+  it('#CG·#아이템 마커가 먼저 있어도 첫 대사/지문 전이면 Scene.outfits 다(기존 동작 보존)', () => {
+    const { scenes } = parseText(
+      ['#S 카페', '#CG 첫 컷', '#아이템 편지', '#복장 히로인:교복', '히로인: 안녕'].join('\n'),
+    );
+    expect(scenes[0].outfits).toEqual({ 히로인: '교복' });
+    expect(outfitLines(scenes[0].lines)).toEqual([['안녕', undefined]]);
+  });
+
+  it('장면 도중의 #복장 은 다음 대사 줄에 얹힌다(그 줄부터 전환)', () => {
+    const { scenes } = parseText(
+      ['#S 카페', '#복장 히로인:교복', '히로인: 하나', '#복장 히로인:사복', '히로인: 둘', '히로인: 셋'].join('\n'),
+    );
+    expect(scenes[0].outfits).toEqual({ 히로인: '교복' }); // 맨 앞 것만 장면 시작값
+    expect(outfitLines(scenes[0].lines)).toEqual([
+      ['하나', undefined],
+      ['둘', { 히로인: '사복' }],
+      ['셋', undefined],
+    ]);
+  });
+
+  it('지문 줄도 pending 을 소비한다', () => {
+    const { scenes } = parseText(['#S s', '히로인: 하나', '#복장 히로인:사복', '퇴근 시간이었다'].join('\n'));
+    expect(outfitLines(scenes[0].lines)).toEqual([
+      ['하나', undefined],
+      ['퇴근 시간이었다', { 히로인: '사복' }],
+    ]);
+  });
+
+  it('여러 캐릭터의 #복장 이 다음 줄 전에 나오면 캐릭터별로 누적된다', () => {
+    const { scenes } = parseText(
+      ['#S s', '히로인: 하나', '#복장 히로인:사복', '#복장 민주:교복', '민주: 둘'].join('\n'),
+    );
+    expect(outfitLines(scenes[0].lines)[1]).toEqual(['둘', { 히로인: '사복', 민주: '교복' }]);
+  });
+
+  it('한 줄에 쉼표로 여러 명을 적어도 같다', () => {
+    const { scenes } = parseText(['#S s', '히로인: 하나', '#복장 히로인:사복, 민주:교복', '민주: 둘'].join('\n'));
+    expect(outfitLines(scenes[0].lines)[1]).toEqual(['둘', { 히로인: '사복', 민주: '교복' }]);
+  });
+
+  it('같은 캐릭터를 다음 줄 전에 다시 지정하면 마지막 값이 이긴다', () => {
+    const { scenes } = parseText(
+      ['#S s', '히로인: 하나', '#복장 히로인:사복', '#복장 히로인:수영복', '히로인: 둘'].join('\n'),
+    );
+    expect(outfitLines(scenes[0].lines)[1]).toEqual(['둘', { 히로인: '수영복' }]);
+  });
+
+  it('#아이템·#CG·#BGM 마커는 pending 을 소비하지 않는다(다음 대사/지문까지 살아 있다)', () => {
+    const { scenes } = parseText(
+      ['#S s', '#BGM 첫곡', '히로인: 하나', '#복장 히로인:사복', '#아이템 편지', '#CG 컷', '히로인: 둘'].join('\n'),
+    );
+    const sc = scenes.find((s) => s.lines.some((l) => l.kind === 'dialogue' && l.text === '둘'))!;
+    const pairs = outfitLines(sc.lines);
+    expect(pairs[pairs.length - 1]).toEqual(['둘', { 히로인: '사복' }]);
+  });
+
+  it('자동 분할(#배경 변경)은 줄 전환 상태를 이어받는다 — 소비분·미소비 예약분 모두', () => {
+    const { scenes } = parseText(
+      [
+        '#S 카페',
+        '#배경 카페 안',
+        '히로인: 하나',
+        '#복장 히로인:사복',
+        '히로인: 둘', // 소비 → appliedOutfits
+        '#복장 민주:교복', // 미소비 pending
+        '#배경 길거리', // 자동 분할
+        '히로인: 셋',
+      ].join('\n'),
+    );
+    expect(scenes).toHaveLength(2);
+    expect(scenes[1].outfits).toEqual({ 히로인: '사복', 민주: '교복' });
+    expect(outfitLines(scenes[1].lines)).toEqual([['셋', undefined]]); // 시작 의상으로 접혔으므로 줄엔 없음
+  });
+
+  it('명시 #S 는 줄 전환 상태를 승계하지 않는다(장면 독립성)', () => {
+    const { scenes } = parseText(
+      ['#S 장면1', '히로인: 하나', '#복장 히로인:사복', '히로인: 둘', '#복장 민주:교복', '#S 장면2', '히로인: 셋'].join(
+        '\n',
+      ),
+    );
+    expect(scenes).toHaveLength(2);
+    expect(scenes[1].outfits).toBeUndefined();
+    expect(outfitLines(scenes[1].lines)).toEqual([['셋', undefined]]);
   });
 });

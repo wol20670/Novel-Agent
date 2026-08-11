@@ -98,6 +98,14 @@ export type Line =
        * 주인공처럼 얼굴 없이 대사만 내보내고 싶을 때 쓴다.
        */
       hideSprites?: boolean;
+      /**
+       * 이 줄부터 갈아입을 의상(캐릭터명 → 의상명). 장면 **도중**에 나온 `#복장` 태그가 다음
+       * 대사/지문 줄에 얹히는 값이라, 한 장면 안에서 같은 캐릭터가 여러 번 갈아입을 수 있다.
+       * 레코드엔 **그 시점에 실제로 바뀌는 캐릭터만** 담는다(적히지 않은 캐릭터는 앞 상태 유지 —
+       * hideSprites 의 줄 단위 override 와 같은 관용구). 장면 시작 의상은 Scene.outfits 이고,
+       * 최종 판정은 outfitFlags 단일 소스.
+       */
+      outfits?: Record<string, string>;
     }
   | {
       kind: 'narration';
@@ -106,6 +114,8 @@ export type Line =
       voiced?: boolean;
       /** dialogue 쪽과 완전히 같은 의미(3-state) — spriteHiddenFlags 참고. */
       hideSprites?: boolean;
+      /** dialogue 쪽과 완전히 같은 의미 — outfitFlags 참고(지문 줄에서도 의상이 바뀔 수 있다). */
+      outfits?: Record<string, string>;
     }
   /**
    * 아이템(소품) 팝업 인라인 이벤트. 태그 위치(그 순간)에 사물을 라이트박스로 잠깐 띄운다.
@@ -557,6 +567,27 @@ export function spriteHiddenFlags(scene: Scene): boolean[] {
       hidden = line.hideSprites;
     }
     flags.push(hidden);
+  }
+  return flags;
+}
+
+/**
+ * 장면의 줄마다 "이 캐릭터가 입고 있는 의상"을 판정하는 단일 소스 — generate.ts(scriptBody)와
+ * ScenePlayer 가 각자 계산하면 어긋나므로(spriteHiddenFlags 와 같은 규칙) 이 함수만 본다.
+ * 시작값은 기존 resolveOutfit(장면 직접 지정 > 배경 키워드 규칙 > '기본')이고, 각 줄의
+ * outfits(dialogue/narration 만 가짐)에 그 캐릭터가 적혀 있으면 **그 줄부터** 바뀐다.
+ * 줄에 안 적힌 캐릭터는 앞 상태를 그대로 유지한다.
+ * 동기·순수 함수 — 렌더 중에도 호출된다(ScenePlayer). (장면,캐릭터)당 한 번 계산해 재사용할 것.
+ */
+export function outfitFlags(scene: Scene, rules: OutfitRule[] | undefined, charName: string): string[] {
+  const flags: string[] = [];
+  let cur = resolveOutfit(rules, scene, charName);
+  for (const line of scene.lines) {
+    if (line.kind === 'dialogue' || line.kind === 'narration') {
+      const next = line.outfits?.[charName];
+      if (next) cur = next;
+    }
+    flags.push(cur);
   }
   return flags;
 }
