@@ -10,6 +10,7 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 ## 명령
 - `npm run dev`(5173) · `npm run build` · `npm run typecheck`(**코드 변경 후 항상**) · `npm run test`(vitest)
 - `npm run gen:lint` — 샘플 대본으로 `.lint-tmp/`에 실제 `.rpy` 생성(+참조 이미지 스텁). 이후 `renpy.exe .lint-tmp lint`. ⚠️ OneDrive에선 산출물은 정상인데 **exit 127로 죽는다**(위 함정) — 파일이 생겼으면 성공이다.
+- `npm run dump:rpy -- <OneDrive 밖 폴더>` — 21구성으로 `.rpy` 덤프(회귀 0 증명용). 작업 전 커밋에서 한 번, 작업 후 한 번 돌려 `diff -r`. 결정론적이라 같은 코드면 항상 같은 출력이다. 새 출력 경로·새 opt-in 기능을 만들면 **이 스크립트의 구성 목록에도 추가**할 것(안 그러면 그 경로는 회귀 대조에서 빠진다 — 실제로 의상 구성이 plain 과 똑같은 덤프를 내던 걸 잡았다).
 - `npm run test:e2e` — Playwright 풀 파이프라인(분석→업로드→ZIP 내용 검증). 빌드+프리뷰(4173)가 먼저 떠 있어야 한다. ⚠️ `npm run build` 는 위 OneDrive 함정으로 **조용히 죽고 옛 dist 가 남는다** — 그러면 e2e 가 몇 달 전 코드를 검사하고 통과한다. `npx vite build --outDir <스크래치>/dist --emptyOutDir` → `npx vite preview --outDir <스크래치>/dist --port 4173` 로 띄울 것(store/UI 리팩터의 유일한 실동작 안전망이라 여기서 속으면 안 된다).
 
 ## 환경 함정 (중요)

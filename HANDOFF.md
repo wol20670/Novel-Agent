@@ -4,7 +4,7 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **복장·표정 자동 추론(LLM) 도입 — Phase 단위 진행 중.** 규칙·진행 기록은 [`PHASES.md`](./PHASES.md)(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프). Phase 프롬프트는 사용자가 하나씩 준다.
+- **복장·표정 자동 추론(LLM) 도입 — Phase 단위 진행 중. 지금은 Phase 2 프롬프트 대기.** 규칙·Phase 로그·**Phase 1 확정 설계(장면 내 의상 전환)**는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프). Phase 프롬프트는 사용자가 하나씩 준다 — 미리 구현하지 말 것.
 - **타이틀 BGM 실기 청취 확인**(사용자) — 에셋 탭 🎵 BGM 맨 위에서 곡을 올리고 내보내 ① 타이틀에서 나오는지 ② "처음부터" 시작하면 첫 장면 곡으로 넘어가는지 ③ ESC→타이틀 복귀 때 다시 나오는지.
 
 ## 📌 알아둘 것 (지속)
@@ -16,6 +16,6 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **구조 리팩터(동작 변경 0)** — `store.ts`(2927줄) → `src/store/` 14파일(index=조립+초기 state 55줄, types=State 계약, context=공유 클로저, helpers=순수 함수, 슬라이스 10개), `LeftPanel.tsx`(1063→358줄) → `components/left/` 6파일, `types.ts`(1131줄) → `types/{project,menu,index}.ts`. **외부 API 무변경**(`from '../store'` 의 useStore·sceneById·Tab, `from '../types'` 그대로 — 컴포넌트·테스트 한 줄도 안 고침). 슬라이스끼리 import 금지(교차 호출은 `get().액션()`), 값 import 기준 순환 0(99파일 검사). 5커밋으로 나눠 진행했고 매 단계 **import 를 걷어낸 정렬 대조로 "로직 줄 동일"을 증명**했다.
-- ⚠️ **store 액션엔 단위 테스트가 여전히 없다** — 479개는 전부 생성기·파서·zip 쪽이라 이번 안전망은 typecheck(State 인터페이스) + e2e + 정렬 대조뿐이었다. 협업 push·자동저장 디바운스처럼 e2e 가 안 건드리는 경로는 사용자가 실제로 써봐야 확인된다.
-- `scripts/e2e.mjs`: 오래돼 깨져 있던 단언 2건 수정(show 문 속성 2개 정규식, 초기화 버튼 title 변경). 이제 e2e 전체 통과가 기준선이다.
+- **Phase 1 확정(코드 변경 없음)** — 장면 내 의상 전환 설계. 요약은 `PHASES.md`, 전체 분석은 플랜 파일. 구현은 Phase 2 프롬프트를 받은 뒤에.
+- **`npm run dump:rpy` 신설** — 21구성 `.rpy` 덤프(결정론적). 그동안 세션마다 임시로 만들던 회귀 0 증명 도구를 리포에 고정했다. 새 출력 경로를 만들면 구성 목록에 추가할 것.
+- **구조 리팩터(동작 변경 0)** — `store.ts`→`src/store/` 슬라이스 10개+골격 4개, `LeftPanel.tsx`→`components/left/` 6개, `types.ts`→`types/{project,menu}`. 외부 API·import 경로 무변경, 순환 0, 단계마다 정렬 대조로 로직 동일 증명. ⚠️ **store 액션엔 단위 테스트가 없다** — 안전망은 typecheck+e2e뿐이라 협업 push·자동저장 디바운스 같은 경로는 실사용 확인이 필요하다.

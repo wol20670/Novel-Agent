@@ -53,6 +53,10 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 - 음성 파일명이 줄 index를 굳힌다(`voiceBaseName`) — 무관한 선행 부채, 별도 Phase.
 
 **구현 순서**: 타입+`outfitFlags`+테스트 → 생성기(추출→②→①→`wanted`) → 미리보기 → 파서 → merge → (선택) 줄 UI.
+
+**Phase 2 착수 시 준비된 도구**
+- `npm run dump:rpy -- <스크래치>/before` 를 **코드 손대기 전에** 한 번 돌려둘 것(21구성 · 결정론적). 작업 후 같은 명령으로 `after` 를 만들어 `diff -r` → 줄 override 를 안 쓴 구성은 **한 구성도 달라지면 안 된다**. 이미 `outfits` 구성(장면 단위 의상 + 배경 키워드 규칙)이 들어 있어 기존 heuristic 보존도 함께 대조된다.
+- 빌드 확인은 `npx vite build --outDir <스크래치>/dist --emptyOutDir`(리포 안 `dist/` 는 조용히 죽는다), e2e 는 그 dist 로 `npx vite preview --outDir <스크래치>/dist --port 4173` 후 `npm run test:e2e`.
 **필수 검증**: override 없는 프로젝트 **출력 회귀 0**(덤프 `diff -r`) · 장면 내 2회 전환 · 타 화자 줄/narration 줄 전환 · hide 중 전환 후 복원 · 전환+show 같은 줄(show 개수 동일) · `splitBeat` 승계 및 `#S` 비승계 · 미등장 캐릭터 선변경 후 등장 · 의상에 그 표정 없음(문서화된 폴백 재현) · save/load · `.npproj.zip` · 재분석 후 유지 + **줄 의상만 바뀐 재분석에서 승인 리셋** · 미리보기/export 전이 시점 대조 · typecheck/test/빌드.
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
