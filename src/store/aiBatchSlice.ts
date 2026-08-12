@@ -3,7 +3,7 @@ import { translateModeOf, translateModelFor, baseLocaleOf } from '../types';
 import { collectUntranslated } from '../generators/translate/collect';
 import { translateBatch, chunkItems, isFatalTranslateError } from '../generators/translate';
 import { sleep } from '../generators/shared/retry';
-import { collectEmotionTargets, selectEmotionsBatch } from '../generators/emotion/aiSelect';
+import { collectEmotionTargets, planEmotionChunks, selectEmotionsBatch } from '../generators/emotion/aiSelect';
 import { estimateEmotionCost } from '../generators/emotion/estimate';
 import { buildSynopsis } from '../generators/theme';
 import type { State } from './types';
@@ -180,11 +180,10 @@ export const createAiBatchSlice: SliceCreator<
             continue;
           }
           let sceneFailed = false;
-          const chunks = chunkItems(batch.items, (it) => it.text.length);
-          // 청크 경계에서 감정 흐름이 끊기지 않도록 직전 청크의 마지막 몇 줄을 다음 청크 프롬프트에
-          // 읽기 전용 문맥으로 넘긴다(AI 응답이 아니라 원본 줄 — 다음 청크 호출 전에 이미 알 수 있다).
-          let prevContextLines: { speaker: string; text: string }[] = [];
-          for (const chunk of chunks) {
+          // target 청크 경계(40줄/4000자)는 그대로 두고, 각 요청에 실제 대본 기반의 읽기 전용 문맥을
+          // 얹은 계획을 받는다 — 견적(estimate.ts)이 세는 문맥과 같은 함수에서 나온다.
+          const plans = planEmotionChunks(batch);
+          for (const plan of plans) {
             if (callIndex > 0) await sleep(PACE_MS);
             callIndex++;
             // 후보는 배치 전체 맵을 그대로 넘긴다 — 프롬프트에 실을 그룹은 selectEmotionsBatch 가
@@ -192,7 +191,7 @@ export const createAiBatchSlice: SliceCreator<
             // "응답 검증에 쓰는 후보"가 두 곳에서 따로 정해져 어긋날 수 있다).
             try {
               const result = await selectEmotionsBatch(
-                chunk,
+                plan.items,
                 {
                   sceneTitle: scene.title,
                   background: scene.background,
@@ -201,11 +200,11 @@ export const createAiBatchSlice: SliceCreator<
                   synopsis,
                   candidatesByKey: batch.candidatesByKey,
                   expressionNotes: project.expressionNotes,
-                  prevContextLines,
+                  contextLines: plan.context,
                 },
                 key,
               );
-              for (const it of chunk) {
+              for (const it of plan.items) {
                 const expr = result[it.i];
                 if (!expr) continue; // 파싱 실패/후보 밖 — resolve.ts 의 휴리스틱 폴백에 맡긴다
                 let sceneUpdates = updates.get(batch.sceneId);
@@ -224,7 +223,6 @@ export const createAiBatchSlice: SliceCreator<
                 break outer;
               }
             }
-            prevContextLines = chunk.slice(-3).map((it) => ({ speaker: it.speaker, text: it.text }));
           }
           if (sceneFailed) failScenes++;
           doneScenes++;

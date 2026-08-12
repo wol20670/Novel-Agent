@@ -6,7 +6,8 @@
 //   - infer.ts    : 신호가 없을 때(또는 AI 미실행)의 결정적 오프라인 추론(inferEmotion) — API 키
 //                    없어도 항상 동작.
 //   - aiSelect.ts : 문맥 기반 AI 배정. 결과는 동기 판정에 못 쓰므로 미리 계산해 Line.emotionAuto 에
-//                    저장해두는 배치 작업(store.ts)에서만 쓰인다.
+//                    저장해두는 배치 작업(store.ts)에서만 쓰인다. 요청 하나가 무엇을 배정하고(items)
+//                    무엇을 읽기만 하는지(context)는 planEmotionChunks 가 정한다 — 실행·견적 공용.
 //   - estimate.ts : aiSelect 실행 전 비용(요청 수·토큰·USD) 어림 — API 호출 없는 순수 계산.
 //
 // 표정 "선택"은 여기서, 표정 "그림"(일관성 있는 스프라이트)은 외부 도구에서 만들어 업로드한다.
@@ -21,10 +22,13 @@ export {
 } from './resolve';
 export {
   collectEmotionTargets,
+  planEmotionChunks,
   selectEmotionsBatch,
   parseEmotionResponse,
   type EmotionItem,
   type EmotionBatch,
+  type EmotionChunkPlan,
+  type EmotionContextLine,
   type EmotionPromptCtx,
 } from './aiSelect';
 export { estimateEmotionCost, type EmotionCostEstimate } from './estimate';

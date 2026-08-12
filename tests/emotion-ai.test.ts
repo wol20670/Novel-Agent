@@ -3,14 +3,25 @@ import {
   candidateKey,
   collectEmotionTargets,
   parseEmotionResponse,
+  planEmotionChunks,
   selectEmotionsBatch,
   type EmotionItem,
 } from '../src/generators/emotion/aiSelect';
-import { outfitFlags, type Character, type Expression } from '../src/types';
+import { outfitFlags, type Character, type Expression, type Line } from '../src/types';
 import { scene, projectWith, dialogue } from './fixtures';
 
 function char(name: string, patch: Partial<Character> = {}): Character {
   return { name, color: '#ffffff', expressions: {}, ...patch };
+}
+
+/** 지문 한 줄 — 문맥 전용(절대 target 이 아니다). */
+function narration(text: string): Line {
+  return { kind: 'narration', text };
+}
+
+/** 스프라이트가 올라간 평범한 히로인(= AI target 이 될 수 있는 화자). */
+function heroine(name = '민주'): Character {
+  return char(name, { expressions: { 기본: 'a1', 기쁨: 'a2', 슬픔: 'a3' } });
 }
 
 /**
@@ -70,13 +81,13 @@ const abcCandidates = new Map<string, Expression[]>([
   [candidateKey('민주', '파티복'), ['기본', '파티복전용']],
 ]);
 
-/** 요청 페이로드(user 메시지)의 모양 — 조건부 필드(outfit/expressionNotes)는 optional. */
+/** 요청 페이로드(user 메시지)의 모양 — 조건부 필드(outfit/expressionNotes/context)는 optional. */
 interface CapturedUser {
   scene: string;
   synopsis?: string;
   candidates: { speaker: string; outfit?: string; candidates: string[] }[];
   expressionNotes?: Record<string, string>;
-  prevContext?: string[];
+  context?: { i: number; speaker?: string; text: string; expr?: string }[];
   items: { i: number; speaker: string; outfit?: string; text: string }[];
 }
 
@@ -318,7 +329,7 @@ describe('selectEmotionsBatch: 청크 경계·후보 그룹·문맥이 그대로
 
   const baseCtx = { sceneTitle: '장면1', direction: [] as string[], cg: [] as string[], synopsis: '요약' };
 
-  it('넘긴 items 만 그대로 요청 items 로 직렬화되고(청크 경계 보존), prevContextLines 도 함께 실린다', async () => {
+  it('넘긴 items 만 그대로 요청 items 로 직렬화되고(청크 경계 보존), contextLines 도 함께 실린다', async () => {
     const chunk: EmotionItem[] = [
       { i: 3, speaker: '민주', outfit: '기본', text: '세 번째 줄' },
       { i: 4, speaker: '민주', outfit: '기본', text: '네 번째 줄' },
@@ -330,7 +341,7 @@ describe('selectEmotionsBatch: 청크 경계·후보 그룹·문맥이 그대로
       {
         ...baseCtx,
         candidatesByKey: new Map([[candidateKey('민주', '기본'), ['기본', '기쁨']]]),
-        prevContextLines: [{ speaker: '민주', text: '직전 줄' }],
+        contextLines: [{ i: 2, speaker: '민주', text: '직전 줄' }],
       },
       'sk-test',
     );
@@ -338,10 +349,12 @@ describe('selectEmotionsBatch: 청크 경계·후보 그룹·문맥이 그대로
     expect(result).toEqual({ 3: '기쁨' });
     // 청크 경계 보존 — 넘긴 두 항목의 i 가 정확히 그대로, 더도 덜도 아니게 실린다.
     expect(captured.user!.items.map((it) => it.i)).toEqual([3, 4]);
-    expect(captured.user!.prevContext).toEqual(['민주: 직전 줄']);
+    // 문맥은 items 와 같은 i 좌표계를 쓰는 객체로 나간다(모델이 시간순으로 합칠 수 있어야 한다).
+    expect(captured.user!.context).toEqual([{ i: 2, speaker: '민주', text: '직전 줄' }]);
+    expect(captured.system).toContain('NEVER output a result for a "context" index');
   });
 
-  it('prevContextLines 가 없으면 prevContext 키 자체가 페이로드에서 빠진다', async () => {
+  it('contextLines 가 없으면 context 키도 안내 문장도 페이로드에서 빠진다', async () => {
     const captured = captureRequest();
 
     await selectEmotionsBatch(
@@ -350,7 +363,8 @@ describe('selectEmotionsBatch: 청크 경계·후보 그룹·문맥이 그대로
       'sk-test',
     );
 
-    expect(captured.user!.prevContext).toBeUndefined();
+    expect(captured.user!.context).toBeUndefined();
+    expect(captured.system).toBe(BASE_SYSTEM_PROMPT);
   });
 
   it('후보 맵에서 이 청크에 필요한 그룹만 싣되 순서는 맵의 삽입 순서를 따른다(요청 바이트 보존)', async () => {
@@ -422,6 +436,247 @@ describe('selectEmotionsBatch: 청크 경계·후보 그룹·문맥이 그대로
   });
 });
 
+/**
+ * F2/F3 — target 과 "읽기 전용 문맥"의 분리. 이 블록의 계약 한 줄:
+ * **target 여부는 그 줄이 문맥 source 에 있는지를 결정하지 않는다.** 예전엔 collectEmotionTargets 의
+ * return 하나가 "AI 결과 대상 아님"과 "프롬프트에서 삭제"를 동시에 결정해, 주인공 대사·지문·이미
+ * 배정된 줄이 LLM 입력에서 통째로 사라졌다.
+ */
+describe('collectEmotionTargets(F2/F3): 문맥 source 는 target gate 와 독립이다', () => {
+  const ctxIdx = (p: ReturnType<typeof collectEmotionTargets>[number]) => [...p.scriptLinesByIndex.keys()];
+
+  it('T1 — 주인공 대사는 target 이 아니지만 문맥에는 남는다', () => {
+    const sc = scene({
+      lines: [dialogue('주인공', '그 사람은 이제 돌아오지 않아.'), dialogue('민주', '...그렇구나.')],
+    });
+    const p = projectWith([sc], {
+      characters: [char('주인공', { isProtagonist: true }), heroine()],
+    });
+
+    const [batch] = collectEmotionTargets(p);
+    expect(batch.items.map((it) => it.i)).toEqual([1]); // 민주만 target
+    expect(ctxIdx(batch)).toEqual([0, 1]); // 주인공 줄도 source 에 있다
+    expect(batch.scriptLinesByIndex.get(0)).toEqual({
+      i: 0,
+      speaker: '주인공',
+      text: '그 사람은 이제 돌아오지 않아.',
+      expr: undefined,
+    });
+  });
+
+  it('T2 — 지문은 문맥에 들어가고(화자 없음) item/cg/bgm 줄은 문맥에도 안 들어간다', () => {
+    const sc = scene({
+      lines: [
+        narration('그녀는 억지로 웃었지만 손끝은 떨리고 있었다.'),
+        { kind: 'item', name: '열쇠' },
+        { kind: 'cg', desc: '노을' },
+        { kind: 'bgm', name: '테마' },
+        dialogue('민주', '괜찮아.'),
+      ],
+    });
+    const p = projectWith([sc], { characters: [heroine()] });
+
+    const [batch] = collectEmotionTargets(p);
+    expect(batch.items.map((it) => it.i)).toEqual([4]);
+    expect(ctxIdx(batch)).toEqual([0, 4]); // 아이템·CG·BGM 줄은 대사 텍스트가 아니라 제외
+    expect(batch.scriptLinesByIndex.get(0)!.speaker).toBeUndefined();
+  });
+
+  it('T3 — 작가가 표정을 적은 줄은 target 이 아니지만 그 표정이 문맥 metadata 로 나간다', () => {
+    const sc = scene({
+      lines: [dialogue('민주', '됐어.', { emotion: '슬픔' }), dialogue('민주', '이제 가자.')],
+    });
+    const p = projectWith([sc], { characters: [heroine()] });
+
+    const [batch] = collectEmotionTargets(p);
+    expect(batch.items.map((it) => it.i)).toEqual([1]);
+    expect(batch.scriptLinesByIndex.get(0)).toEqual({ i: 0, speaker: '민주', text: '됐어.', expr: '슬픔' });
+  });
+
+  it('T4 — 이미 AI 가 배정한 줄도 target 에서만 빠지고 문맥에는 기존 값과 함께 남는다', () => {
+    const sc = scene({
+      lines: [dialogue('민주', '아까 그 말.', { emotionAuto: '기쁨' }), dialogue('민주', '지금은?')],
+    });
+    const p = projectWith([sc], { characters: [heroine()] });
+
+    const [batch] = collectEmotionTargets(p);
+    expect(batch.items.map((it) => it.i)).toEqual([1]);
+    expect(batch.scriptLinesByIndex.get(0)!.expr).toBe('기쁨');
+  });
+
+  it('T5 — 합동 대사는 target 이 아니지만 묶음 라벨 그대로 문맥에 남는다', () => {
+    const sc = scene({
+      lines: [
+        dialogue('한지수 & 강민주', '같이 말함', { members: ['한지수', '강민주'] }),
+        dialogue('민주', '너희 뭐야.'),
+      ],
+    });
+    const p = projectWith([sc], {
+      characters: [char('한지수', { expressions: { 기본: 'a1' } }), char('강민주', { expressions: { 기본: 'a2' } }), heroine()],
+    });
+
+    const [batch] = collectEmotionTargets(p);
+    expect(batch.items.map((it) => it.i)).toEqual([1]);
+    expect(batch.scriptLinesByIndex.get(0)!.speaker).toBe('한지수 & 강민주');
+    // members 배열은 문맥에 싣지 않는다(후보 키와 무관한 이름이 페이로드에 늘어날 뿐).
+    expect(batch.scriptLinesByIndex.get(0)).not.toHaveProperty('members');
+  });
+
+  it('T6 — 그 줄 의상에 후보가 없어 빠진 줄, 미등록 화자의 줄도 문맥에는 남는다', () => {
+    const sc = scene({
+      lines: [
+        dialogue('그림없음', '난 아직 스프라이트가 없어'),
+        dialogue('행인A', '난 등록도 안 됐어'),
+        dialogue('민주', '그래도 대화는 이어진다.'),
+      ],
+    });
+    const p = projectWith([sc], {
+      characters: [char('그림없음', { expressions: {} }), heroine()],
+    });
+
+    const [batch] = collectEmotionTargets(p);
+    expect(batch.items.map((it) => it.i)).toEqual([2]);
+    expect(ctxIdx(batch)).toEqual([0, 1, 2]);
+  });
+
+  it('T14 — 빈 텍스트 줄은 문맥에서만 빠진다(target 자격은 기존 그대로 유지)', () => {
+    const sc = scene({
+      lines: [dialogue('민주', ''), dialogue('민주', '   '), dialogue('민주', '진짜 대사')],
+    });
+    const p = projectWith([sc], { characters: [heroine()] });
+
+    const [batch] = collectEmotionTargets(p);
+    // 기존 collectEmotionTargets 에는 텍스트 검사가 없었다 — 여기에 끼우면 조용한 target 축소(회귀)다.
+    expect(batch.items.map((it) => it.i)).toEqual([0, 1, 2]);
+    expect(ctxIdx(batch)).toEqual([2]); // 빈 줄은 토큰만 먹으므로 문맥에서만 제외
+  });
+});
+
+/** 요청 하나가 무엇을 배정하고(items) 무엇을 읽기만 하는지(context) 정하는 planEmotionChunks. */
+describe('planEmotionChunks: 실제 장면 흐름 기반 bounded 문맥 window', () => {
+  const idxOf = (lines: { i: number }[]) => lines.map((l) => l.i);
+  const charsOf = (lines: { text: string }[]) => lines.reduce((s, l) => s + l.text.length, 0);
+
+  /** 40 target 청크 경계를 실제로 넘기면서 경계 부근에 문맥 전용 줄 3종을 끼운 장면. */
+  function crossChunkProject() {
+    const lines: Line[] = [];
+    for (let n = 0; n < 38; n += 1) lines.push(dialogue('민주', `앞대사${n}`)); // 0..37 target
+    lines.push(dialogue('주인공', '내가 말한다')); // 38 문맥
+    lines.push(narration('바람이 불었다')); // 39 문맥
+    lines.push(dialogue('민주', '이미 정함', { emotion: '슬픔' })); // 40 문맥(표정 보유)
+    for (let n = 0; n < 7; n += 1) lines.push(dialogue('민주', `뒷대사${n}`)); // 41..47 target
+    const p = projectWith([scene({ lines })], {
+      characters: [char('주인공', { isProtagonist: true }), heroine()],
+    });
+    return collectEmotionTargets(p)[0];
+  }
+
+  it('T7 — 두 번째 요청의 문맥이 "직전 target 3개"가 아니라 실제 장면 window 다', () => {
+    const plans = planEmotionChunks(crossChunkProject());
+
+    expect(plans).toHaveLength(2);
+    expect(idxOf(plans[0].items)).toHaveLength(40); // 청크 경계는 기존 40줄 상한 그대로
+    expect(idxOf(plans[1].items)).toEqual([43, 44, 45, 46, 47]);
+
+    const ctx2 = plans[1].context;
+    // ① 직전 청크에서 **평범한 target 이었던** 대사도 이제 읽기 전용 문맥으로 보인다
+    expect(idxOf(ctx2)).toContain(37);
+    expect(idxOf(ctx2)).toContain(42);
+    // ② 주인공 ③ 지문 ④ 이미 표정이 있는 줄 — 전부 같은 시간축에
+    expect(ctx2.find((c) => c.i === 38)!.speaker).toBe('주인공');
+    expect(ctx2.find((c) => c.i === 39)!.speaker).toBeUndefined();
+    expect(ctx2.find((c) => c.i === 40)!.expr).toBe('슬픔');
+    // 시간순 + 이번 요청의 target 은 문맥에 중복되지 않는다
+    expect(idxOf(ctx2)).toEqual([...idxOf(ctx2)].sort((a, b) => a - b));
+    expect(idxOf(ctx2).some((i) => idxOf(plans[1].items).includes(i))).toBe(false);
+    expect(Math.max(...idxOf(ctx2))).toBeLessThanOrEqual(Math.max(...idxOf(plans[1].items)));
+
+    // 첫 요청도 자기 구간 안에 낀 문맥 전용 줄을 본다(예전엔 청크 안의 줄도 사라졌다)
+    expect(idxOf(plans[0].context)).toEqual([38, 39, 40]);
+
+    // target 은 하나도 누락되지 않는다
+    expect(plans.flatMap((p) => idxOf(p.items))).toHaveLength(45);
+  });
+
+  it('T7b — 문맥 전용 줄이 하나도 없는 장면에서도 두 번째 요청의 문맥이 비지 않는다(옛 prevContext 회귀 방지)', () => {
+    const lines = Array.from({ length: 45 }, (_, n) => dialogue('민주', `대사${n}`));
+    const p = projectWith([scene({ lines })], { characters: [heroine()] });
+    const plans = planEmotionChunks(collectEmotionTargets(p)[0]);
+
+    expect(plans).toHaveLength(2);
+    // 첫 요청: 앞선 textual 줄이 전부 자기 target 이라 문맥이 비는 게 정상
+    expect(plans[0].context).toEqual([]);
+    // 두 번째 요청: **비면 안 된다.** 직전 청크의 실제 대사들이 읽기 전용으로 들어온다.
+    expect(plans[1].context.length).toBeGreaterThan(0);
+    expect(idxOf(plans[1].context)).toEqual(Array.from({ length: 40 }, (_, n) => n));
+    expect(idxOf(plans[1].items)).toEqual([40, 41, 42, 43, 44]);
+    expect(idxOf(plans[1].context).some((i) => idxOf(plans[1].items).includes(i))).toBe(false);
+  });
+
+  it('T11 — 긴 장면에서 문맥이 상한 안에 머물고, 잘리는 쪽은 언제나 오래된 앞부분이다', () => {
+    const text = '가'.repeat(30);
+    const lines: Line[] = Array.from({ length: 200 }, (_, n) =>
+      n % 10 === 9 ? narration(text) : dialogue('민주', text),
+    );
+    const p = projectWith([scene({ lines })], { characters: [heroine()] });
+    const plans = planEmotionChunks(collectEmotionTargets(p)[0]);
+
+    const textualIdx = lines.map((_, i) => i).filter((i) => lines[i].kind === 'dialogue' || lines[i].kind === 'narration');
+    for (const plan of plans) {
+      const lastI = plan.items[plan.items.length - 1].i;
+      const targets = new Set(idxOf(plan.items));
+      // 기대값 = "lastTarget 까지의 모든 대본 줄 − 이번 요청의 target" 의 **뒤에서** 60줄
+      // (줄당 30자라 60줄 = 1800자로 글자 상한 2000 안 — 줄 상한이 먼저 물린다).
+      const pool = textualIdx.filter((i) => i <= lastI && !targets.has(i));
+      expect(idxOf(plan.context)).toEqual(pool.slice(Math.max(0, pool.length - 60)));
+      expect(plan.context.length).toBeLessThanOrEqual(60);
+      expect(charsOf(plan.context)).toBeLessThanOrEqual(2000);
+    }
+    expect(plans.some((pl) => pl.context.length === 60)).toBe(true); // 상한이 실제로 물렸다
+    // 어느 요청에서도 미래 줄을 미리 읽지 않는다 + target 누락 0
+    for (const plan of plans) {
+      expect(Math.max(...idxOf(plan.context))).toBeLessThan(plan.items[plan.items.length - 1].i);
+    }
+    expect(plans.flatMap((pl) => idxOf(pl.items))).toHaveLength(180);
+  });
+
+  it('줄 수는 적어도 글자 수가 크면 글자 상한이 문맥을 자른다', () => {
+    const long = '나'.repeat(600);
+    const lines: Line[] = [
+      narration(long), // 0 — 잘려나갈 오래된 문맥
+      narration(long), // 1
+      narration(long), // 2
+      narration(long), // 3
+      dialogue('민주', '마지막 한 줄'), // 4 target
+    ];
+    const p = projectWith([scene({ lines })], { characters: [heroine()] });
+    const [plan] = planEmotionChunks(collectEmotionTargets(p)[0]);
+
+    // 4줄 × 600자 = 2400자 > 2000 → 가장 오래된 한 줄만 버려 1800자로 맞춘다.
+    expect(idxOf(plan.context)).toEqual([1, 2, 3]);
+    expect(charsOf(plan.context)).toBeLessThanOrEqual(2000);
+  });
+});
+
+describe('parseEmotionResponse(F2/F3): 문맥 줄 인덱스는 쓰기 대상이 아니다', () => {
+  it('T8 — 모델이 context 의 i 로 결과를 돌려줘도 저장되지 않고, 같은 응답의 target 결과는 그대로 채택된다', () => {
+    const sc = scene({
+      lines: [
+        dialogue('주인공', '주인공 대사'), // 0 — 문맥 전용
+        narration('지문'), // 1 — 문맥 전용
+        dialogue('민주', '진짜 target'), // 2
+      ],
+    });
+    const p = projectWith([sc], { characters: [char('주인공', { isProtagonist: true }), heroine()] });
+    const batch = collectEmotionTargets(p)[0];
+    const [plan] = planEmotionChunks(batch);
+
+    // 문맥 줄 인덱스에 **유효한 후보 이름**을 실어 보낸다 — 후보 검증만으로는 못 거른다.
+    const raw = '{"results":[{"i":0,"expr":"기쁨"},{"i":1,"expr":"슬픔"},{"i":2,"expr":"슬픔"}]}';
+    expect(parseEmotionResponse(raw, plan.items, batch.candidatesByKey)).toEqual({ 2: '슬픔' });
+  });
+});
+
 describe('selectEmotionsBatch(F4): 표정 설명은 metadata 일 뿐 후보 identity 가 아니다', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -483,5 +738,81 @@ describe('selectEmotionsBatch(F4): 표정 설명은 metadata 일 뿐 후보 iden
     const result = await selectEmotionsBatch(noteItems, ctx({ '옅은 미소': '살짝 웃는 표정' }), 'sk-test');
 
     expect(result).toEqual({});
+  });
+});
+
+/** collect → plan → 요청 페이로드까지 실제 경로를 한 번에 태워 "선 위의 모양"을 고정한다. */
+describe('문맥 파이프라인 end-to-end: 대본 → 계획 → 요청 페이로드', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const send = async (p: ReturnType<typeof projectWith>) => {
+    const batch = collectEmotionTargets(p)[0];
+    const [plan] = planEmotionChunks(batch);
+    const captured = captureRequest();
+    await selectEmotionsBatch(
+      plan.items,
+      {
+        sceneTitle: '장면1',
+        direction: [],
+        cg: [],
+        synopsis: '',
+        candidatesByKey: batch.candidatesByKey,
+        expressionNotes: p.expressionNotes,
+        contextLines: plan.context,
+      },
+      'sk-test',
+    );
+    return captured;
+  };
+
+  it('지문의 speaker 는 선 위에서 키째로 사라지고, 표정 있는 줄만 expr 을 달고 나간다', async () => {
+    const sc = scene({
+      lines: [
+        dialogue('주인공', '주인공 대사'),
+        narration('지문 한 줄'),
+        dialogue('민주', '이미 정함', { emotion: '슬픔' }),
+        dialogue('민주', '진짜 target'),
+      ],
+    });
+    const captured = await send(
+      projectWith([sc], { characters: [char('주인공', { isProtagonist: true }), heroine()] }),
+    );
+
+    expect(captured.user!.items.map((it) => it.i)).toEqual([3]);
+    expect(captured.user!.context).toEqual([
+      { i: 0, speaker: '주인공', text: '주인공 대사' },
+      { i: 1, text: '지문 한 줄' }, // speaker 키 자체가 없다
+      { i: 2, speaker: '민주', text: '이미 정함', expr: '슬픔' },
+    ]);
+    expect(Object.keys(captured.user!.context![1])).not.toContain('speaker');
+    expect(captured.system).toContain('NEVER output a result for a "context" index');
+  });
+
+  it('후보가 없어 target 에서 빠진 화자의 후보 그룹은 문맥에 남아도 페이로드에 실리지 않는다(F1 후보 확대 금지)', async () => {
+    const sc = scene({
+      lines: [dialogue('그림없음', '난 스프라이트가 없어'), dialogue('민주', '그래도 이어진다')],
+    });
+    const captured = await send(
+      projectWith([sc], { characters: [char('그림없음', { expressions: {} }), heroine()] }),
+    );
+
+    expect(captured.user!.candidates.map((c) => c.speaker)).toEqual(['민주']);
+    expect(captured.user!.context!.map((c) => c.speaker)).toEqual(['그림없음']);
+  });
+
+  it('T13 — 문맥이 붙을 게 없는 baseline(단일 청크·의상 전환 없음·설명 없음)은 예전 요청과 완전히 같다', async () => {
+    // 조건부 규칙 3개가 전부 꺼진 구성이어야 이 동치 비교가 의미를 가진다:
+    // 선행 문맥 줄 없음(모든 줄이 자기 target) · 한 화자 한 벌 · expressionNotes 없음.
+    const sc = scene({
+      lines: [dialogue('민주', '첫 줄'), dialogue('민주', '둘째 줄'), dialogue('민주', '셋째 줄')],
+    });
+    const captured = await send(projectWith([sc], { characters: [heroine()] }));
+
+    expect(captured.user!.context).toBeUndefined();
+    expect(captured.user!.items.map((it) => it.i)).toEqual([0, 1, 2]);
+    expect(JSON.stringify(captured.user)).not.toContain('context');
+    expect(captured.system).toBe(BASE_SYSTEM_PROMPT);
   });
 });
