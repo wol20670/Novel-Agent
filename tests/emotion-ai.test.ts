@@ -15,7 +15,8 @@ function char(name: string, patch: Partial<Character> = {}): Character {
 
 /**
  * aiSelect.ts 의 기본 지시문 사본. 줄 단위 의상 전환도 표정 설명도 없는 프로젝트는 프롬프트가
- * 예전과 한 바이트도 달라지면 안 되므로(temperature 0 이라 배정 결과까지 같다) 여기에 못을 박는다.
+ * 예전과 한 바이트도 달라지면 안 되므로(입력이 같아야 temperature 0 의 재현성이 유지된다 — 모델
+ * 쪽 비결정성까지 없애진 못하니 "결과 동일"까지는 아니다) 여기에 못을 박는다.
  * 조건부 문장(의상 구분 안내·설명 안내)이 실수로 무조건 붙게 되면 이 사본과 어긋나 즉시 드러난다.
  */
 const BASE_SYSTEM_PROMPT =

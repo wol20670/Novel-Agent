@@ -26,7 +26,8 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 1 | 복장 시스템 분석 + 장면 내 의상 전환 설계(**코드 변경 없음**) | ✅ 확정 (3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
 | 2 | 장면 내 수동 의상 전환 구현 | ✅ 확정 | `7dbfaaa` (보정 `ec7bc04`) | typecheck · vitest 42파일/517 · 기존 `.rpy` 21구성 바이트 회귀 0 + 신규 `outfits-line` 정상 · 스크래치 빌드+e2e · Ren'Py lint 에러 0 · save/load·`.npproj.zip` 왕복 |
 | 3 | 기존 표정 AI end-to-end audit(**코드 변경 없음**) | ✅ 확정 (3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
-| 4 | 표정 AI correctness — F1(줄 시점 의상) + F4(표정 설명 identity) | ⏳ | | |
+| 4 | 표정 AI correctness — F1(줄 시점 의상) + F4(표정 설명 identity) | ✅ 확정 (2차 리뷰 반영) | `558f18e` | typecheck · vitest 42파일/532 · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 |
+| 5 | 표정 AI 문맥 품질(F2/F3) | ⏳ | | |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -79,6 +80,33 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 **Phase 4 범위 = F1 + F4 correctness만.** 제외: F2/F3 문맥 품질 · 실행 중 취소 UX · 장면 단위 재실행 · `emotionAuto`만 비우는 UI · review modal · suggestion staging · provenance · deterministic smoothing/state machine · stable Line ID · timeline/event 엔진 · 범용 AI 인프라 리팩터 · 표정 AI 전면 재작성 · 의상 AI · 미리보기/export 폴백 통일 · merge 재설계.
 
 **Phase 4 검증**: 같은 장면·**같은 청크**에서 동일 화자가 A→B→C로 갈아입는 케이스로 ① 줄별 effective outfit ② 줄별 허용 후보 ③ 이전 의상 전용 후보 제외 ④ 새 의상 전용 후보 포함 ⑤ 파싱이 줄별 올바른 후보로 검증 — 다섯을 직접 검증한다. F4는 구현 중립으로 ① 설명이 있는 프로젝트에서 정상 배정 성립 ② 저장값이 `project.expressions` 원문과 일치 ③ 후보 밖은 여전히 거부 ④ 설명이 없으면 기존 동작 불변. `npm run dump:rpy` before/after `diff -r` 은 **전체 회귀 안전망**으로 유지하되 **F1 의 직접 증명이 아니다**(위 단위 테스트가 증명한다).
+
+## Phase 4 확정 설계 — 표정 AI correctness (구현 `558f18e`)
+
+**F1 — 후보 키가 화자 하나 → `(화자, 의상)`.** `EmotionItem` 이 자기 줄의 `outfit` 을 들고 다니고,
+`EmotionBatch.candidatesByKey` 가 `candidateKey(화자, 의상)`(= `JSON.stringify([speaker, outfit])`,
+구분자 문자를 박지 않아 이름에 뭐가 들어와도 안 겹친다) 로 후보를 담는다. 줄 시점 의상은
+**`outfitFlags` 단일 소스**를 (장면,캐릭터)당 한 번 계산해 재사용한다(`aiSelect.ts` 안에 의상 fold 를
+새로 만들지 않는다 — `resolveOutfit` 직접 호출은 사라졌다). 프롬프트·응답 검증이 **같은 줄의 후보
+집합 하나**만 본다: `parseEmotionResponse` 는 `i → item → candidateKey` 로 조회하므로 전환 전 의상에만
+있는 표정은 전환 뒤 줄에서 거부된다. "그 줄 의상에 스프라이트가 하나도 없음" 판정도 화자 단위가
+아니라 **줄 단위**가 됐다(그 줄만 대상에서 빠진다).
+→ Phase 1 의 known limitation "AI 표정 후보가 장면 단위" 는 이걸로 해소됐다.
+
+**F4 — 설명은 metadata, identity 는 canonical 하나.** 후보 라벨에 `표정명(설명)` 으로 결합하던 걸 없애고
+`expressionNotes` 를 **별도 payload 키**로 보낸다(그 청크 후보에 실제로 실린 표정의 설명만). 파서·저장은
+그대로라 성공값은 항상 `project.expressions` 원문이고 후보 밖 응답은 계속 거부된다 — **괄호 제거·fuzzy
+매칭·display 문자열 허용은 넣지 않았다.**
+
+**기존 동작 보존(테스트로 고정)**: 줄 단위 전환도 표정 설명도 없는 프로젝트는 요청 페이로드와 기본
+지시문이 **바이트 단위로 예전과 같다.** 조건부는 둘 다 **그 청크에 실제로 필요할 때만** 켜진다 —
+`disambiguate` = *같은 화자*가 이 청크에서 2벌 이상(화자마다 한 벌씩이면 꺼짐), `hasNotes` = *이 청크
+후보에 실린* 표정 중 설명 보유(프로젝트 전체 유무가 아니다). 후보 그룹 순서는 items 등장 순서가 아니라
+**`candidatesByKey` 삽입 순서**를 따른다(items 순서로 새로 만들면 뒤쪽 청크에서 화자 순서가 뒤집힌다).
+
+**손대지 않은 것**: `resolve.ts` 우선순위 사슬 · `availableExpressions`/`effectiveExpressions` 역할 분리 ·
+`estimate.ts` · `applyEmotionUpdates` · 저장/zip/협업/merge/미리보기/export · 배치 골격 · stable Line ID 없음.
+`Line`/`Project` 에 새 필드가 없다(`outfit` 은 배치 실행 중에만 존재하는 파생값)라 저장 포맷 변화도 없다.
 
 **Phase 5 재정의**: 기존의 smoothing/표정 state-machine 성격 Phase 는 **진행하지 않는다.** 남긴다면 **"표정 AI 문맥 품질 개선"**(F2/F3 전용)으로 축소한다. 위의 구조적 사실은 이미 확정됐으니 다시 재평가하지 말고, **어디까지 문맥을 넣을지(지문 포함 여부·기존 표정 값 포함 여부·창 크기)와 토큰·비용 대비 품질 향상이 있는지**만 실측으로 정한다. deterministic smoothing 은 문맥 개선 뒤에도 필요성이 입증될 때만 다시 본다. 실키 검증이 최후순위 연기 상태라 착수 시점은 보류 가능.
 

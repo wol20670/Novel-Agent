@@ -122,7 +122,8 @@ function normalizeLabel(s: string): string {
 }
 
 // 기본 지시문 — **이 문자열은 바꾸지 않는다.** 줄 단위 의상 전환도 표정 설명도 없는 프로젝트는
-// 프롬프트가 예전과 한 바이트도 달라지지 않아야 한다(temperature 0 이라 배정 결과까지 같다).
+// 프롬프트가 예전과 한 바이트도 달라지지 않아야 한다: 입력이 같아야 temperature 0 의 재현성이
+// 그대로 유지된다(모델 쪽 비결정성까지 없앨 수는 없으니 "배정 결과 동일"을 보장하진 못한다).
 const BASE_SYSTEM_PROMPT =
   'You are a visual-novel director choosing character facial expressions from scene context. ' +
   "For each dialogue line, pick exactly ONE expression from that speaker's candidate list — " +
