@@ -27,7 +27,7 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 2 | 장면 내 수동 의상 전환 구현 | ✅ 확정 | `7dbfaaa` (보정 `ec7bc04`) | typecheck · vitest 42파일/517 · 기존 `.rpy` 21구성 바이트 회귀 0 + 신규 `outfits-line` 정상 · 스크래치 빌드+e2e · Ren'Py lint 에러 0 · save/load·`.npproj.zip` 왕복 |
 | 3 | 기존 표정 AI end-to-end audit(**코드 변경 없음**) | ✅ 확정 (3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
 | 4 | 표정 AI correctness — F1(줄 시점 의상) + F4(표정 설명 identity) | ✅ 확정 (2차 리뷰 반영) | `558f18e` | typecheck · vitest 42파일/532 · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 |
-| 5 | 표정 AI 문맥 품질(F2/F3) | ⏳ | | |
+| 5 | 표정 AI 문맥 품질(F2/F3) | ✅ 확정 (v2 리뷰 반영) | `e1c1adf` | typecheck · vitest 42파일/549(532→+17) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 200줄 합성 장면 구조 실측 |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -109,6 +109,50 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 `Line`/`Project` 에 새 필드가 없다(`outfit` 은 배치 실행 중에만 존재하는 파생값)라 저장 포맷 변화도 없다.
 
 **Phase 5 재정의**: 기존의 smoothing/표정 state-machine 성격 Phase 는 **진행하지 않는다.** 남긴다면 **"표정 AI 문맥 품질 개선"**(F2/F3 전용)으로 축소한다. 위의 구조적 사실은 이미 확정됐으니 다시 재평가하지 말고, **어디까지 문맥을 넣을지(지문 포함 여부·기존 표정 값 포함 여부·창 크기)와 토큰·비용 대비 품질 향상이 있는지**만 실측으로 정한다. deterministic smoothing 은 문맥 개선 뒤에도 필요성이 입증될 때만 다시 본다. 실키 검증이 최후순위 연기 상태라 착수 시점은 보류 가능.
+
+## Phase 5 확정 설계 — 표정 AI 실제 장면 문맥 (구현 `e1c1adf`)
+
+**계약 한 줄(설계 불변식)**: *target 여부는 그 줄이 장면 문맥 source 에 존재하는지를 결정하지 않는다.
+**현재 요청의 target 인 줄만** 그 요청의 context 에서 빠진다.* 예전엔 `collectEmotionTargets` 의 `return`
+하나가 "AI 결과 대상 아님"과 "프롬프트에서 삭제"를 동시에 결정해, 주인공 대사·지문·합동 대사·이미
+배정된 줄·후보 0인 줄이 LLM 입력에서 통째로 사라졌다(F2/F3).
+
+**문맥 source** — `EmotionBatch.scriptLinesByIndex`(런타임 전용, scene line index → 문맥 줄, 삽입 순서 =
+시간 순서). 담는 것: 일반 dialogue·**AI target dialogue**·주인공·지문·합동 대사·`emotion` 보유·`emotionAuto`
+보유·미등록 화자·그 줄 의상에 후보가 없어 target 이 못 된 dialogue. 빼는 것: `item`/`cg`/`bgm`, 빈 텍스트.
+⚠️ **빈 텍스트 필터는 문맥 쪽에만 건다** — 기존 target gate 엔 텍스트 검사가 없어서 거기 끼우면 빈 대사의
+target 자격이 조용히 사라진다(회귀).
+
+**문맥 window** — `planEmotionChunks`(실행·견적 **공용 단일 소스**). target 청크 경계(40줄/4000자)는 그대로
+두고 요청마다 문맥만 얹는다: ① `i ≤ 이 청크의 마지막 target` 인 대본 줄 ② **이 요청의 target 제외**
+③ 시간순 유지 ④ 최대 60줄 ⑤ 최대 2000자 ⑥ 초과분은 **오래된 앞쪽부터** 제거 ⑦ **look-ahead 없음**.
+같은 줄이 앞 요청에선 target, 뒤 요청에선 읽기 전용 문맥이 되는 것은 **정상 semantics** 다.
+
+**옛 `prevContext` 는 제거·흡수** — `prevContextLines = chunk.slice(-3)`(직전 target 3줄) 경로는 사라졌고
+장면 기반 bounded 문맥 하나로 통합됐다. ⚠️ **"옛 마지막 3줄이 항상 새 문맥에 남는다"고 쓰지 말 것** —
+상한이 포화되면 더 최근의 실제 장면 문맥에 밀려 오래된 직전-target 줄이 제거될 수 있다. 기록하는 계약은
+**"T7b 같은 all-target 다중 청크 장면에서 후속 요청의 문맥이 v1 설계처럼 구조적으로 0 이 되는 회귀를
+막는다"** 수준까지다.
+
+**기존 표정 metadata** — 문맥 줄의 `expr` 은 **실행 시작 전에 저장돼 있던 값**(`emotion || emotionAuto ||
+undefined`)뿐이다. 휴리스틱·폴백·`exprSource`·provenance·**직전 청크에서 방금 생성된 미커밋 AI 값**은 넣지
+않는다. `expr` 은 연속성 참고용이라 후보에 없을 수도 있고, AI 의 새 답은 언제나 그 줄의 canonical
+`candidates` 에서만 나온다.
+
+**유지된 계약**: `parseEmotionResponse` 의 target-only 쓰기 경계(문맥 인덱스 결과는 저장 안 됨) · F1
+`(화자, 의상)` candidate identity 와 줄별 검증 · 후보 밖 거부 · F4 canonical identity 와 `expressionNotes`
+metadata 분리(fuzzy·`표정명(설명)` 없음) · 증분 target 선정 · 단일 커밋 · **저장 schema 무변경**.
+
+**견적** — 실행과 estimator 가 같은 `planEmotionChunks` 를 쓴다: 요청 수·`targetLines`·`outputTokens`
+semantics 불변, 실제 문맥 글자 수만 input 에 반영. 근사 estimator 성격 유지(**tiktoken·새 tokenizer 없음**).
+⚠️ `CONTEXT_MAX_CHARS = 2000` 은 prompt/token 전체 상한이 아니라 **estimator 가 세는 요청당 문맥 텍스트
+글자 수 상한**이다.
+
+**검증**: typecheck · vitest 42파일/549(532→+17) · `.rpy` 22구성 245파일 회귀 0 · 스크래치 outDir 빌드.
+구조 실측(API 없음, 200줄 합성 장면): target 124 · 요청 4 · 요청별 문맥 25/60/60/60 줄, 747/1810/1853/1860 자
+· look-ahead 없음 확인 · 총 문맥 6,270자 · `inputTokens` 3,905→8,728 · 예상 비용 $0.001479→$0.002202.
+⚠️ **이 실측과 자동 테스트가 증명하는 것은 "구조적으로 필요한 문맥이 실제 요청에 들어간다"까지다** —
+표정 선택 품질 향상은 BYO 키 검증이 연기 상태라 증명했다고 쓰지 않는다.
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
