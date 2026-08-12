@@ -187,11 +187,9 @@ export const createAiBatchSlice: SliceCreator<
           for (const chunk of chunks) {
             if (callIndex > 0) await sleep(PACE_MS);
             callIndex++;
-            // 프롬프트 비대화 방지 — 이 청크에 실제로 등장하는 화자의 후보만 추려 넘긴다.
-            const speakersInChunk = new Set(chunk.map((it) => it.speaker));
-            const candidatesBySpeaker = new Map(
-              [...batch.candidatesBySpeaker].filter(([sp]) => speakersInChunk.has(sp)),
-            );
+            // 후보는 배치 전체 맵을 그대로 넘긴다 — 프롬프트에 실을 그룹은 selectEmotionsBatch 가
+            // 청크 items 에서 역산한다(후보를 여기서 한 번 더 추리면 "프롬프트에 실린 후보"와
+            // "응답 검증에 쓰는 후보"가 두 곳에서 따로 정해져 어긋날 수 있다).
             try {
               const result = await selectEmotionsBatch(
                 chunk,
@@ -201,7 +199,7 @@ export const createAiBatchSlice: SliceCreator<
                   direction: scene.direction,
                   cg: scene.cg,
                   synopsis,
-                  candidatesBySpeaker,
+                  candidatesByKey: batch.candidatesByKey,
                   expressionNotes: project.expressionNotes,
                   prevContextLines,
                 },

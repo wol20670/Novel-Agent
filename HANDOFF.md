@@ -4,9 +4,9 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **복장·표정 자동 추론(LLM) 도입 — Phase 단위 진행 중. Phase 3 확정 완료, 다음은 Phase 4(표정 AI correctness = F1 + F4) Plan 프롬프트 대기.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프). Phase 프롬프트는 사용자가 하나씩 준다 — **새 세션에서 프롬프트를 받기 전까지 Phase 4 구현을 시작하지 말 것.**
-  - **Phase 4에서 읽을 것**: `src/generators/emotion/aiSelect.ts`(후보 수집·payload·검증) · `src/generators/emotion/resolve.ts` · `src/store/aiBatchSlice.ts` · `src/types/project.ts · outfitFlags` · `tests/emotion-ai.test.ts` + PHASES.md 의 Phase 1/2/3 확정 계약.
-  - **Phase 4에서 하지 않을 것**: 문맥 품질(F2/F3 — Phase 5) · smoothing 엔진 · review modal · 새 AI framework · stable Line ID · 취소 UX/장면 단위 재실행.
+- **복장·표정 자동 추론(LLM) 도입 — Phase 단위 진행 중. Phase 4(F1+F4) 구현·검증 완료, 다음은 GPT 구현 검토 → `PHASES.md` Phase 4 행 확정 기록.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프). Phase 프롬프트는 사용자가 하나씩 준다 — **Phase 5 프롬프트를 받기 전까지 Phase 5 를 시작하지 말 것.**
+  - **Phase 5 = 표정 AI 문맥 품질(F2/F3)만** — 주인공 대사·지문·이미 배정된 줄이 LLM 문맥에서 통째로 빠지는 문제. 어디까지 넣을지·토큰 대비 품질은 실측으로 정한다(실키 검증이 연기 상태라 착수 시점 보류 가능).
+  - **Phase 5에서 하지 않을 것**: smoothing 엔진 · review modal · 새 AI framework · stable Line ID · 취소 UX/장면 단위 재실행.
 - **타이틀 BGM 실기 청취 확인**(사용자) — 에셋 탭 🎵 BGM 맨 위에서 곡을 올리고 내보내 ① 타이틀에서 나오는지 ② "처음부터" 시작하면 첫 장면 곡으로 넘어가는지 ③ ESC→타이틀 복귀 때 다시 나오는지.
 
 ## 📌 알아둘 것 (지속)
@@ -19,4 +19,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 3 확정** — 기존 표정 AI end-to-end audit(**코드 변경 없음**). 기존 구조는 대부분 유지(A), correctness 2건(F1 줄 시점 의상 ↔ AI 후보 / F4 표정 설명 identity)이 Phase 4 필수로, 문맥 결손(F2/F3)은 Phase 5 로 이관. 상세는 `PHASES.md`.
+- **Phase 4 구현** — 표정 AI 후보 키가 화자 단위 → **(화자, 의상)** 로 바뀌어 줄 시점 의상과 맞물린다(F1), 표정 설명은 후보 라벨에서 분리돼 canonical identity 하나로 닫혔다(F4). 전환·설명을 안 쓰는 프로젝트는 **요청 바이트·기본 지시문이 예전 그대로**(테스트로 고정). 검증: typecheck · vitest 42파일/532 · `.rpy` 22구성 회귀 0 · 스크래치 빌드.
