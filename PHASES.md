@@ -29,6 +29,7 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 4 | 표정 AI correctness — F1(줄 시점 의상) + F4(표정 설명 identity) | ✅ 확정 (2차 리뷰 반영) | `558f18e` | typecheck · vitest 42파일/532 · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 |
 | 5 | 표정 AI 문맥 품질(F2/F3) | ✅ 확정 (v2 리뷰 반영) | `e1c1adf` | typecheck · vitest 42파일/549(532→+17) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 200줄 합성 장면 구조 실측 |
 | 6 | Outfit AI audit + 최소 계약(**코드 변경 없음**) | ✅ 확정 (v3.1, 3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
+| 7 | Outfit AI transition suggestion 구현 | ✅ 확정 (Plan v4 + 구현 diff 리뷰 반영) | `25c2b5e` | typecheck · vitest 46파일/668(549→+119) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 기존 e2e 전체 통과 · 브라우저 targeted smoke · `.npproj.zip` 실제 왕복 |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -234,6 +235,63 @@ tiktoken · Preview/Export 폴백 비대칭 수정 · merge 재설계 · `Emotio
 **전체본**(감사 근거·대안 비교·O1~O27 회귀 테스트 매트릭스·known limitations 14종)은 계획 파일
 `~/.claude/plans/novel-agent-phase-6-scalable-meadow.md` v3.1. **실키 검증은 하지 않았으므로 탐지 품질
 (recall/precision·false positive)은 증명된 바 없다.**
+
+## Phase 7 확정 설계 — Outfit AI transition suggestion (구현 `25c2b5e`)
+
+Phase 6 계약을 그대로 구현했다 — **계약에서 달라진 점 없음.** 신규 `src/generators/outfit/`
+(`aiSelect`=수집·계획·요청·파싱 / `apply`=재검증·머지·일괄 fold / `estimate`) + store 액션 7개 + 최소 UI.
+
+**저장(P3)**: `Scene`/`Line`/`Project` 에 **신규 persistent 필드 0**. 제안은 project 밖 런타임 state
+(`outfitSuggestions`·`outfitSuggestionRevision`·`outfitProgress`)라 저장·zip·협업에 자동으로 안 실린다
+(`.npproj.zip` 실제 왕복으로 확인). 수락하면 기존 `Line.outfits` 에 **manual 값**으로 들어가고
+provenance 는 의도적으로 사라진다.
+
+**값의 단일 소스**: `currentOutfit` 은 언제나 `outfitFlags(scene, rules, char)[scanStart]` 다 —
+Outfit AI 전용 fold/state machine 을 만들지 않았다. `outfitSource` 는 **설명 라벨만** 파생하며 순서는
+`line-manual > scene-manual > rule > default`. ⚠️ `Line.outfits` 를 먼저 보는 이유: `outfitFlags` 는
+줄 override 를 **그 줄 index 에 이미 반영**해서(대입 뒤 push), `Scene.outfits` 를 먼저 보면 값과 라벨이
+모순된다. **미승인 제안은 다음 window 의 상태에 overlay 하지 않는다.**
+
+**scan/문맥**: writable 줄에 `chunkItems(…, 60, 3500)` 로 disjoint scan window + lead-in 10줄/500자
+(읽기 전용) + **look-ahead 없음.** 모든 metadata 를 그 causal window 로 자른다 — `fixed` 는 **scan 범위
+안의** manual 값만(미래 값 금지), 마커는 `[leadIn 시작, scan 끝]` 안에서 **실제 일어난** hide/show 전이만.
+
+**⚠️ hide 는 상태와 전이가 다른 개념이다**: `initialHidden` = 첫 포함 줄 **직전**의 canonical 상태,
+`markers` = 실제 전이. `spriteHiddenFlags` 가 "그 줄 override 를 적용한 뒤" 값이라 전이 판정은
+`flags[i-1]` vs `flags[i]` 여야 한다. request 마다 `prev=false` 로 시작해 마커를 만들면 ① 이미 숨겨진
+구간에서 시작한 window 에 **없던 hidden 이 생기고** ② 첫 줄의 실제 `hidden→shown` 이 **통째로 사라진다**
+(둘 다 리뷰에서 잡힌 회귀 — O11 이 고정).
+
+**writable 경계**: raw `kind:'cg'` 가 아니라 **first effective CG** 4갈래(`getFirstEffectiveCgIndex`).
+orphan 마커는 경계도 아니고 모델에 `event:"cg"` 로 보내지도 않는다. 경계 sentinel 은 **마지막 writable
+window 에만**. hide 구간 transition 은 반대로 정상 target 이다.
+
+**액션 semantics(가장 헷갈리는 지점 — `apply ≠ invalidate`)**: `applyOutfitSuggestion` 은 **그 항목만**
+제거하고 나머지 제안을 유지한다(전체 clear 는 manual `setLineOutfit` 쪽). `ignore*` 는 revision 을 안
+올리고, 일괄 적용은 working scene 순차 재검증 후 **실제 write 가 있을 때만** 1회 커밋 + revision +1.
+적용 불가/no-op 제안은 목록에서 **제거하되** canonical·revision 은 안 건드린다(영원히 실패하는 칩 방지).
+
+**재검증**: Phase 6 최소 9검사 + 방어 2검사(현재 effective-CG writable · 첫 텍스트 줄 explicit
+`Scene.outfits` 보호). 후자 둘이 없으면 "첫 줄 → 사복" 제안이 `Scene.outfits=교복` 상태에서 8·9 를
+**둘 다 통과**한다(리뷰에서 잡힘).
+
+**stale-run guard**: `outfitSuggestionRevision` 은 provenance 가 아니라 **in-flight run 의 stale commit
+방지 epoch**. run 시작 스냅샷 ↔ 최종 commit 직전 비교, 다르면 **부분 채택 없이 전체 폐기**. 그래서
+canonical 을 바꾸는 경로는 (async 면 **첫 await 이전에**) epoch 을 올려야 한다 — `removeOutfit` 이 그 예다.
+
+**무효화는 "Outfit AI 가 읽는 입력"이 바뀔 때만** — 액션 이름이 아니라 **바뀌는 필드**로 판정한다.
+⚠️ `renameBackgroundGroup`/`renameCgGroup` 은 에셋 액션처럼 보이지만 `scene.background`/`scene.cg`
+**문자열**을 바꾼다(후자는 CG cutoff 를 움직인다) → 무효화 대상. 반대로 `importCgGroup`(`cgAssetIds` 만)·
+스프라이트 업로드·`clearGeneratedAssets`(의상 **이름** 유지) 는 대상이 아니다.
+
+**Expression AI 무수정**: 수락 후 `Line.outfits` → `outfitFlags` → 기존 `collectEmotionTargets` 경로로
+후보가 자연히 바뀐다. `emotion`/`emotionAuto` 자동 삭제 없음.
+
+**검증**: typecheck · vitest 46파일/668(549→+119) · `.rpy` 22구성 245파일 회귀 0 · 스크래치 outDir 빌드 ·
+기존 e2e 전체 통과 · `.npproj.zip` 실제 왕복(수락값 유지 + 제안 metadata 미포함) · 브라우저 targeted smoke.
+**known limitation**: AI 제안 칩의 적용/무시/모두 적용 **브라우저 클릭 경로는 자동 e2e 로 seed 하지 않았고**
+(store 통합 테스트 + typecheck/build + diff 리뷰로 검증), **실키 미검증이라 탐지 품질(precision/recall)은
+여전히 증명된 바 없다.**
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 

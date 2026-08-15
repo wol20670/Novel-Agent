@@ -4,9 +4,10 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **복장·표정 자동 추론(LLM) 도입 — Phase 단위 진행 중. Phase 6 까지 확정 완료(GPT 승인).** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
-  - **다음 Phase(=Outfit AI 구현) 프롬프트를 받기 전까지 시작하지 말 것.** Phase 6 은 분석 Phase 라 코드가 한 줄도 안 바뀌었고, 확정된 건 **계약**뿐이다.
-  - Phase 5/6 이 증명한 것은 구조까지다 — **표정 선택 품질도, 의상 전환 탐지 품질도 실키 검증 연기 상태라 증명되지 않았다.**
+- **복장·표정 자동 추론(LLM) 도입 — Phase 7 까지 확정 완료(GPT 승인).** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
+  - **다음 Phase 프롬프트를 받기 전까지 새 Phase 를 시작하지 말 것.** Phase 7 로 계획된 범위(sparse 탐지 + 검수 + 수락)는 끝났다.
+  - Phase 5/6/7 이 증명한 것은 **구조까지**다 — 표정 선택 품질도, 의상 전환 탐지 품질도 **실키 검증 연기 상태라 증명되지 않았다.**
+  - Outfit AI 후속 후보(착수 전 지시 필요): 실키로 탐지 품질(recall/precision) 실측 · AI 제안 칩 클릭 경로 e2e(제안 seed 수단이 없어 이번엔 미검증) · 무시한 제안이 재실행 때 다시 나오는 문제(ignored 기억은 persistent provenance 라 일부러 안 만듦).
 - **타이틀 BGM 실기 청취 확인**(사용자) — 에셋 탭 🎵 BGM 맨 위에서 곡을 올리고 내보내 ① 타이틀에서 나오는지 ② "처음부터" 시작하면 첫 장면 곡으로 넘어가는지 ③ ESC→타이틀 복귀 때 다시 나오는지.
 
 ## 📌 알아둘 것 (지속)
@@ -19,4 +20,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 6 확정(분석 Phase — 코드 변경 없음)** — Outfit AI 최소 계약: 제안은 휘발성(P3), 수락하면 기존 `Line.outfits` 에 manual 로, `outfitFlags`·persistent schema 무변경. 확정 설계는 `PHASES.md`.
+- **Phase 7 확정 — Outfit AI 의상 전환 추천 구현(`25c2b5e`)**: 대본이 갈아입었다고 말한 자리만 찾는 sparse 탐지 → **휘발성 제안** → 사람이 수락하면 기존 `Line.outfits` 에 manual 값. persistent schema 0 변경, `outfitFlags` 단일 소스 유지, `.rpy` 회귀 0. 함정 요약은 `CLAUDE.md`, 전체 설계는 `PHASES.md` "Phase 7 확정 설계".
