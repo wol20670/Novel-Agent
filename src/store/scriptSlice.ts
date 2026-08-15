@@ -1,8 +1,32 @@
 import { mergeScenes } from '../project/mergeScenes';
 import { SAMPLE_STORY } from '../sample';
+import {
+  foldSceneSuggestions,
+  mergeLineOutfit,
+  validateOutfitSuggestion,
+  type OutfitSuggestion,
+} from '../generators/outfit';
+import type { Scene } from '../types';
 import type { State } from './types';
 import type { SliceCreator } from './context';
-import { localeMeta, unionChars, mergeChars } from './helpers';
+import { localeMeta, unionChars, mergeChars, sceneById } from './helpers';
+
+/**
+ * Outfit AI 입력에 해당하는 Scene 키 — `updateScene` 은 무검증 제네릭 패처(`{...sc, ...patch}`)라
+ * 전용 액션(setLineText 등)이 따로 있어도 같은 필드가 이 경로로 들어올 수 있다. 그래서 방어선을
+ * 좁히지 않는다: title/background/direction = LLM 문맥, outfits = 장면 baseline, cg = CG cutoff,
+ * lines = scan 입력 전체, hideSprites = hide 문맥. (bgm·*AssetId·status 는 입력이 아니라 유지.)
+ * ⚠️ 판정은 **키 존재** 기준이다 — 같은 값으로 덮어써도 무효화된다(값 비교까지는 하지 않는다).
+ */
+const OUTFIT_AI_SCENE_KEYS: readonly (keyof Scene)[] = [
+  'title',
+  'background',
+  'direction',
+  'outfits',
+  'cg',
+  'lines',
+  'hideSprites',
+];
 
 export const createScriptSlice: SliceCreator<
   Pick<
@@ -15,12 +39,54 @@ export const createScriptSlice: SliceCreator<
     | 'setLineHideSprites'
     | 'setLineText'
     | 'setLineTranslation'
+    | 'setLineOutfit'
+    | 'invalidateOutfitSuggestions'
+    | 'applyOutfitSuggestion'
+    | 'ignoreOutfitSuggestion'
+    | 'applySceneOutfitSuggestions'
+    | 'ignoreSceneOutfitSuggestions'
     | 'setSceneStatus'
     | 'setSceneHideSprites'
     | 'approveAll'
   >
 > = (set, get, ctx) => {
   const { flash, autoSave, setScenes } = ctx;
+
+  /**
+   * 줄 의상 레코드를 바꾼 scenes 배열을 만든다(슬라이스 내부 전용, 순수).
+   * 레코드 머지·빈 레코드 정리 규칙은 `mergeLineOutfit`(generators/outfit) 단일 소스를 쓴다 —
+   * 수동 편집(setLineOutfit)과 AI 수락(applyOutfitSuggestion)이 같은 규칙이어야 하기 때문이다.
+   * **후처리(제안 목록을 어떻게 할지)만 호출측이 다르게 한다** — 범용 framework 로 만들지 않는다.
+   */
+  const patchLineOutfit = (
+    sceneId: string,
+    lineIndex: number,
+    character: string,
+    outfit: string | undefined,
+  ): Scene[] =>
+    get().project.scenes.map((sc) =>
+      sc.id === sceneId ? mergeLineOutfit(sc, lineIndex, character, outfit) : sc,
+    );
+
+  /** 제안 목록에서 항목 하나만 뺀다(그 장면 키가 비면 키째 제거 — 빈 배열을 남기지 않는다). */
+  const dropSuggestion = (
+    all: Record<string, OutfitSuggestion[]>,
+    sceneId: string,
+    lineIndex: number,
+    character: string,
+  ): Record<string, OutfitSuggestion[]> => {
+    const list = all[sceneId];
+    if (!list) return all;
+    const next = list.filter(
+      (s) => !(s.lineIndex === lineIndex && s.character === character),
+    );
+    if (next.length === list.length) return all;
+    const copy = { ...all };
+    if (next.length) copy[sceneId] = next;
+    else delete copy[sceneId];
+    return copy;
+  };
+
   return {
     setRawInput: (text) => {
       set((s) => ({ project: { ...s.project, rawInput: text } }));
@@ -58,12 +124,15 @@ export const createScriptSlice: SliceCreator<
         selectedSceneId: stillSelected ? s0.selectedSceneId : (scenes[0]?.id ?? null),
         activeTab: 'scenes',
       }));
+      // ⚠️ 이 액션은 setScenes 를 안 타므로(위 set + autoSave 직접 호출) 무효화를 여기 직접 건다.
+      get().invalidateOutfitSuggestions();
       autoSave();
       const verb = mode === 'merge' ? '병합' : mode === 'append' ? '추가' : '분석';
       flash(`${scenes.length}개 장면으로 ${verb} 완료(캐릭터 ${characters.length}명).`);
     },
 
     updateScene: (id, patch) => {
+      if (OUTFIT_AI_SCENE_KEYS.some((k) => k in patch)) get().invalidateOutfitSuggestions();
       setScenes(get().project.scenes.map((sc) => (sc.id === id ? { ...sc, ...patch } : sc)));
     },
 
@@ -80,6 +149,7 @@ export const createScriptSlice: SliceCreator<
     },
 
     setLineHideSprites: (sceneId, lineIndex, hide) => {
+      get().invalidateOutfitSuggestions(); // hide 문맥은 Outfit AI 입력이다(markers/initialHidden)
       setScenes(
         get().project.scenes.map((sc) => {
           if (sc.id !== sceneId) return sc;
@@ -92,6 +162,7 @@ export const createScriptSlice: SliceCreator<
     },
 
     setLineText: (sceneId, lineIndex, text) => {
+      get().invalidateOutfitSuggestions(); // 대사 텍스트는 제안의 근거이자 lineKey 지문이다
       setScenes(
         get().project.scenes.map((sc) => {
           if (sc.id !== sceneId) return sc;
@@ -121,11 +192,120 @@ export const createScriptSlice: SliceCreator<
       );
     },
 
+    // ── Outfit AI: 수동 편집 · 제안 적용/무시 ────────────────────────────────
+    // invalidate 와 apply 를 절대 섞지 않는다 — apply 가 전체 clear 를 하면 한 건 수락에 검수 목록이
+    // 통째로 날아가 P3(제안→검수→수락) UX 가 무너진다.
+
+    setLineOutfit: (sceneId, lineIndex, character, outfit) => {
+      // 수동 편집은 canonical 을 바꾸므로 기존 제안의 전제(그 줄의 현재 의상)가 통째로 흔들린다 → 전체 clear.
+      get().invalidateOutfitSuggestions();
+      setScenes(patchLineOutfit(sceneId, lineIndex, character, outfit));
+    },
+
+    invalidateOutfitSuggestions: () => {
+      set((s) => ({
+        outfitSuggestions: {},
+        // epoch↑ — 실행 중인 배치가 이 변경 뒤에 결과를 커밋하지 못하게 한다(provenance 가 아니다).
+        outfitSuggestionRevision: s.outfitSuggestionRevision + 1,
+      }));
+    },
+
+    applyOutfitSuggestion: (sceneId, lineIndex, character) => {
+      const s0 = get();
+      const target = s0.outfitSuggestions[sceneId]?.find(
+        (x) => x.lineIndex === lineIndex && x.character === character,
+      );
+      if (!target) return;
+
+      const scene = sceneById(s0.project.scenes, sceneId);
+      const verdict = validateOutfitSuggestion(s0.project, scene, target);
+      if (verdict !== 'ok') {
+        // 적용 불가/no-op 이어도 **목록에서는 뺀다** — 안 그러면 영원히 실패하는 칩이 남는다.
+        // canonical 을 안 건드렸으므로 revision 도 올리지 않는다.
+        set((s) => ({
+          outfitSuggestions: dropSuggestion(s.outfitSuggestions, sceneId, lineIndex, character),
+        }));
+        flash(
+          verdict === 'noop'
+            ? '이미 그 의상입니다(제안을 목록에서 제거했습니다).'
+            : '대본·캐릭터·의상 상태가 바뀌어 적용할 수 없습니다(제안을 목록에서 제거했습니다).',
+        );
+        return;
+      }
+
+      set((s) => ({
+        // 그 항목만 제거하고 나머지 제안은 유지한다.
+        outfitSuggestions: dropSuggestion(s.outfitSuggestions, sceneId, lineIndex, character),
+        // canonical 이 실제로 바뀌었으니 실행 중인 old run 은 폐기돼야 한다.
+        outfitSuggestionRevision: s.outfitSuggestionRevision + 1,
+      }));
+      setScenes(patchLineOutfit(sceneId, lineIndex, character, target.outfit));
+      flash(`${character} → ${target.outfit} 적용했습니다(표정 배정은 그대로 유지됩니다).`, 'success');
+    },
+
+    ignoreOutfitSuggestion: (sceneId, lineIndex, character) => {
+      // 목록에서만 제거 — canonical 무변경이라 revision 도 올리지 않는다(실행 중인 run 을 죽일 이유가 없다).
+      set((s) => ({
+        outfitSuggestions: dropSuggestion(s.outfitSuggestions, sceneId, lineIndex, character),
+      }));
+    },
+
+    applySceneOutfitSuggestions: (sceneId) => {
+      const s0 = get();
+      const list = s0.outfitSuggestions[sceneId];
+      if (!list?.length) return;
+      const scene = sceneById(s0.project.scenes, sceneId);
+      if (!scene) {
+        set((s) => {
+          const copy = { ...s.outfitSuggestions };
+          delete copy[sceneId];
+          return { outfitSuggestions: copy };
+        });
+        return;
+      }
+
+      // ⚠️ 각각 독립 적용하면 틀린다 — 의상은 carry 라 앞의 적용이 뒤 제안을 no-op 으로 만든다.
+      // foldSceneSuggestions 가 갱신된 working scene 기준으로 순차 재검증한다(순수 함수).
+      const { scene: next, applied, skipped } = foldSceneSuggestions(s0.project, scene, list);
+
+      set((s) => {
+        const copy = { ...s.outfitSuggestions };
+        delete copy[sceneId]; // 처리분(적용+스킵) 전부 목록에서 제거
+        return {
+          outfitSuggestions: copy,
+          // 실제 canonical write 가 있을 때만 epoch↑ — 전부 스킵됐으면 아무것도 안 바뀐 것이다.
+          outfitSuggestionRevision: applied
+            ? s.outfitSuggestionRevision + 1
+            : s.outfitSuggestionRevision,
+        };
+      });
+      // 단일 커밋 — 항목마다 setScenes 를 부르면 장면 수에 비례해 리렌더/저장이 반복된다.
+      if (applied) setScenes(s0.project.scenes.map((sc) => (sc.id === sceneId ? next : sc)));
+
+      const suffix = skipped ? ` · ${skipped}건 건너뜀(이미 반영/대본 변경)` : '';
+      flash(
+        applied
+          ? `의상 제안 ${applied}건 적용${suffix}(표정 배정은 그대로 유지됩니다).`
+          : `적용할 제안이 없습니다${suffix}.`,
+        applied ? 'success' : 'info',
+      );
+    },
+
+    ignoreSceneOutfitSuggestions: (sceneId) => {
+      set((s) => {
+        if (!s.outfitSuggestions[sceneId]) return {};
+        const copy = { ...s.outfitSuggestions };
+        delete copy[sceneId];
+        return { outfitSuggestions: copy };
+      });
+    },
+
     setSceneStatus: (id, status) => {
       setScenes(get().project.scenes.map((sc) => (sc.id === id ? { ...sc, status } : sc)));
     },
 
     setSceneHideSprites: (sceneId, hide) => {
+      get().invalidateOutfitSuggestions(); // 장면 시작 hide 상태 = initialHidden 의 입력
       setScenes(get().project.scenes.map((sc) => (sc.id === sceneId ? { ...sc, hideSprites: hide } : sc)));
     },
 

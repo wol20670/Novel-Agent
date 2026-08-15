@@ -129,6 +129,7 @@ export default function AssetsTab() {
         </p>
         <ExpressionSetEditor />
         <AssignEmotionsRow />
+        <SuggestOutfitsRow />
         {characters.length === 0 && <p className="text-gray-600 text-sm">등장 캐릭터 없음</p>}
         <div className="grid grid-cols-2 gap-3">
           {characters.filter((c) => !c.isProtagonist).map((c) => (
@@ -758,6 +759,40 @@ function AssignEmotionsRow() {
         )}
       </button>
       <span className="text-[10px] text-gray-500">표정 미지정 대사에만 적용 · 직접 고른 표정은 유지됩니다</span>
+    </div>
+  );
+}
+
+/**
+ * 🤖 의상 전환 추천(AI) 실행 버튼 — AssignEmotionsRow 와 같은 "버튼이 곧 진행률" 패턴.
+ * ⚠️ 아래 CharacterCard 의 👗 탭이 아니라 **여기**에 둔다: 저쪽은 캐릭터 단위 설정이고 이 배치는
+ * 프로젝트 전체를 훑는 작업이다. 표정과 달리 결과가 바로 반영되지 않고 **장면 카드의 검수 칩**으로
+ * 뜬다(수락해야 Line.outfits 에 들어간다).
+ */
+function SuggestOutfitsRow() {
+  const busy = useStore((s) => !!s.busy['batch:outfit']);
+  const progress = useStore((s) => s.outfitProgress);
+  const autoSuggestOutfitsAll = useStore((s) => s.autoSuggestOutfitsAll);
+  return (
+    <div className="flex items-center gap-2 mb-3 -mt-1.5">
+      <button
+        className="btn-ghost text-xs"
+        disabled={busy}
+        onClick={() => void autoSuggestOutfitsAll()}
+        title="대본이 '갈아입었다'고 말한 자리를 AI가 찾아 제안합니다. 바로 반영되지 않고 장면 카드에서 검수 후 적용합니다."
+      >
+        {busy ? (
+          <span className="flex items-center gap-1.5">
+            <Spinner />
+            {progress ? `${progress.done}/${progress.total} 분석 중…` : '분석 중…'}
+          </span>
+        ) : (
+          '🤖 의상 전환 추천'
+        )}
+      </button>
+      <span className="text-[10px] text-gray-500">
+        대본이 옷 갈아입는 대목을 말한 자리만 제안 · 직접 지정한 의상은 덮어쓰지 않습니다
+      </span>
     </div>
   );
 }

@@ -40,6 +40,11 @@ export const createCharacterSlice: SliceCreator<
     },
 
     updateCharacter: (name, patch) => {
+      // Outfit AI 의 candidate identity/자격에 해당하는 키만 무효화한다 — color·side·voice 같은
+      // 표시용 patch 로 검수 목록을 날리지 않는다(제네릭 패처라 키 검사가 필요하다).
+      if ('name' in patch || 'isProtagonist' in patch || 'outfits' in patch) {
+        get().invalidateOutfitSuggestions();
+      }
       set((s) => ({
         project: {
           ...s.project,
@@ -198,6 +203,7 @@ export const createCharacterSlice: SliceCreator<
       const char = get().project.characters.find((c) => c.name === charName);
       if (!char) return;
       if (char.outfits?.some((o) => o.name === n)) return flash('이미 있는 의상입니다.');
+      get().invalidateOutfitSuggestions(); // 후보(정답 공간)가 늘어난다
       set((s) => ({
         project: {
           ...s.project,
@@ -232,7 +238,11 @@ export const createCharacterSlice: SliceCreator<
     removeOutfit: async (charName, name) => {
       const char = get().project.characters.find((c) => c.name === charName);
       const o = char?.outfits?.find((x) => x.name === name);
-      if (!o) return;
+      if (!o) return; // 실제 변경이 없는 early return — 여기선 epoch 을 올리지 않는다
+      // ⚠️ **첫 await 이전에** 올려야 한다. await 뒤로 밀면 canonical(후보·Line.outfits)은 이미 바뀌었는데
+      // revision 은 아직 옛 값이라, 그 사이 resolve 된 in-flight AI run 이 최종 guard 를 통과해
+      // 삭제된 의상을 가리키는 stale 제안을 커밋할 수 있다.
+      get().invalidateOutfitSuggestions();
       const toDelete = Object.values(o.expressions).filter((x): x is string => !!x);
       await commitAssetSwap(
         (s) => ({
@@ -256,6 +266,7 @@ export const createCharacterSlice: SliceCreator<
     addOutfitRule: (charName, outfit, keyword) => {
       const kw = keyword.trim();
       if (!kw) return;
+      get().invalidateOutfitSuggestions(); // 배경 키워드 규칙 = 장면 baseline(currentOutfit)의 입력
       set((s) => {
         const rules = s.project.outfitRules ?? [];
         if (rules.some((r) => r.charName === charName && r.outfit === outfit && r.keyword === kw)) return s;
@@ -265,6 +276,7 @@ export const createCharacterSlice: SliceCreator<
     },
 
     removeOutfitRule: (index) => {
+      get().invalidateOutfitSuggestions(); // 위와 같은 이유(baseline 이 바뀐다)
       set((s) => ({
         project: { ...s.project, outfitRules: (s.project.outfitRules ?? []).filter((_, i) => i !== index) },
       }));

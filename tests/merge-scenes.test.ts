@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mergeScenes, previewMerge, diffMatchedScene } from '../src/project/mergeScenes';
+import { mergeLineOutfit } from '../src/generators/outfit';
 import type { Scene, Line } from '../src/types';
 
 function scene(id: string, title: string, patch: Partial<Scene> = {}): Scene {
@@ -670,6 +671,21 @@ describe('mergeScenes: 줄 단위 의상 전환(Line.outfits) 승계와 변경 �
     const [l1] = result[0].lines as Line[];
     // 히로인 지정은 대본에서 지운 것이므로 살아남으면 안 된다.
     expect((l1 as Extract<Line, { kind: 'dialogue' }>).outfits).toEqual({ 민주: '수영복' });
+  });
+
+  // O13(Phase 7) — Outfit AI 제안을 수락한 값은 "사람이 적은 값"과 지위가 같다(provenance 소멸이 설계).
+  // 그래서 수락 경로(mergeLineOutfit)가 만든 값도 위와 똑같이 재분석을 통과해야 하고, 대본에 그 줄
+  // #복장 이 없으면 **승인이 부당하게 리셋되지도 않아야** 한다(오탐 리셋 없음).
+  it('AI 제안 수락으로 생긴 줄 의상도 재분석에서 살아남고 승인도 유지된다', () => {
+    const before = scene('s1', '장면1', { status: 'approved', lines: [dlg('하나'), dlg('둘')] });
+    const accepted = mergeLineOutfit(before, 1, '민주', '사복'); // 실제 수락 경로가 쓰는 순수 함수
+    expect((accepted.lines[1] as Extract<Line, { kind: 'dialogue' }>).outfits).toEqual({ 민주: '사복' });
+
+    const next: Scene[] = [scene('n1', '장면1', { lines: [dlg('하나'), dlg('둘')] })]; // 대본엔 #복장 없음
+    const result = mergeScenes([accepted], next, 'merge');
+    expect((result[0].lines[1] as Extract<Line, { kind: 'dialogue' }>).outfits).toEqual({ 민주: '사복' });
+    expect(result[0].status).toBe('approved'); // 오탐 리셋 없음
+    expect(previewMerge([accepted], next).statusReset).toBe(0);
   });
 
   it('지문 줄에서도 같은 규칙으로 승계된다', () => {

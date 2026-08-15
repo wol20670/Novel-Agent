@@ -86,6 +86,9 @@ export function createStoreContext(set: StoreSet, get: StoreGet): StoreContext {
         const stillExists = project.scenes.some((sc) => sc.id === s.selectedSceneId);
         return { project, selectedSceneId: stillExists ? s.selectedSceneId : (project.scenes[0]?.id ?? null) };
       });
+      // 원격 project 로 통째 교체됐으니 내 화면의 Outfit AI 제안은 다른 대본을 가리키는 좌표가 된다.
+      // set() **직후** 동기 호출이라 위의 동기 구간 계약을 깨지 않는다(비동기로 밀지 말 것).
+      get().invalidateOutfitSuggestions();
       // 로컬 캐시(localStorage) 저장은 autoSave() 를 그대로 재사용하면 안 된다 — 확인해본 두 가지 이유:
       //  ① autoSave() 는 collabEnabled 면 collabPushProject(project) 도 함께 호출한다. 그 실행이
       //     600ms 뒤로 밀리면 withApplyingRemoteGuard 의 동기 구간(applyingRemote=true)은 이미

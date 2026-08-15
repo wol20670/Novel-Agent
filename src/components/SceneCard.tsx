@@ -17,6 +17,7 @@ import {
   type Scene,
 } from '../types';
 import { resolveEmotionDetailed } from '../generators/emotion/resolve';
+import type { OutfitSuggestion } from '../generators/outfit';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
 import VoiceLab from './VoiceLab';
@@ -86,6 +87,21 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
       .map((nm) => charMap.get(nm))
       .filter((c): c is Character => !!c && (c.outfits?.length ?? 0) > 0);
   }, [scene.lines, charMap]);
+  // AI 의상 전환 제안(휘발성 — project 밖 런타임 state). 줄마다 store 를 구독하지 않도록 카드에서
+  // 한 번 받아 lineIndex → 제안들 맵으로 만들고 hiddenFlags 처럼 props 로 내려준다.
+  const outfitSuggestions = useStore((s) => s.outfitSuggestions[sceneId]);
+  const suggestionsByLine = useMemo(() => {
+    if (!outfitSuggestions?.length) return null;
+    const m = new Map<number, OutfitSuggestion[]>();
+    for (const s of outfitSuggestions) {
+      const arr = m.get(s.lineIndex);
+      if (arr) arr.push(s);
+      else m.set(s.lineIndex, [s]);
+    }
+    return m;
+  }, [outfitSuggestions]);
+  const applySceneSuggestions = useStore((s) => s.applySceneOutfitSuggestions);
+  const ignoreSceneSuggestions = useStore((s) => s.ignoreSceneOutfitSuggestions);
   // 협업 — 지금 이 장면을 보고 있는 상대방(있으면 편집 충돌을 피하라는 신호). peersForScene 은
   // collabPeers identity 기준 캐싱된 조회라 카드마다 .filter() 를 새로 돌리지 않는다(위 설명).
   const peersHere = useStore((s) => peersForScene(s.collabPeers, sceneId));
@@ -243,6 +259,24 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
         </div>
       )}
 
+      {/* AI 의상 전환 제안 — 수락해야 Line.outfits 에 들어간다(제안 자체는 저장되지 않는다). */}
+      {outfitSuggestions && outfitSuggestions.length > 0 && (
+        <div
+          className="flex items-center gap-2 mb-3 text-[11px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="rounded px-1.5 py-0.5 border border-sky-500/40 text-sky-500 bg-sky-500/5">
+            🤖 의상 제안 {outfitSuggestions.length}건
+          </span>
+          <button className="chip border-edge text-gray-400 hover:text-gray-200" onClick={() => applySceneSuggestions(sceneId)}>
+            모두 적용
+          </button>
+          <button className="chip border-edge text-gray-500 hover:text-gray-300" onClick={() => ignoreSceneSuggestions(sceneId)}>
+            모두 무시
+          </button>
+        </div>
+      )}
+
       {/* 대사/지문 미리보기 */}
       <div className="bg-ink/70 rounded-lg border border-edge p-3 max-h-44 overflow-y-auto text-sm mb-3 space-y-0.5">
         {scene.lines.length === 0 && <span className="text-gray-600 text-xs">대사 없음</span>}
@@ -255,6 +289,7 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
             scene={scene}
             charMap={charMap}
             effHidden={hiddenFlags[i]}
+            suggestions={suggestionsByLine?.get(i)}
           />
         ))}
         {scene.cg.map((c, i) => (
@@ -312,6 +347,7 @@ function LineRow({
   scene,
   charMap,
   effHidden,
+  suggestions,
 }: {
   sceneId: string;
   index: number;
@@ -320,11 +356,16 @@ function LineRow({
   charMap: Map<string, Character>;
   /** 이 줄의 유효 숨김 상태(spriteHiddenFlags[index]) — 버튼 표시·title 안내용. */
   effHidden: boolean;
+  /** 이 줄에 붙은 AI 의상 제안(휘발성) — 카드가 한 번에 그룹핑해 내려준다. */
+  suggestions?: OutfitSuggestion[];
 }) {
   const [editing, setEditing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const setText = useStore((s) => s.setLineText);
   const setTr = useStore((s) => s.setLineTranslation);
+  const setLineOutfit = useStore((s) => s.setLineOutfit);
+  const applySuggestion = useStore((s) => s.applyOutfitSuggestion);
+  const ignoreSuggestion = useStore((s) => s.ignoreOutfitSuggestion);
   const base = useStore((s) => baseLocaleOf(s.project));
   // 번역 대상 = base 를 제외한 지원 로케일(en·ja) — 엑셀 C/D열과 동일.
   const targets = (Object.keys(LOCALE_LABEL) as Locale[]).filter((l) => l !== base);
@@ -409,15 +450,72 @@ function LineRow({
                 </p>
               ) : null,
             )}
-            {/* 이 줄부터 갈아입는 의상(#복장 이 장면 도중에 나온 경우) — 대본이 만든 상태라 여기선
-                표시만 한다(편집은 장면 단위 👗 드롭다운, 줄 단위는 대본 태그로). CG/아이템 마커 칩과 같은 표현. */}
+            {/* 이 줄부터 갈아입는 의상(장면 도중의 #복장 또는 AI 제안 수락분). ✕ 로 개별 해제할 수
+                있다 — 대본 태그가 만든 값도 지워지지만, 원본 태그가 남아 있으면 재분석 때 다시 생긴다. */}
             {line.outfits && Object.keys(line.outfits).length > 0 && (
-              <p className="text-[11px] pl-1">
-                <span className="rounded px-1.5 py-0.5 border border-teal-500/40 text-teal-500 bg-teal-500/5">
-                  👗 {Object.entries(line.outfits).map(([nm, o]) => `${nm}→${o}`).join(', ')}
-                </span>
+              <p className="text-[11px] pl-1 flex flex-wrap gap-1">
+                {Object.entries(line.outfits).map(([nm, o]) => (
+                  <span
+                    key={nm}
+                    className="rounded px-1.5 py-0.5 border border-teal-500/40 text-teal-500 bg-teal-500/5 inline-flex items-center gap-1"
+                  >
+                    👗 {nm}→{o}
+                    <button
+                      className="text-teal-600/70 hover:text-teal-400 leading-none"
+                      title="이 줄의 의상 지정을 해제합니다(대본에 #복장 태그가 남아 있으면 재분석 때 다시 생깁니다)."
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLineOutfit(sceneId, index, nm, undefined);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
               </p>
             )}
+            {/* AI 제안 — 저장된 값이 아니라 검수 대기 항목이다(적용해야 위 칩이 된다). */}
+            {suggestions?.map((s) => {
+              const char = charMap.get(s.character);
+              // renderability 경고는 **렌더 시점 현재 asset 상태**로 계산한다(제안에 스냅샷하지 않는다).
+              // '기본'은 대상이 아니다 — 그 pool 이 곧 정답이라 폴백이 곧 정상 표시다.
+              const noSprite =
+                s.outfit !== '기본' &&
+                !Object.values(char?.outfits?.find((o) => o.name === s.outfit)?.expressions ?? {}).some(
+                  (id) => !!id,
+                );
+              return (
+                <p key={s.character} className="text-[11px] pl-1 flex flex-wrap items-center gap-1">
+                  <span className="rounded px-1.5 py-0.5 border border-sky-500/40 text-sky-500 bg-sky-500/5">
+                    🤖 {s.character} → {s.outfit}
+                  </span>
+                  {s.reason && <span className="text-gray-500">{s.reason}</span>}
+                  <button
+                    className="chip border-edge text-gray-400 hover:text-gray-200"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      applySuggestion(sceneId, index, s.character);
+                    }}
+                  >
+                    적용
+                  </button>
+                  <button
+                    className="chip border-edge text-gray-500 hover:text-gray-300"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      ignoreSuggestion(sceneId, index, s.character);
+                    }}
+                  >
+                    무시
+                  </button>
+                  {noSprite && (
+                    <span className="text-amber-600 w-full">
+                      ⚠ 전용 스프라이트가 없어 화면상 기본 의상으로 보일 수 있습니다.
+                    </span>
+                  )}
+                </p>
+              );
+            })}
           </div>
         )}
 

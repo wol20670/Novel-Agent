@@ -32,6 +32,10 @@ export const useStore = create<State>((set, get) => {
     busy: {},
     translateProgress: null,
     emotionProgress: null,
+    // Outfit AI 제안은 project 밖 런타임 state — 새로고침하면 사라진다(저장·zip·협업 미포함이 설계).
+    outfitSuggestions: {},
+    outfitSuggestionRevision: 0,
+    outfitProgress: null,
     voiceEstimate: null,
     toast: null,
     toastType: 'info',

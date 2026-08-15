@@ -62,6 +62,8 @@ export const createPersistenceSlice: SliceCreator<
       })();
       set({ openaiKey, typecastKey });
       if (loaded) {
+        // project 교체 — 남아 있던 Outfit AI 제안은 전부 다른 프로젝트의 좌표계다.
+        get().invalidateOutfitSuggestions();
         set({ project: loaded.project, assets: loaded.assets, selectedSceneId: loaded.project.scenes[0]?.id ?? null });
       }
       // 이전에 연결한 Ren'Py 폴더 이름 복원(권한 프롬프트 없이 표시만).
@@ -82,6 +84,7 @@ export const createPersistenceSlice: SliceCreator<
       clearProject();
       clearAssets().catch(() => {});
       const empty = emptyProject();
+      get().invalidateOutfitSuggestions(); // project 교체 — 첫 await/set 이전에 epoch↑
       set({
         project: empty,
         assets: {},
@@ -116,6 +119,9 @@ export const createPersistenceSlice: SliceCreator<
         flash('프로젝트 파일을 불러오는 중…');
         const oldIds = Object.keys(get().assets);
         const { project, assets, assetCount } = await importProjectFile(file);
+        // project 교체가 확정된 시점 — canonical 을 바꾸는 set 보다 **먼저** epoch 을 올린다
+        // (그 사이 resolve 되는 in-flight run 이 남의 프로젝트 좌표계로 제안을 커밋하지 못하게).
+        get().invalidateOutfitSuggestions();
         // 새로 복원된 에셋과 겹치지 않는 이전 프로젝트 에셋은 고아가 되므로 IndexedDB 에서 제거.
         const newIds = new Set(Object.keys(assets));
         // 단일 트랜잭션(건당 트랜잭션 순차 호출 대체) — 고아 에셋이 많은 대형 프로젝트 교체에서 유리.

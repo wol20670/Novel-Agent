@@ -19,6 +19,7 @@ import type {
   EscColors,
 } from '../types';
 import type { BuildResult } from '../parser';
+import type { OutfitSuggestion } from '../generators/outfit';
 import type { AnalyzeMode } from '../project/mergeScenes';
 import type { VoiceEstimate } from '../generators/voice/estimate';
 import type { CollabStatus, PeerPresence } from '../collab';
@@ -81,6 +82,48 @@ export interface State {
   autoAssignEmotionAll: () => Promise<void>;
   /** AI 표정 배정 진행 상황(장면 기준) — null = 실행 중 아님. translateProgress 와 동일한 표시 계약. */
   emotionProgress: { done: number; total: number } | null;
+
+  // ── AI 의상 전환 추천(Outfit AI) ─────────────────────────────────────────────
+  // ⚠️ 제안은 **project 밖 런타임 state** 다 — 그래서 localStorage 저장·.npproj.zip·협업 push 어디에도
+  // 자동으로 안 실린다(그게 이 설계의 핵심이다: 표정의 emotionAuto 처럼 AI 값을 저장하지 않는다).
+  // 사용자가 수락한 값만 기존 Line.outfits 에 manual 값으로 들어간다.
+  /** sceneId → 검수 대기 중인 제안들. 항목 identity 는 (sceneId, lineIndex, character). */
+  outfitSuggestions: Record<string, OutfitSuggestion[]>;
+  /**
+   * ⚠️ **suggestion provenance 가 아니라 in-flight run 의 stale-commit 방지 epoch** 이다.
+   * 배치는 시작 시 이 값을 스냅샷하고 최종 commit 직전에 비교해, 다르면 그 run 결과를 통째로 버린다.
+   * 그래서 canonical 이 바뀌는 모든 경로가 **canonical 변경보다 먼저**(async 면 첫 await 이전에) 올려야 한다.
+   */
+  outfitSuggestionRevision: number;
+  /** AI 의상 추천 진행 상황(장면 기준) — null = 실행 중 아님. */
+  outfitProgress: { done: number; total: number } | null;
+  /**
+   * 대사/지문 한 줄의 의상 전환을 수동 지정/해제(undefined = 그 캐릭터 지정 제거).
+   * 판정 단일 소스는 outfitFlags(types/project.ts) — 이 액션은 그 입력값만 바꾼다.
+   * ⚠️ AI 전용이 아니다: 파서 `#복장` 이 만든 값도 이걸로 지운다(원본 대본 태그가 남아 있으면 재분석 때 다시 생긴다).
+   */
+  setLineOutfit: (
+    sceneId: string,
+    lineIndex: number,
+    character: string,
+    outfit: string | undefined,
+  ) => void;
+  /** 제안 전체를 버리고 epoch 을 올린다(입력이 바뀌어 기존 제안이 더는 유효하지 않을 때의 단일 진입점). */
+  invalidateOutfitSuggestions: () => void;
+  /**
+   * 대본이 의상 변화를 말한 자리를 GPT 로 찾아 **제안만** 만든다(canonical 은 안 건드린다).
+   * autoAssignEmotionAll 과 같은 골격(busy 키·진행률·PACE_MS·outer abort·단일 커밋) + revision guard.
+   */
+  autoSuggestOutfitsAll: () => Promise<void>;
+  /** 제안 하나를 적용 — 현재 state 로 재검증 후 **그 항목만** 목록에서 빼고 나머지는 유지한다. */
+  applyOutfitSuggestion: (sceneId: string, lineIndex: number, character: string) => void;
+  /** 제안 하나를 목록에서만 제거(canonical 무변경·revision 무변경). */
+  ignoreOutfitSuggestion: (sceneId: string, lineIndex: number, character: string) => void;
+  /** 한 장면의 제안을 lineIndex 순서로 순차 재검증하며 일괄 적용 — canonical 변경이 있을 때만 1회 커밋. */
+  applySceneOutfitSuggestions: (sceneId: string) => void;
+  /** 한 장면의 제안을 전부 목록에서만 제거(canonical 무변경·revision 무변경). */
+  ignoreSceneOutfitSuggestions: (sceneId: string) => void;
+
   setSceneStatus: (id: string, status: Scene['status']) => void;
   /**
    * 이 장면을 스프라이트 숨김 상태로 시작할지(장면 카드 헤더 토글). 차량 내부처럼 인물이 서 있는

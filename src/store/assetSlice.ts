@@ -268,6 +268,9 @@ export const createAssetSlice: SliceCreator<
 
     // 같은 배경 이름을 쓰는 모든 장면의 배경 이름을 한 번에 변경(라이브러리 편집).
     renameBackgroundGroup: (key, name) => {
+      // ⚠️ 에셋 액션처럼 보이지만 바꾸는 건 **scene.background 문자열**이다 — Outfit AI 의 LLM 문맥이자
+      // OutfitRule(배경 키워드) baseline 판정의 입력이라 제안이 낡는다. updateScene 을 안 타므로 직접 배선.
+      get().invalidateOutfitSuggestions();
       set((s) => ({
         project: {
           ...s.project,
@@ -302,7 +305,11 @@ export const createAssetSlice: SliceCreator<
     renameCgGroup: (oldDesc, newDesc) => {
       const oldKey = oldDesc.trim();
       const next = newDesc.trim();
-      if (!oldKey || oldKey === next) return;
+      if (!oldKey || oldKey === next) return; // 실제 변경 없음 — epoch 을 올리지 않는다
+      // ⚠️ **CG cutoff 가 움직인다.** 이 액션은 scene.cg 문자열만 바꾸고 kind:'cg' 라인의 desc 는 그대로 두므로,
+      // 매칭되던 마커가 orphan 이 되어(또는 그 반대로) first effective CG 가 이동한다 = writable 경계 변경.
+      // importCgGroup(cgAssetIds 만 바꿈)과 달리 여기는 semantic identity 변경이라 무효화 대상이다.
+      get().invalidateOutfitSuggestions();
       // 설명만 바꾸고 cgAssetIds(인덱스 기준)는 그대로 두어 이미 만든 이미지를 유지한다.
       set((s) => ({
         project: {

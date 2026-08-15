@@ -5,15 +5,25 @@ import { translateBatch, chunkItems, isFatalTranslateError } from '../generators
 import { sleep } from '../generators/shared/retry';
 import { collectEmotionTargets, planEmotionChunks, selectEmotionsBatch } from '../generators/emotion/aiSelect';
 import { estimateEmotionCost } from '../generators/emotion/estimate';
+import {
+  collectOutfitTargets,
+  estimateOutfitCost,
+  outfitLineKey,
+  planOutfitWindows,
+  suggestOutfitsBatch,
+  type OutfitSuggestion,
+} from '../generators/outfit';
 import { buildSynopsis } from '../generators/theme';
 import type { State } from './types';
 import type { SliceCreator } from './context';
 import { sceneById, applyEmotionUpdates } from './helpers';
 
-// setTranslateMode/autoTranslateAll/autoAssignEmotionAll — 번역·표정 두 AI 일괄 처리 액션은
-// busy 키·진행률·PACE_MS·outer 루프 abort·단일 커밋이라는 같은 구조를 공유해서 한 파일로 묶는다.
+// setTranslateMode/autoTranslateAll/autoAssignEmotionAll/autoSuggestOutfitsAll — 번역·표정·의상 AI
+// 일괄 처리 액션은 busy 키·진행률·PACE_MS·outer 루프 abort·단일 커밋이라는 같은 구조를 공유해서
+// 한 파일로 묶는다. 의상만 다른 점: 결과를 canonical 이 아니라 **휘발성 제안 목록**에 커밋하고,
+// 커밋 직전에 revision guard 로 "실행 중 입력이 바뀌었는지"를 확인한다.
 export const createAiBatchSlice: SliceCreator<
-  Pick<State, 'setTranslateMode' | 'autoTranslateAll' | 'autoAssignEmotionAll'>
+  Pick<State, 'setTranslateMode' | 'autoTranslateAll' | 'autoAssignEmotionAll' | 'autoSuggestOutfitsAll'>
 > = (set, get, ctx) => {
   const { flash, autoSave, setScenes } = ctx;
   return {
@@ -242,6 +252,130 @@ export const createAiBatchSlice: SliceCreator<
       } else {
         const msg =
           `AI 표정 배정 완료 — ${done}건 채움` + (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
+        flash(msg, failScenes ? 'error' : 'success');
+      }
+    },
+
+    // 위 두 배치와 같은 골격이되 **canonical 을 건드리지 않는다** — 결과는 검수 대기 제안 목록으로만
+    // 들어가고, 사용자가 수락한 것만 Line.outfits 로 넘어간다(scriptSlice 의 apply 액션들).
+    autoSuggestOutfitsAll: async () => {
+      const project = get().project;
+      const key = get().openaiKey.trim();
+      if (!key) {
+        flash('OpenAI 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
+        return;
+      }
+      const batches = collectOutfitTargets(project);
+      if (!batches.length) {
+        flash('의상 전환을 찾을 대상이 없습니다(추가 의상을 가진 등장인물이 필요합니다).');
+        return;
+      }
+      const estimate = estimateOutfitCost(project);
+      if (!estimate.requests) {
+        flash('의상 전환을 찾을 대상이 없습니다(스캔할 대사가 없습니다).');
+        return;
+      }
+      const ok = window.confirm(
+        `AI 의상 전환 추천을 실행합니다.\n` +
+          `스캔 대상: ${estimate.scanLines}줄 · 예상 요청 ${estimate.requests}회\n` +
+          `예상 비용: 약 $${estimate.usd.toFixed(4)}(gpt-4o-mini 기준, 실제 과금은 OpenAI 대시보드가 정본)\n` +
+          `대본이 옷을 갈아입는다고 말한 자리만 제안합니다(바로 반영되지 않고 검수 후 적용).\n` +
+          `계속할까요?`,
+      );
+      if (!ok) return;
+
+      // ⚠️ stale-run guard 의 기준점. 실행 중 입력이 바뀌면(편집·의상 삭제·원격 반영 등 §invalidation)
+      // 이 값이 올라가고, 최종 커밋 직전 비교에서 걸려 이번 run 의 결과를 통째로 버린다.
+      const startRev = get().outfitSuggestionRevision;
+
+      set((s) => ({
+        busy: { ...s.busy, 'batch:outfit': true },
+        outfitProgress: { done: 0, total: batches.length },
+      }));
+      const synopsis = buildSynopsis(project);
+      const collected: Record<string, OutfitSuggestion[]> = {};
+      let found = 0;
+      let failScenes = 0;
+      let doneScenes = 0;
+      let aborted = false;
+      const PACE_MS = 1200;
+      let callIndex = 0;
+      try {
+        outer: for (const batch of batches) {
+          const scene = sceneById(project.scenes, batch.sceneId);
+          if (!scene) {
+            doneScenes++;
+            continue;
+          }
+          let sceneFailed = false;
+          // 실행과 견적이 같은 planner 를 쓴다 — 요청 수가 어긋날 수 없다.
+          const plans = planOutfitWindows(batch, scene, project.outfitRules);
+          for (const plan of plans) {
+            if (callIndex > 0) await sleep(PACE_MS);
+            callIndex++;
+            try {
+              const changes = await suggestOutfitsBatch(plan, batch, {
+                sceneTitle: scene.title,
+                background: scene.background,
+                direction: scene.direction,
+                synopsis,
+              }, key);
+              for (const c of changes) {
+                const line = scene.lines[c.i];
+                if (!line) continue;
+                const list = collected[batch.sceneId] ?? [];
+                list.push({
+                  sceneId: batch.sceneId,
+                  lineIndex: c.i,
+                  character: c.character,
+                  outfit: c.outfit,
+                  reason: c.reason,
+                  // 제안 생성 시점의 줄 지문 — 적용 시점에 대본이 바뀌었으면 여기서 걸린다.
+                  lineKey: outfitLineKey(line),
+                });
+                collected[batch.sceneId] = list;
+                found++;
+              }
+            } catch (e) {
+              sceneFailed = true;
+              console.warn('[AI 의상 추천] 요청 실패:', batch.sceneId, e);
+              if (isFatalTranslateError(e)) {
+                aborted = true;
+                break outer;
+              }
+            }
+          }
+          if (sceneFailed) failScenes++;
+          doneScenes++;
+          set(() => ({ outfitProgress: { done: doneScenes, total: batches.length } }));
+        }
+      } finally {
+        set((s) => ({ busy: { ...s.busy, 'batch:outfit': false }, outfitProgress: null }));
+      }
+
+      // ⚠️ 커밋 직전 단 한 번의 비교. 다르면 **부분 채택도 하지 않는다** — 낡은 입력으로 만든 제안은
+      // 인덱스·현재 의상 전제가 전부 흔들렸을 수 있어서 골라낼 방법이 없다.
+      if (get().outfitSuggestionRevision !== startRev) {
+        flash(
+          '프로젝트가 의상 AI 분석 중 변경되었습니다. 이번 제안은 적용하지 않았습니다 — 다시 실행해주세요.',
+          'error',
+        );
+        return;
+      }
+      // 단일 커밋. run 결과로 목록을 **통째로 교체**한다(부분 merge 아님 — 이번 실행이 본 대본 전체가 근거).
+      set({ outfitSuggestions: collected });
+
+      if (aborted) {
+        flash(
+          `AI 의상 추천 중단 — ${found}건 제안 · API 키/쿼터 오류로 중단됨(키·잔액을 확인하세요).`,
+          'error',
+        );
+      } else if (!found) {
+        flash('의상 전환으로 볼 만한 대목을 찾지 못했습니다.');
+      } else {
+        const msg =
+          `AI 의상 추천 완료 — ${found}건 제안(장면 카드에서 검수 후 적용)` +
+          (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
         flash(msg, failScenes ? 'error' : 'success');
       }
     },
