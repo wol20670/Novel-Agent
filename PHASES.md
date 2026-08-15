@@ -28,6 +28,7 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 3 | 기존 표정 AI end-to-end audit(**코드 변경 없음**) | ✅ 확정 (3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
 | 4 | 표정 AI correctness — F1(줄 시점 의상) + F4(표정 설명 identity) | ✅ 확정 (2차 리뷰 반영) | `558f18e` | typecheck · vitest 42파일/532 · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 |
 | 5 | 표정 AI 문맥 품질(F2/F3) | ✅ 확정 (v2 리뷰 반영) | `e1c1adf` | typecheck · vitest 42파일/549(532→+17) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 200줄 합성 장면 구조 실측 |
+| 6 | Outfit AI audit + 최소 계약(**코드 변경 없음**) | ✅ 확정 (v3.1, 3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -153,6 +154,86 @@ semantics 불변, 실제 문맥 글자 수만 input 에 반영. 근사 estimator
 · look-ahead 없음 확인 · 총 문맥 6,270자 · `inputTokens` 3,905→8,728 · 예상 비용 $0.001479→$0.002202.
 ⚠️ **이 실측과 자동 테스트가 증명하는 것은 "구조적으로 필요한 문맥이 실제 요청에 들어간다"까지다** —
 표정 선택 품질 향상은 BYO 키 검증이 연기 상태라 증명했다고 쓰지 않는다.
+
+## Phase 6 확정 설계 — Outfit AI 최소 계약 (코드 변경 없음, 구현은 Phase 7)
+
+**역할 분리**: `resolveOutfit` = 장면 시작 baseline 1개 / `outfitFlags` = 그 baseline 에서 출발한 줄별
+fold(판정 단일 소스). **Outfit AI 는 둘 다 안 건드리고** fold 의 입력(`Line.outfits`)만 *사람 손을 거쳐*
+채운다. 찾는 것은 대본이 **의상 변화를 진술한 자리**뿐 — 매 줄 재분류·heuristic 재판정·새 의상 이름
+생성·표정/포즈·hide/show 생성은 범위 밖.
+
+**저장 = P3(transient 제안 → 사용자 apply)**. `Scene`/`Line`/`Project` 에 **신규 persistent 필드 0**.
+제안은 `project` 밖 런타임 state(`outfitSuggestions` + `outfitSuggestionRevision`)라 저장·zip·협업에
+자동으로 안 실린다. 수락하면 기존 `Line.outfits` 에 **manual 값**으로 기록 → merge·삭제·export 가 전부
+Phase 2 경로 그대로(추가 작업 0). provenance 소멸은 **의도**다(승인한 값과 적은 값은 같은 지위).
+표정이 `emotionAuto`(dense·줄마다 배정)를 택한 것과 갈리는 이유: 의상은 **sparse + carry**(한 번 틀리면
+다음 변화까지 계속 틀린 옷) → 검수 비용은 작고 오답 비용이 크다. **`emotionAuto` 구조를 복제하지 말 것.**
+
+**후보 identity = `characterOutfits(c)` 원문**(canonical exact match, fuzzy·괄호 결합 금지 — F4 교훈).
+표정의 `availableExpressions`(업로드된 것만)를 **복사하면 안 된다** — 리스크 구조가 다르다: 스프라이트가
+하나도 없는 의상은 이미지가 정의되지 않고 `pickSpriteAttrs` 가 `기본` pool 로 내려가 **플레이스홀더가 안
+실린다**(대신 "화면상 옷이 안 바뀐다" → 검수 UI 가 **렌더 시점 현재 asset 으로** 경고. snapshot 금지).
+대상 캐릭터 = 그 장면 화자 ∧ 주인공 아님 ∧ 추가 의상 ≥1 — 화자 판정은 **`SceneCard.outfitChars` 와 같은
+규칙**(joint 는 `members` 전개) ⇒ **joint member 는 정상 target**(합성 라벨은 아니다. 표정 AI 의
+joint gate 를 복사하지 말 것). 의상을 안 쓰는 프로젝트는 배치가 비어 **요청 0회**.
+
+**⚠️ 사후 apply 는 Scene-local 이다** — `splitBeat` 승계는 파서 실행 중 상태(`appliedOutfits`)로만
+일어난다. 이미 만들어진 Scene 의 `Line.outfits` 를 고쳐도 **다음 Scene 의 `Scene.outfits`/baseline 은
+안 바뀐다**(자동 분할 sibling 포함, 오늘의 장면 카드 👗 편집도 동일). propagation engine 금지.
+
+**⚠️ writable 경계 = first *effective* CG** — `cgActive` 는 `true` 로만 설정돼 첫 활성 이후 복원·의상
+동기화·화자 show 가 전부 막힌다 ⇒ 그 뒤 transition 은 **dead write**. 단 cutoff 은 raw `kind:'cg'` 가
+아니다: 생성기가 `desc` 를 `scene.cg` 와 매칭할 때만 활성화하므로 **orphan 마커는 경계를 안 끊고**,
+레거시 폴백 게이트는 "**`kind:'cg'` 라인이 하나도 없음**"이라 *`scene.cg` 는 있는데 orphan 마커만 있는
+장면*은 CG 가 끝까지 안 켜져 **전체 writable** 이다(미리보기 `activeCgIdx` 도 같은 3갈래). **hide 는
+반대로 정상 target** — 복원 블록이 그 줄의 fold 값을 쓰므로 새 옷이 실제로 나온다.
+
+**Scene-start**: 별도 Scene-level AI 필드를 만들지 않고 **첫 텍스트 줄의 transition** 으로 표현한다
+(첫 dialogue 이전엔 선 스프라이트가 없어 **관찰되는 렌더 결과가 동등** — raw `outfitFlags` 배열 동일성을
+주장하는 게 아니다). 단 그 캐릭터의 baseline 이 `scene-manual`/`line-manual` 이면 **첫 줄 제안 금지**
+(baseline correction 과 실제 state change 를 deterministic 하게 못 가른다 — v1 은 recall 을 희생).
+`rule`/`default` 면 허용. 집행은 요청에 싣는 transient `outfitSource` 로.
+
+**청킹**: 표정의 `planEmotionChunks` 재사용 금지(문제 구조가 다르다 — 배정 vs 탐색). writable 줄에
+`chunkItems(…, 60, 3500)` 로 **disjoint scan window** + **lead-in 10줄/500자(쓰기 금지)** + look-ahead 없음.
+**미승인 제안을 다음 window 의 current outfit 에 되먹이지 않는다**(Phase 5 의 미커밋 값 금지와 같은 이유,
+의상은 오류 전파가 더 크다) — 대가로 같은 변화가 다른 줄에 재제안될 수 있고 그건 검수가 거른다.
+
+**액션 semantics(가장 헷갈리는 지점)** — invalidate 와 apply 는 **다르다**:
+
+| 액션 | 제안 목록 | revision | canonical |
+|---|---|---|---|
+| `invalidateOutfitSuggestions()` | 전체 clear | +1 | 무변경 |
+| `setLineOutfit()`(manual·칩 ✕) | 전체 clear | +1 | 변경 |
+| `applyOutfitSuggestion()` | **그 항목만 제거(나머지 유지)** | +1 | 변경 |
+| `applySceneOutfitSuggestions()` | 처리분만 제거 | +1(1회) | 변경(**단일 commit**) |
+| `ignoreOutfitSuggestion()` | 그 항목만 제거 | 증가 없음 | 무변경 |
+
+apply 가 전체 clear 를 하면 **한 건 적용에 검수 목록이 통째로 날아간다**(P3 UX 붕괴). 그래도 revision 은
+올린다 — canonical 이 바뀌었으니 동시 실행 중인 old run 을 폐기해야 한다. `outfitSuggestionRevision` =
+*현재 run 의 입력 유효성 세대*이고, 배치는 시작 시 스냅샷 → **최종 commit 직전 비교 → 다르면 run 전체 폐기**.
+일괄 적용은 `lineIndex` 오름차순 **working copy 순차 재검증**(앞 적용이 뒤 제안을 no-op 으로 만든다) 후
+1회 commit. 개별·일괄 모두 apply 직전 **현재 state 로 9개 재검증**(scene/index/kind/`lineKey`/character/
+대상 자격/canonical outfit/manual 선점/no-op).
+
+**invalidation 기준은 slice 가 아니라 "Outfit AI 가 읽는 입력"**: text·hide·Scene 메타/`Scene.outfits`·
+manual `Line.outfits`·OutfitRule·캐릭터 name/`isProtagonist`/의상 add·remove·`applyAnalysis`·
+`hydrate`/`importProject`/`resetAll`/`applyRemoteProject` → clear. **표정 추가·삭제·설명·입화 업로드/
+삭제/교체는 clear 하지 않는다**(candidate identity 는 의상 **이름**뿐이고 renderability 는 렌더 시점 계산).
+⚠️ `lineKey` 지문은 **target anchor 방어일 뿐 context 방어가 아니다**(근거 줄이 바뀌어도 통과) — 그래서
+input-dependency invalidation 이 반드시 함께 필요하다.
+
+**Expression AI**: 수락 즉시 `collectEmotionTargets`(F1)가 `outfitFlags` 로 새 후보를 본다. 기존
+`emotionAuto` 는 **자동으로 안 지운다**(manual 의상 변경도 오늘 똑같은 stale 을 갖는다 — AI 경로만 특별
+취급하면 비대칭). `Line.emotion` 자동 삭제는 **절대 금지**.
+
+**Phase 7 범위 밖**: 신규 store slice · stable Line ID · Scene 간 propagation/파서 재실행 · generic
+stale·revision·transaction·CG framework · provenance graph · 대형 review modal · cancellation ·
+tiktoken · Preview/Export 폴백 비대칭 수정 · merge 재설계 · `Emotion*` generic 개명.
+
+**전체본**(감사 근거·대안 비교·O1~O27 회귀 테스트 매트릭스·known limitations 14종)은 계획 파일
+`~/.claude/plans/novel-agent-phase-6-scalable-meadow.md` v3.1. **실키 검증은 하지 않았으므로 탐지 품질
+(recall/precision·false positive)은 증명된 바 없다.**
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
