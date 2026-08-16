@@ -31,6 +31,7 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 6 | Outfit AI audit + 최소 계약(**코드 변경 없음**) | ✅ 확정 (v3.1, 3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
 | 7 | Outfit AI transition suggestion 구현 | ✅ 확정 (Plan v4 + 구현 diff 리뷰 반영) | `25c2b5e` | typecheck · vitest 46파일/668(549→+119) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 기존 e2e 전체 통과 · 브라우저 targeted smoke · `.npproj.zip` 실제 왕복 |
 | 8 | AI 연출 workflow 통합 audit + 정합성 방어 | ✅ 확정 (Plan v4 + actual diff 리뷰 반영) | `88c4095` | typecheck · vitest 50파일/708(668→+40) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 브라우저 e2e 전체(제안 칩 4경로 + export/import 후속 단계 포함) · `git diff --check` 이상 없음 |
+| 9 | Preview↔Export 스프라이트 표시 parity | ✅ 확정 (Plan v6 + GitHub actual commit 리뷰 반영) | `7352ba5` | typecheck · vitest 50파일/729(708→+21) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 브라우저 e2e 전체 · `git diff --check` 이상 없음 · 미리보기 실기 스모크(콘솔 에러 0) |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -52,7 +53,8 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 **merge**: `carryLineMeta`의 dialogue·narration 두 갈래에 `outfits: next.outfits ?? prev.outfits`(whole-record 교체 — 캐릭터별 merge는 대본에서 지운 지정이 좀비로 남는다). 변경 감지는 `tagFieldsChanged` **한 곳만** 확장하되 **`linesIdentical`일 때만** 인덱스별로 `prev.outfits` vs `next.outfits ?? prev.outfits`(= 실제 병합 결과와 동일 semantics) 비교 → 다르면 `affectsGame`. **`lineKey`·`pairLines`는 불변**, `emotion`/`hideSprites` 감지는 이번에 안 건드림.
 
 **known limitations(이번에 고치지 않음, 기록만)**
-- Preview는 "기본 의상 + 현재 표정", Export는 "그 의상 + neutral"로 폴백이 **비대칭**(`spriteAssetId` vs `generate.ts:765-771`) — 오늘도 존재하나 줄 단위 전환으로 마주칠 확률이 는다.
+- ~~Preview는 "기본 의상 + 현재 표정", Export는 "그 의상 + neutral"로 폴백이 **비대칭**(`spriteAssetId` vs `generate.ts:765-771`) — 오늘도 존재하나 줄 단위 전환으로 마주칠 확률이 는다.~~
+  → **Phase 2 당시의 known limitation. Phase 9(`7352ba5`)에서 Export 를 canonical 로 두고 통합돼 해결됐다.**
 - `pairLines`는 FIFO라 **동일 speaker+text 줄이 여럿이면** 메타가 다른 동일 줄에 붙을 수 있다(emotion·voice·hideSprites가 공유하는 기존 한계).
 - 재분석 시 `next.outfits` 부재가 "태그 삭제"인지 "앱 수동값 유지"인지 구분할 **provenance가 없다** — origin 필드/시스템 추가 금지.
 - AI 표정 후보가 **장면 단위** 의상으로 계산된다(`aiSelect.ts:71-73` → `availableExpressions`) — 줄 단위 전환과 어긋날 수 있는 cross-system 의존. 별도 검토 대상.
@@ -343,10 +345,73 @@ fixture**로 `manual > emotionAuto > 기본` 이 `.rpy` 속성까지 반영되�
 신규 테스트가 실제 회귀를 잡는지는 **mutation check** 로 확인했다(가드 제거 시 12건 중 10건 실패 ·
 생성기가 `emotionAuto` 를 무시하거나 AI 를 작가보다 우선하면 각각 해당 테스트만 실패).
 
-**known limitations(그대로 유지)**: Preview↔Export 스프라이트 폴백 divergence(선행 동작 —
+**known limitations(그대로 유지)**: ~~Preview↔Export 스프라이트 폴백 divergence(선행 동작 —
 `tests/preview-export-fallback.test.ts` 가 "현재 동작"으로 고정하며 후속 Phase 가 통합하면 그 테스트를
-함께 바꾸는 게 정상) · `pairLines` FIFO · stable Line ID 없음 · 무시한 제안이 재실행 때 다시 나옴 ·
-**양쪽 AI 실키 precision/recall 미검증**(사용자 승인 없이 paid 호출을 하지 않았다).
+함께 바꾸는 게 정상)~~ → **Phase 8 시점의 known limitation이었고 Phase 9(`7352ba5`)에서 해결됐다**
+(그 테스트 파일은 예고대로 parity 검증으로 의미가 바뀌었다) · `pairLines` FIFO · stable Line ID 없음 ·
+무시한 제안이 재실행 때 다시 나옴 · **양쪽 AI 실키 precision/recall 미검증**(사용자 승인 없이 paid
+호출을 하지 않았다).
+
+## Phase 9 확정 설계 — Preview↔Export 스프라이트 표시 parity (구현 `7352ba5`)
+
+**문제**: 같은 줄에서 미리보기와 게임이 **다른 그림**을 골랐다. 그 의상에 그 표정 그림이 없을 때
+미리보기는 `spriteAssetId` 로 *기본 의상의 같은 표정*(옷을 버림)을, 생성기는 `pickSpriteAttrs` 로
+*그 의상의 neutral/pool[0]*(표정을 버림)을 썼다.
+
+**Export 가 canonical.** 줄의 의상은 `outfitFlags` 가 정하고 게임이 정본이므로 **미리보기를 출력에
+맞췄다**(생성기 semantics 무변경).
+
+**공유 단일 소스**: slot 목록 `spriteSlots` + 폴백 판정 `selectSprite`(둘 다 `generate.ts`, 미리보기가
+import). `pickSpriteAttrs` 는 `selectSprite` 의 wrapper 로 남고 **반환 계약 `(outfitAttr, attr)` 무변경**.
+helper 를 `types/project.ts` 에 두지 않은 이유는 순환 의존(그 모듈은 런타임 의존 0) — Ren'Py 속성
+어휘의 소유자가 `generate.ts` 다.
+
+**폴백 사다리(2단계, 모든 의상 공통 — base 특별취급 없음)**
+```
+pool  : requested outfit → (비면) '기본' → (비면) 전체
+pool 내: wantAttr → 'neutral' → pool[0]
+```
+⚠️ **판정은 Expression identity 가 아니라 `attr` 존재 기준**이다 — 커스텀 표정 속성이 32비트 FNV-1a
+해시라 injective 가 아니어서(D5) 두 판정이 갈리면 기존 게임 출력이 달라진다. 반대로 `'neutral'` 은
+커스텀이 항상 `'x'` 접두사를 가져 **`'기본'` 전용이 보장**되고, base pool 에는 리터럴 `'기본'` 슬롯이
+항상 있어 **base 재진입은 항상 `'기본'` 에 착지**한다(`pool[0]` 은 추가 의상에서만 도달).
+
+**줄 사이 carry 는 논리 표정이 아니라 *실제 표시된 attr***(= 생성기 `lastShown.attr` 대응).
+- **화자 줄**: 논리 표정(`resolveEmotion`)을 **다시 계산**한다.
+- **비화자 의상 동기화 · 숨김 복원**: 직전 **표시 attr** 을 이어받아 다시 사다리를 탄다.
+  (A 의상에 '기쁨'이 없어 neutral 로 내려갔으면, B 로 갈아입어도 '기쁨'이 아니라 neutral 이다.)
+- **숨김 · 유효 CG 구간**: 표시 상태 **동결**.
+⚠️ carry 를 논리 표정으로 되돌리면 그 지점에서 다시 갈라진다. `wantedOutfit` 은 emission 전용
+게이트라 미리보기가 carry 할 필요가 없다(`pick` 이 멱등).
+
+**기본 의상 slot 의 입력(정책은 호출자에게)**: `spriteSlots(c, planExprs)` 는 정책을 모른다.
+- 생성기 = `expressionPlan`(**승인 장면만**, 합동 대사는 멤버 전개)
+- 미리보기 = **승인 장면 project-wide ∪ 지금 보고 있는 미승인 장면 하나**
+⇒ 미리보기 정책이 `.rpy` 로 샐 수 없다.
+
+**D3 보존(의도)**: 기본 의상 스프라이트가 하나도 없어 생성기 `optedIn` 게이트에서 탈락하는 캐릭터는
+**게임에 아예 안 나오므로 parity 대상이 아니다** — 미리보기는 **예전 `spriteAssetId` 경로를 그대로**
+쓴다. 게이트는 `spriteSlots` 호출보다 **앞**에 있어야 한다(뒤로 밀면 그 캐릭터가 새로 게임에 등장한다).
+
+**저장·출력**: `Line`/`Scene`/`Project` 신규 필드 0, save/load·`.npproj.zip` 구조 무변경,
+`.rpy` **22구성 245파일 0바이트 회귀**.
+
+**테스트**: `tests/preview-export-fallback.test.ts` 가 divergence 기록 → **parity 검증**으로 의미가
+바뀌었다(Phase 8 머리주석이 예고한 대로). 기대값을 미리보기로 만들지 않고 **실제 `.rpy` 의 show/hide
+를 파싱**해 대조하며, 핵심 케이스는 Export literal·Preview literal·parity 를 셋 다 본다.
+신규 테스트는 **mutation check** 로 검출력을 확인했다 — 그 과정에서 T15c/T15d 의 약한 fixture(정작
+`scriptExprs` 범위 변이를 못 잡던 것)를 발견해 보정했다.
+
+**known limitations**
+- **D3** — Export `optedIn` 비대칭 자체는 미해결(base 스프라이트가 없고 추가 의상만 올린 캐릭터는
+  올린 아트가 게임에서 무시된다). 고치면 `show` 가 새로 생겨 회귀 0 이 깨진다.
+- **D4** — `availableExpressions` 의 기본 의상 폴백 때문에 AI 표정 후보에 그 의상이 표시하지 못하는
+  표정이 실린다(미해결). Phase 9 이후엔 그 강등이 **미리보기에 보이게** 됐을 뿐이다.
+- **D5** — 커스텀 **표정** 속성의 32비트 FNV-1a 충돌 가능.
+- **D6** — 커스텀 **의상** 속성의 32비트 FNV-1a 충돌 가능(미리보기 칸 조회는 논리 의상 이름으로 해
+  엉뚱한 의상을 집지는 않는다).
+- D5/D6 충돌 영역에서 **Ren'Py 중복 image 정의의 승자 parity 는 보장 범위 밖**이다. 폴백 attr 선택
+  자체는 기존 semantics 를 그대로 보존한다.
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 

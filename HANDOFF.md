@@ -4,10 +4,22 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **복장·표정 자동 추론(LLM) 도입 — Phase 8 까지 확정 완료(GPT actual diff 승인).** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
-  - **다음 Phase 프롬프트를 받기 전까지 새 Phase 를 시작하지 말 것.** Phase 8(통합 audit + 정합성 방어)로 계획된 범위는 끝났다.
-  - Phase 5~8 이 증명한 것은 **구조까지**다 — 표정 선택 품질도, 의상 전환 탐지 품질도 **실키 검증 연기 상태라 증명되지 않았다.**
-  - 후속 후보(착수 전 지시 필요): 실키로 의상 탐지 품질(recall/precision) 실측 · 무시한 제안이 재실행 때 다시 나오는 문제(ignored 기억은 persistent provenance 라 일부러 안 만듦) · Preview↔Export 스프라이트 폴백 divergence 통합 여부 판단.
+- **복장·표정 자동 추론(LLM) 도입 — Phase 9 까지 확정 완료(GPT actual commit 승인).** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
+  - **다음 Phase 프롬프트를 받기 전까지 새 Phase 를 시작하지 말 것.** Phase 9(Preview↔Export 스프라이트 표시 parity)로 계획된 범위는 끝났다.
+  - Phase 5~9 가 증명한 것은 **구조까지**다 — 표정 선택 품질도, 의상 전환 탐지 품질도 **실키 검증 연기 상태라 증명되지 않았다.**
+  - 후속 후보(착수 전 지시 필요): 실키로 의상 탐지 품질(recall/precision) 실측 · 무시한 제안이 재실행 때 다시 나오는 문제(ignored 기억은 persistent provenance 라 일부러 안 만듦).
+  - known limitations(**명시적 우선순위 지시 전까지 착수하지 않음**, 상세는 PHASES.md Phase 9 절): D3 Export `optedIn` 비대칭 · D4 `availableExpressions` 후보 누수 · D5/D6 커스텀 표정·의상 속성 해시 충돌.
+
+## 📌 Phase 9 가 확정한 계약 (다음 Phase 의 baseline — 깨지 말 것)
+- **미리보기 스프라이트 선택은 Export 와 맞춘 상태다.** `optedIn=true` 캐릭터는 생성기의
+  `spriteSlots`/`selectSprite` 를 **공유**하고, 줄 사이에는 논리 표정이 아니라 **실제 표시된 attr** 을
+  잇는다(생성기 `lastShown.attr` 대응).
+- **화자 줄에서만 논리 표정을 다시 계산**하고, 비화자 의상 동기화·숨김 복원은 **표시 attr carry**,
+  숨김·유효 CG 구간은 **동결**이다.
+- **미리보기에 독자적인 스프라이트 폴백 state machine 을 다시 만들지 말 것** — 판정이 둘로 갈리는
+  순간 Phase 9 이전 버그가 되돌아온다. 폴백 판정은 Expression identity 가 아니라 **attr 존재** 기준.
+- **`optedIn=false` 캐릭터(D3)는 기존 미리보기 경로(`spriteAssetId`)를 의도적으로 유지**한다 —
+  게임에 안 나오는 캐릭터라 parity 대상이 아니고, 통합하면 목적 밖의 화면 변경이 된다.
 
 ## 📌 Phase 8 이 확정한 계약 (다음 Phase 의 baseline — 깨지 말 것)
 - **표정 AI 는 async 결과를 현재 project 에 그냥 merge 하지 않는다.** 커밋 직전 **current snapshot 하나**로 대상·청크·요청을 다시 만들어 재검증하고, 어긋난 것만 버린다(run 전체 폐기 아님). 쓰기 base 는 항상 `currentProject.scenes` — 실행 중 사용자가 한 무관한 편집(번역·상태 등)은 **보존된다**. 검증~`setScenes` 사이에 `await` 을 넣지 말 것.
@@ -27,4 +39,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 8 확정 — AI 연출 workflow 통합 audit + 정합성 방어(`88c4095`)**: 표정 AI 커밋 직전 stale 재검증(C1) · 의상 제안 무효화 안내(C2) · 적용 토스트 정확화(C3) · AI 표정 초기화(C4). 생성기·파서·schema·협업 무수정이라 `.rpy` 회귀 0(22구성/245파일). 검증 = typecheck · vitest 50파일/708 · 브라우저 e2e 전체. 전체 설계는 `PHASES.md` "Phase 8 확정 설계".
+- **Phase 9 확정 — Preview↔Export 스프라이트 표시 parity(`7352ba5`)**: 미리보기가 생성기의 `spriteSlots`/`selectSprite` 를 공유하고 줄 사이에 **실제 표시 attr** 을 잇도록 통합(판정 함수 `computeSpriteDisplay` 로 분리 — React 없이 테스트). 생성기 출력 semantics 무변경이라 `.rpy` 회귀 0(22구성/245파일). 검증 = typecheck · vitest 50파일/729 · 브라우저 e2e 전체 · 미리보기 실기 스모크. 전체 설계는 `PHASES.md` "Phase 9 확정 설계".
