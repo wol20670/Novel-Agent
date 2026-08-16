@@ -435,3 +435,43 @@ describe('O24 — in-flight run stale-commit guard', () => {
     expect(lineOutfits(1)).toBeUndefined();
   });
 });
+
+// ── Phase 8 · C2 ────────────────────────────────────────────────────────────
+// 무효화 자체는 계약대로 옳다(제목·배경은 Outfit AI 의 LLM 문맥 입력이다). 결함이었던 건 **침묵**이다:
+// 유료로 받은 검수 목록이 장면 제목 한 글자에 통째로 사라지는데 아무 안내가 없어, 사용자는 스크롤하다
+// 뒤늦게 알아채고 복구 수단은 재실행(재과금)뿐이었다.
+describe('C2 — 무효화로 실제 제안이 사라질 때만 1회 알린다', () => {
+  it('검수 목록이 있었으면 건수를 알린다', () => {
+    seed();
+    useStore.setState({ toast: null });
+
+    useStore.getState().updateScene(SCENE_ID, { title: '새 제목' });
+
+    expect(useStore.getState().toast).toContain('의상 제안 2건을 취소했습니다');
+    expect(suggestions()).toEqual({});
+  });
+
+  it('이미 비어 있으면 완전히 침묵한다(hydrate·원격 반영 등에서 토스트가 튀지 않는다)', () => {
+    useStore.setState({
+      project: baseProject(),
+      outfitSuggestions: {},
+      outfitSuggestionRevision: 3,
+      toast: null,
+    });
+
+    useStore.getState().invalidateOutfitSuggestions();
+
+    expect(useStore.getState().toast).toBeNull();
+    expect(revision()).toBe(4); // 알림만 생략할 뿐 epoch 은 정상적으로 올라간다
+  });
+
+  it('연속 무효화에서도 토스트는 목록이 있던 첫 번째만 뜬다(스팸 불가)', () => {
+    seed();
+    useStore.getState().updateScene(SCENE_ID, { title: '한 번' });
+    useStore.setState({ toast: null });
+
+    useStore.getState().updateScene(SCENE_ID, { title: '두 번' }); // 이제 목록이 비어 있다
+
+    expect(useStore.getState().toast).toBeNull();
+  });
+});

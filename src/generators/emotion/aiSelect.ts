@@ -313,8 +313,16 @@ export interface EmotionPromptCtx {
  *    예전 요청과 바이트가 같다).
  * 후보 그룹은 items 에서 **필요한 키만** 추리되 순서는 ctx.candidatesByKey 의 삽입 순서를 그대로
  * 쓴다(items 등장 순서로 새로 만들면 뒤쪽 청크에서 화자 순서가 뒤집혀 요청 바이트가 달라진다).
+ *
+ * ⚠️ **export 인 이유**: 배치(store)가 커밋 직전에 "이 결과를 만든 요청이 지금도 같은가"를 판정할 때
+ * 이 함수의 반환값을 그대로 stale 판정 키로 쓴다(`buildOutfitRequest` 가 export 인 것과 같은 이유).
+ * 그 판정이 의미를 가지려면 **실제로 전송되는 요청과 같은 함수·같은 입력**이어야 한다 — 비슷한
+ * 페이로드를 store 쪽에서 따로 조립하면 두 곳이 조용히 갈라져 stale 판정이 거짓말을 한다.
  */
-function buildRequest(items: EmotionItem[], ctx: EmotionPromptCtx): { system: string; user: string } {
+export function buildEmotionRequest(
+  items: EmotionItem[],
+  ctx: EmotionPromptCtx,
+): { system: string; user: string } {
   const scenePart = [`title: ${ctx.sceneTitle}`];
   if (ctx.background) scenePart.push(`background: ${ctx.background}`);
   if (ctx.direction.length) scenePart.push(`direction: ${ctx.direction.join(' / ')}`);
@@ -482,7 +490,7 @@ export async function selectEmotionsBatch(
   apiKey: string,
 ): Promise<Record<number, Expression>> {
   if (!items.length) return {};
-  const { system, user } = buildRequest(items, ctx);
+  const { system, user } = buildEmotionRequest(items, ctx);
   const raw = await chatWithRetry(system, user, apiKey);
   return parseEmotionResponse(raw, items, ctx.candidatesByKey);
 }

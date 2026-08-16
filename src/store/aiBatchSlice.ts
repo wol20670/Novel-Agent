@@ -1,9 +1,16 @@
-import type { Locale, Expression } from '../types';
+import type { Locale, Expression, Project } from '../types';
 import { translateModeOf, translateModelFor, baseLocaleOf } from '../types';
 import { collectUntranslated } from '../generators/translate/collect';
 import { translateBatch, chunkItems, isFatalTranslateError } from '../generators/translate';
 import { sleep } from '../generators/shared/retry';
-import { collectEmotionTargets, planEmotionChunks, selectEmotionsBatch } from '../generators/emotion/aiSelect';
+import {
+  buildEmotionRequest,
+  candidateKey,
+  collectEmotionTargets,
+  planEmotionChunks,
+  selectEmotionsBatch,
+  type EmotionItem,
+} from '../generators/emotion/aiSelect';
 import { estimateEmotionCost } from '../generators/emotion/estimate';
 import {
   collectOutfitTargets,
@@ -22,6 +29,116 @@ import { sceneById, applyEmotionUpdates } from './helpers';
 // 일괄 처리 액션은 busy 키·진행률·PACE_MS·outer 루프 abort·단일 커밋이라는 같은 구조를 공유해서
 // 한 파일로 묶는다. 의상만 다른 점: 결과를 canonical 이 아니라 **휘발성 제안 목록**에 커밋하고,
 // 커밋 직전에 revision guard 로 "실행 중 입력이 바뀌었는지"를 확인한다.
+
+/**
+ * 표정 배치가 실행 중에만 들고 다니는 결과 하나 — **저장되지 않는다.**
+ * Project/Scene/Line 어디에도 새 필드가 생기지 않는다(persistent schema 증가 0).
+ *
+ * `requestKey` 는 provenance 가 아니라 **stale 판정용 ephemeral 값**이다: 이 결과를 만든 요청의
+ * (system, user) 원문이라, 커밋 직전에 현재 project 로 같은 요청을 다시 만들어 비교하면
+ * "그때 모델이 본 근거가 지금도 같은가"를 추측 없이 판정할 수 있다.
+ */
+interface PendingEmotionUpdate {
+  expr: Expression;
+  /** 그 요청의 EmotionItem 값 그대로(새로 계산하지 않는다) — target anchor·(화자,의상) identity. */
+  speaker: string;
+  text: string;
+  outfit: string;
+  requestKey: string;
+}
+
+/**
+ * 요청 원문 → stale 판정 키. 해시 라이브러리를 쓰지 않는다(문자열 비교로 충분하고, 어긋났을 때
+ * 원인이 그대로 보인다). 직렬화가 `candidateKey`(emotion/aiSelect.ts)와 같은 JSON 배열 관용구인
+ * 이유도 같다 — 구분자 문자를 박으면 그 문자가 프롬프트에 등장하는 순간 서로 다른 (system, user)
+ * 조합이 같은 키가 되고, 결국 별도 escaping 규칙을 만들게 된다.
+ */
+function emotionRequestKey(system: string, user: string): string {
+  return JSON.stringify([system, user]);
+}
+
+/**
+ * 커밋 직전 재검증 — **의상 AI 의 global revision epoch 를 복사하지 않는다.**
+ * 의상은 sparse(제안 몇 건)라 run 전체 폐기가 싸지만, 표정은 dense·유료(수백 줄)라 무관한 편집 하나에
+ * run 전체를 버리면 비용이 사용자에게 전가된다. 그래서 **어긋난 update 만** 버리고 나머지는 살린다.
+ *
+ * 판정은 두 축이다(중복이 아니라 역할 분리):
+ *  · target validation  = "이 결과를 지금 이 줄에 써도 되는가"(1~8)
+ *  · request validation = "이 결과를 만든 LLM 판단 근거가 아직 같은가"(9)
+ *
+ * 1·2·3·5·6 은 **기존 collectEmotionTargets 의 gate 가 그대로 제공한다** — 아직 emotionAuto 를 쓰기
+ * 전이라, 그 사이 사람이 표정을 직접 고른 줄(또는 사라진 줄)은 fresh 목록에서 자연히 빠진다.
+ * 새 fingerprint/dependency framework 를 만들지 않고 기존 planner·builder 를 그대로 다시 태운다.
+ */
+function validateEmotionUpdates(
+  currentProject: Project,
+  pending: Map<string, Map<number, PendingEmotionUpdate>>,
+): { valid: Map<string, Map<number, Expression>>; skipped: number } {
+  const synopsis = buildSynopsis(currentProject);
+  const lineKey = (sceneId: string, i: number) => JSON.stringify([sceneId, i]);
+  const fresh = new Map<string, { item: EmotionItem; requestKey: string; candidates: Expression[] }>();
+
+  // 현재 project 로 대상·청크·요청을 **실행 때와 같은 경로**로 다시 만든다.
+  for (const batch of collectEmotionTargets(currentProject)) {
+    const scene = sceneById(currentProject.scenes, batch.sceneId);
+    if (!scene) continue;
+    for (const plan of planEmotionChunks(batch)) {
+      const { system, user } = buildEmotionRequest(plan.items, {
+        sceneTitle: scene.title,
+        background: scene.background,
+        direction: scene.direction,
+        cg: scene.cg,
+        synopsis,
+        candidatesByKey: batch.candidatesByKey,
+        expressionNotes: currentProject.expressionNotes,
+        contextLines: plan.context,
+      });
+      const requestKey = emotionRequestKey(system, user);
+      for (const it of plan.items) {
+        fresh.set(lineKey(batch.sceneId, it.i), {
+          item: it,
+          requestKey,
+          candidates: batch.candidatesByKey.get(candidateKey(it.speaker, it.outfit)) ?? [],
+        });
+      }
+    }
+  }
+
+  const valid = new Map<string, Map<number, Expression>>();
+  let skipped = 0;
+  for (const [sceneId, lineMap] of pending) {
+    for (const [i, u] of lineMap) {
+      const f = fresh.get(lineKey(sceneId, i));
+      // 1·2·3·5·6 — 장면·줄이 사라졌거나, 더 이상 배정 대상이 아니거나(사람이 표정을 직접 지정 등)
+      if (!f) {
+        skipped += 1;
+        continue;
+      }
+      // 4 줄 anchor · 7 (화자, 의상) candidate identity — 의상만 바뀌어도 후보 공간이 달라진다
+      if (f.item.speaker !== u.speaker || f.item.text !== u.text || f.item.outfit !== u.outfit) {
+        skipped += 1;
+        continue;
+      }
+      // 8 고른 표정이 지금도 그 줄의 유효 후보인가(스프라이트·표정 목록이 바뀌었을 수 있다)
+      if (!f.candidates.includes(u.expr)) {
+        skipped += 1;
+        continue;
+      }
+      // 9 그 결과를 만든 요청이 지금도 같은가(문맥 줄·장면 메타·시놉시스·후보까지 전부 포함된 원문 비교)
+      if (f.requestKey !== u.requestKey) {
+        skipped += 1;
+        continue;
+      }
+      let m = valid.get(sceneId);
+      if (!m) {
+        m = new Map();
+        valid.set(sceneId, m);
+      }
+      m.set(i, u.expr);
+    }
+  }
+  return { valid, skipped };
+}
 export const createAiBatchSlice: SliceCreator<
   Pick<State, 'setTranslateMode' | 'autoTranslateAll' | 'autoAssignEmotionAll' | 'autoSuggestOutfitsAll'>
 > = (set, get, ctx) => {
@@ -172,14 +289,13 @@ export const createAiBatchSlice: SliceCreator<
         emotionProgress: { done: 0, total: batches.length },
       }));
       const synopsis = buildSynopsis(project);
-      let done = 0;
       let failScenes = 0;
       let doneScenes = 0;
       let aborted = false; // 키/쿼터 오류처럼 재시도해도 의미 없는 치명적 오류 — 배치 전체 중단
-      // sceneId → lineIndex → 배정된 표정. 루프가 끝난 뒤 applyEmotionUpdates 로 딱 1번만 커밋한다
-      // (autoTranslateAll 의 updates Map 누적 → 단일 커밋과 동일한 이유 — 채워질 때마다 scenes 를
-      // 재빌드하면 장면·줄 수에 비례해 리렌더/저장이 반복된다).
-      const updates = new Map<string, Map<number, Expression>>();
+      // sceneId → lineIndex → 배정 결과(+ stale 판정용 anchor·requestKey). 루프가 끝난 뒤
+      // 재검증을 거쳐 applyEmotionUpdates 로 딱 1번만 커밋한다(autoTranslateAll 의 updates Map 누적
+      // → 단일 커밋과 동일한 이유 — 채워질 때마다 scenes 를 재빌드하면 리렌더/저장이 반복된다).
+      const updates = new Map<string, Map<number, PendingEmotionUpdate>>();
       const PACE_MS = 1200; // 연속 호출 레이트리밋 회피(자동 번역과 동일 기준)
       let callIndex = 0;
       try {
@@ -199,21 +315,23 @@ export const createAiBatchSlice: SliceCreator<
             // 후보는 배치 전체 맵을 그대로 넘긴다 — 프롬프트에 실을 그룹은 selectEmotionsBatch 가
             // 청크 items 에서 역산한다(후보를 여기서 한 번 더 추리면 "프롬프트에 실린 후보"와
             // "응답 검증에 쓰는 후보"가 두 곳에서 따로 정해져 어긋날 수 있다).
+            const promptCtx = {
+              sceneTitle: scene.title,
+              background: scene.background,
+              direction: scene.direction,
+              cg: scene.cg,
+              synopsis,
+              candidatesByKey: batch.candidatesByKey,
+              expressionNotes: project.expressionNotes,
+              contextLines: plan.context,
+            };
+            // ⚠️ 이 요청이 **실제로 무엇을 보고 답했는지**를 그대로 기억해 둔다(커밋 직전 재검증의 축 9).
+            // selectEmotionsBatch 가 내부에서 부르는 것과 **같은 함수·같은 입력**이어야 의미가 있다 —
+            // 비슷한 페이로드를 여기서 따로 조립하면 두 곳이 조용히 갈라진다.
+            const { system, user } = buildEmotionRequest(plan.items, promptCtx);
+            const requestKey = emotionRequestKey(system, user);
             try {
-              const result = await selectEmotionsBatch(
-                plan.items,
-                {
-                  sceneTitle: scene.title,
-                  background: scene.background,
-                  direction: scene.direction,
-                  cg: scene.cg,
-                  synopsis,
-                  candidatesByKey: batch.candidatesByKey,
-                  expressionNotes: project.expressionNotes,
-                  contextLines: plan.context,
-                },
-                key,
-              );
+              const result = await selectEmotionsBatch(plan.items, promptCtx, key);
               for (const it of plan.items) {
                 const expr = result[it.i];
                 if (!expr) continue; // 파싱 실패/후보 밖 — resolve.ts 의 휴리스틱 폴백에 맡긴다
@@ -222,8 +340,13 @@ export const createAiBatchSlice: SliceCreator<
                   sceneUpdates = new Map();
                   updates.set(batch.sceneId, sceneUpdates);
                 }
-                sceneUpdates.set(it.i, expr);
-                done++;
+                sceneUpdates.set(it.i, {
+                  expr,
+                  speaker: it.speaker,
+                  text: it.text,
+                  outfit: it.outfit,
+                  requestKey,
+                });
               }
             } catch (e) {
               sceneFailed = true;
@@ -241,18 +364,33 @@ export const createAiBatchSlice: SliceCreator<
       } finally {
         set((s) => ({ busy: { ...s.busy, 'batch:emotion': false }, emotionProgress: null }));
       }
+      // ⚠️ 여기부터 setScenes 까지는 **동기 구간**이다 — await/sleep/네트워크를 넣지 말 것.
+      // 검증과 쓰기가 서로 다른 시점의 project 를 보면(= 중간에 사용자 편집이 끼면) 방금 통과시킨
+      // 판정이 무의미해진다. 그래서 스냅샷을 **한 번만** 잡고 그 아래에서 get() 을 다시 읽지 않는다.
+      let committed = 0;
+      let staleSkipped = 0;
       if (updates.size) {
-        setScenes(applyEmotionUpdates(get().project.scenes, updates)); // 단일 set + 단일 autoSave
+        const currentProject = get().project;
+        const { valid, skipped } = validateEmotionUpdates(currentProject, updates);
+        staleSkipped = skipped;
+        for (const m of valid.values()) committed += m.size;
+        // 쓰기 base 는 **반드시 현재 scenes** 다. 실행 시작 시점 스냅샷(project.scenes)에 쓰면
+        // 실행 중 사용자가 한 다른 편집(번역·보이스·상태 등)을 통째로 되감는다.
+        if (valid.size) setScenes(applyEmotionUpdates(currentProject.scenes, valid)); // 단일 set + 단일 autoSave
       }
+      const staleSuffix = staleSkipped
+        ? ` · ${staleSkipped}건 건너뜀(분석 중 프로젝트가 변경됨)`
+        : '';
       if (aborted) {
         flash(
-          `AI 표정 배정 중단 — ${done}건 채움 · API 키/쿼터 오류로 중단됨(키·잔액을 확인하세요).`,
+          `AI 표정 배정 중단 — ${committed}건 채움${staleSuffix} · API 키/쿼터 오류로 중단됨(키·잔액을 확인하세요).`,
           'error',
         );
       } else {
         const msg =
-          `AI 표정 배정 완료 — ${done}건 채움` + (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
-        flash(msg, failScenes ? 'error' : 'success');
+          `AI 표정 배정 완료 — ${committed}건 채움${staleSuffix}` +
+          (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
+        flash(msg, failScenes || staleSkipped ? 'error' : 'success');
       }
     },
 

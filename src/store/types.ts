@@ -82,6 +82,19 @@ export interface State {
   autoAssignEmotionAll: () => Promise<void>;
   /** AI 표정 배정 진행 상황(장면 기준) — null = 실행 중 아님. translateProgress 와 동일한 표시 계약. */
   emotionProgress: { done: number; total: number } | null;
+  /**
+   * **사용자가 명시적으로 누를 때만** 실행되는 AI 배정 표정 초기화 — `Line.emotionAuto` 만 비운다.
+   *
+   * ⚠️ 이건 automatic invalidation 이 아니다. 의상을 바꿔도 기존 표정은 **자동으로 안 지운다**(수동
+   * 의상 편집도 똑같은 stale 을 만들기 때문에 AI 경로만 특별 취급하면 비대칭이 된다). 대신 표정 AI 는
+   * 이미 값이 있는 줄을 영구 스킵하므로(collectEmotionTargets 의 증분 gate) **재실행으로 되돌릴 방법이
+   * 이 액션 하나뿐**이다. 초기화 후 기존 🎭 배정을 다시 돌리면 그 줄들이 자연히 대상으로 돌아온다.
+   *
+   * 불변: `Line.emotion`(사람이 정한 값)·`Line.outfits`·`Scene.outfits`·`outfitSuggestions`·
+   * `outfitSuggestionRevision`·번역·보이스·상태는 **전부 그대로**(표정은 Outfit AI 입력이 아니다).
+   * `emotionAuto` 가 하나도 없으면 확인창도 띄우지 않고 아무것도 저장하지 않는다.
+   */
+  clearEmotionAuto: () => void;
 
   // ── AI 의상 전환 추천(Outfit AI) ─────────────────────────────────────────────
   // ⚠️ 제안은 **project 밖 런타임 state** 다 — 그래서 localStorage 저장·.npproj.zip·협업 push 어디에도

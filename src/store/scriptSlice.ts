@@ -36,6 +36,7 @@ export const createScriptSlice: SliceCreator<
     | 'applyAnalysis'
     | 'updateScene'
     | 'setLineEmotion'
+    | 'clearEmotionAuto'
     | 'setLineHideSprites'
     | 'setLineText'
     | 'setLineTranslation'
@@ -148,6 +149,39 @@ export const createScriptSlice: SliceCreator<
       );
     },
 
+    // ⚠️ 사용자가 누를 때만 도는 recovery 액션이다(automatic invalidation 아님 — types.ts 계약 참고).
+    // 표정은 Outfit AI 의 입력이 아니므로 invalidateOutfitSuggestions 를 **부르지 않는다**
+    // (setLineEmotion 과 같은 관용구) — 그래서 검수 중인 의상 제안이 이 액션으로 날아가지 않는다.
+    clearEmotionAuto: () => {
+      const scenes = get().project.scenes;
+      // 먼저 센다 — 0건이면 확인창도, 저장도, 상태 변경도 없다(빈 상태에서 파괴적 confirm 금지).
+      let count = 0;
+      for (const sc of scenes) {
+        for (const l of sc.lines) if (l.kind === 'dialogue' && l.emotionAuto) count += 1;
+      }
+      if (!count) {
+        flash('초기화할 AI 배정 표정이 없습니다.');
+        return;
+      }
+      const ok = window.confirm(
+        `AI가 자동 배정한 표정 ${count}건을 초기화합니다.\n` +
+          `직접 지정한 표정은 유지됩니다. 계속할까요?`,
+      );
+      if (!ok) return; // 취소 — canonical·저장 모두 무변경
+      setScenes(
+        scenes.map((sc) => {
+          if (!sc.lines.some((l) => l.kind === 'dialogue' && l.emotionAuto)) return sc; // 참조 유지
+          return {
+            ...sc,
+            lines: sc.lines.map((l) =>
+              l.kind === 'dialogue' && l.emotionAuto ? { ...l, emotionAuto: undefined } : l,
+            ),
+          };
+        }),
+      );
+      flash(`AI 배정 표정 ${count}건을 초기화했습니다(직접 지정한 표정은 유지).`, 'success');
+    },
+
     setLineHideSprites: (sceneId, lineIndex, hide) => {
       get().invalidateOutfitSuggestions(); // hide 문맥은 Outfit AI 입력이다(markers/initialHidden)
       setScenes(
@@ -203,6 +237,14 @@ export const createScriptSlice: SliceCreator<
     },
 
     invalidateOutfitSuggestions: () => {
+      // 검수 목록이 실제로 있었을 때만 1회 알린다 — 유료로 받은 제안이 조용히 사라지면 사용자는
+      // 스크롤하다 뒤늦게 알게 되고 복구 수단이 재실행(재과금)뿐이다. 이미 비어 있으면 완전 침묵
+      // (hydrate·원격 반영 등 목록이 없는 경로에서 토스트가 튀지 않는다).
+      // ⚠️ best-effort 다: importProject/resetAll 처럼 뒤이어 다른 flash 가 나는 경로에선 덮인다.
+      const pending = Object.values(get().outfitSuggestions).reduce((n, list) => n + list.length, 0);
+      if (pending) {
+        flash(`대본·설정이 바뀌어 의상 제안 ${pending}건을 취소했습니다(다시 실행해야 합니다).`);
+      }
       set((s) => ({
         outfitSuggestions: {},
         // epoch↑ — 실행 중인 배치가 이 변경 뒤에 결과를 커밋하지 못하게 한다(provenance 가 아니다).
@@ -240,7 +282,12 @@ export const createScriptSlice: SliceCreator<
         outfitSuggestionRevision: s.outfitSuggestionRevision + 1,
       }));
       setScenes(patchLineOutfit(sceneId, lineIndex, character, target.outfit));
-      flash(`${character} → ${target.outfit} 적용했습니다(표정 배정은 그대로 유지됩니다).`, 'success');
+      // ⚠️ "유지됩니다"가 아니라 "다시 계산되지 않습니다" — 둘은 다른 뜻이다. 의상이 바뀌면 표정
+      // 후보도 바뀌지만 이미 배정된 줄은 재실행해도 스킵되므로, 필요하면 AI 표정 초기화가 필요하다.
+      flash(
+        `${character} → ${target.outfit} 적용했습니다(이미 배정된 표정은 다시 계산되지 않습니다).`,
+        'success',
+      );
     },
 
     ignoreOutfitSuggestion: (sceneId, lineIndex, character) => {
@@ -285,7 +332,7 @@ export const createScriptSlice: SliceCreator<
       const suffix = skipped ? ` · ${skipped}건 건너뜀(이미 반영/대본 변경)` : '';
       flash(
         applied
-          ? `의상 제안 ${applied}건 적용${suffix}(표정 배정은 그대로 유지됩니다).`
+          ? `의상 제안 ${applied}건 적용${suffix}(이미 배정된 표정은 다시 계산되지 않습니다).`
           : `적용할 제안이 없습니다${suffix}.`,
         applied ? 'success' : 'info',
       );

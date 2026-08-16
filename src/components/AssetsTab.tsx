@@ -741,8 +741,9 @@ function AssignEmotionsRow() {
   // 계약 초안은 assignEmotionsAll 이었지만 실제 착지한 store 액션명은 autoAssignEmotionAll —
   // 실제 이름을 따른다(스토어는 다른 에이전트 소유).
   const autoAssignEmotionAll = useStore((s) => s.autoAssignEmotionAll);
+  const clearEmotionAuto = useStore((s) => s.clearEmotionAuto);
   return (
-    <div className="flex items-center gap-2 mb-3 -mt-1.5">
+    <div className="flex flex-wrap items-center gap-2 mb-3 -mt-1.5">
       <button
         className="btn-ghost text-xs"
         disabled={busy}
@@ -758,7 +759,21 @@ function AssignEmotionsRow() {
           '🎭 표정 자동 배정'
         )}
       </button>
+      {/* AI 배정만 되돌리는 유일한 경로 — 표정 AI 는 이미 값이 있는 줄을 재실행해도 스킵하므로,
+          의상을 바꾼 뒤 다시 배정하려면 이걸 먼저 눌러야 한다(자동 삭제는 일부러 안 만들었다). */}
+      <button
+        className="btn-ghost text-xs"
+        disabled={busy}
+        onClick={() => clearEmotionAuto()}
+        title="AI가 자동 배정한 표정만 지웁니다. 직접 고른 표정은 그대로 유지되며, 의상·번역·보이스에는 영향이 없습니다."
+      >
+        ↺ AI 표정 초기화
+      </button>
       <span className="text-[10px] text-gray-500">표정 미지정 대사에만 적용 · 직접 고른 표정은 유지됩니다</span>
+      <span className="text-[10px] text-gray-500 w-full">
+        의상 전환을 먼저 확정하면 의상별 표정 후보가 정확합니다. 의상 변경 후 표정을 다시 배정하려면 AI
+        표정값을 초기화한 뒤 재실행하세요.
+      </span>
     </div>
   );
 }
