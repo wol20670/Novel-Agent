@@ -30,6 +30,7 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 5 | 표정 AI 문맥 품질(F2/F3) | ✅ 확정 (v2 리뷰 반영) | `e1c1adf` | typecheck · vitest 42파일/549(532→+17) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 200줄 합성 장면 구조 실측 |
 | 6 | Outfit AI audit + 최소 계약(**코드 변경 없음**) | ✅ 확정 (v3.1, 3차 리뷰 반영) | 이 문서 | — (분석 Phase) |
 | 7 | Outfit AI transition suggestion 구현 | ✅ 확정 (Plan v4 + 구현 diff 리뷰 반영) | `25c2b5e` | typecheck · vitest 46파일/668(549→+119) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 기존 e2e 전체 통과 · 브라우저 targeted smoke · `.npproj.zip` 실제 왕복 |
+| 8 | AI 연출 workflow 통합 audit + 정합성 방어 | ✅ 확정 (Plan v4 + actual diff 리뷰 반영) | `88c4095` | typecheck · vitest 50파일/708(668→+40) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 브라우저 e2e 전체(제안 칩 4경로 + export/import 후속 단계 포함) · `git diff --check` 이상 없음 |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -292,6 +293,60 @@ canonical 을 바꾸는 경로는 (async 면 **첫 await 이전에**) epoch 을 
 **known limitation**: AI 제안 칩의 적용/무시/모두 적용 **브라우저 클릭 경로는 자동 e2e 로 seed 하지 않았고**
 (store 통합 테스트 + typecheck/build + diff 리뷰로 검증), **실키 미검증이라 탐지 품질(precision/recall)은
 여전히 증명된 바 없다.**
+
+## Phase 8 확정 설계 — AI 연출 workflow 통합 audit + 정합성 방어 (구현 `88c4095`)
+
+**성격**: 새 기능 Phase 가 아니다. 두 AI(표정·의상)를 **한 제작 workflow 로 번갈아 썼을 때**의
+semantics 를 감사하고, 확인된 결함만 최소 수정했다. 생성기·파서·`mergeScenes`·`types/project.ts`·
+`store/helpers.ts`·협업 프로토콜·schema **전부 무수정** → 기존 프로젝트 `.rpy` 는 바이트 동일.
+
+**감사 결론(변경 불필요로 확인)**: 두 축 모두 사람 값 > AI(단일 판정 함수) · 제안의 canonical 영향 0 ·
+`apply ≠ invalidate` · 무효화는 액션 이름이 아니라 **바뀌는 필드** 기준 · effective CG 4갈래 ·
+hide 상태/전이 분리 · Scene 경계 비전파 · 견적↔실행 동일 planner · production 로직에 게임별 이름 의존 0.
+
+**C1 — 표정 AI 커밋 직전 stale 재검증**(`store/aiBatchSlice.ts`). 결과는 실행 중에만 사는 ephemeral
+값(`Line`/`Scene`/`Project` 신규 필드 0)이고, 커밋 직전 **current project 스냅샷 하나**로
+`collectEmotionTargets → planEmotionChunks → buildEmotionRequest` 를 **같은 경로로 다시 돌려** 대조한다:
+① 장면·인덱스 ② 여전히 target 인가(= gate 가 manual `emotion`·새 `emotionAuto` 선점을 자동으로 걸러준다)
+③ 줄 anchor(speaker/text) ④ `(화자, 의상)` identity ⑤ 선택 표정이 지금도 유효 후보 ⑥ **요청 원문 동일성**.
+⚠️ ⑥ 이 없으면 *target 은 한 글자도 안 변했는데 그 요청의 문맥 줄(주인공 대사·지문·기배정 표정)만
+바뀐 경우* 가 통째로 새어 나간다. 어긋난 update 만 skip 하고 나머지는 커밋한다 — **의상 AI 의 global
+revision epoch 를 복사하지 않는다**(sparse 는 전체 폐기가 싸지만 표정은 dense·유료라 비용이 사용자에게
+전가된다). 쓰기 base 는 반드시 `currentProject.scenes`(실행 시작 스냅샷에 쓰면 실행 중 사용자가 한
+번역·상태 편집을 되감는다), 검증~`setScenes` 사이에 **`await` 없음**.
+⚠️ **보수적 반경(의도)**: target 하나가 사라지거나 후보가 바뀌면 청크가 재구성돼 **같은 요청의 다른
+target 도 함께 skip** 된다. `buildSynopsis` 가 project-wide(모든 장면의 제목·배경·첫 3줄, 700자)라
+다른 장면 앞부분을 고쳐도 그 run 전체가 skip 될 수 있다 — 오검보다 안전한 쪽을 택했다.
+⚠️ 문맥은 `i ≤ 그 청크의 마지막 target` 까지만 실린다(look-ahead 없음) ⇒ ⑥ 은 **target 보다 앞의**
+문맥 줄이 바뀔 때 발화한다.
+
+**C2 — 의상 제안 무효화 안내**(`scriptSlice`): 실제 pending 이 있을 때만 1회 알린다. 비어 있으면 완전
+침묵(hydrate·원격 반영에서 토스트가 안 튄다). revision epoch semantics 불변. best-effort 라
+`importProject`/`resetAll` 처럼 뒤이어 다른 flash 가 나는 경로에선 덮인다.
+
+**C3 — 의상 적용 토스트 정확화**(개별 + 일괄 공통): "표정 배정은 유지된다" → **"이미 배정된 표정은
+다시 계산되지 않는다"**. automatic `emotionAuto` invalidation 은 **도입하지 않는다**.
+
+**C4 — AI 배정 표정 초기화**(`clearEmotionAuto`, 사용자가 누를 때만): `emotionAuto` 만 비우고
+사람이 정한 `emotion`·`Line.outfits`/`Scene.outfits`·번역·보이스·상태·**의상 제안/revision** 은 전부
+보존한다(표정은 Outfit AI 입력이 아니므로 `invalidateOutfitSuggestions` 를 부르지 않는다).
+0건이면 확인창·`setScenes`·`autoSave` 전부 없음, 취소하면 canonical 무변경.
+→ **역순 작업(표정 먼저 → 의상 변경)의 유일한 복구 경로**다: 표정 AI 는 이미 값이 있는 줄을 영구
+스킵하므로 초기화 없이는 재실행이 no-op 이다. **권장 순서는 여전히 Outfit 확정 → Expression AI.**
+
+**테스트 정확도(리뷰에서 보정)**: W2 의 `expect(f(x)).toBe(f(x))` tautology 제거 → **case 별 독립 생성
+fixture**로 `manual > emotionAuto > 기본` 이 `.rpy` 속성까지 반영되는지 검증(한 장면의 연속 대사와
+`show` 가 1:1 이라고 가정하지 않는다). ScenePlayer 를 render 하는 테스트가 아니므로 "미리보기를
+검증한다"고 쓰지 않는다. e2e 는 나가는 요청에서 **유효 `(line, character, outfit)` 을 역산**하고
+(effective outfit 은 그 줄까지의 최신 `fixed` 로 계산), 적용 대상과 원복 대상을 **같은 제안 행에서**
+추적해 정확히 그 override 만 ✕ 로 지운다(fixture 시작 `baseWorn === 0` 명시).
+신규 테스트가 실제 회귀를 잡는지는 **mutation check** 로 확인했다(가드 제거 시 12건 중 10건 실패 ·
+생성기가 `emotionAuto` 를 무시하거나 AI 를 작가보다 우선하면 각각 해당 테스트만 실패).
+
+**known limitations(그대로 유지)**: Preview↔Export 스프라이트 폴백 divergence(선행 동작 —
+`tests/preview-export-fallback.test.ts` 가 "현재 동작"으로 고정하며 후속 Phase 가 통합하면 그 테스트를
+함께 바꾸는 게 정상) · `pairLines` FIFO · stable Line ID 없음 · 무시한 제안이 재실행 때 다시 나옴 ·
+**양쪽 AI 실키 precision/recall 미검증**(사용자 승인 없이 paid 호출을 하지 않았다).
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
