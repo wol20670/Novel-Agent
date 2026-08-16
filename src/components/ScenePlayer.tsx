@@ -8,7 +8,8 @@ import { resolveEmotion } from '../generators/emotion';
 import { canvasSprite } from '../generators/image/canvasSprite';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { getAsset } from '../storage/assetStore';
-import { arrangePositions } from '../renpy/generate';
+import { arrangePositions, attrFor, selectSprite, spriteSlots, type SpriteSlot } from '../renpy/generate';
+import { getFirstEffectiveCgIndex } from '../generators/outfit';
 import {
   resolveTheme,
   withGuiOverrides,
@@ -27,7 +28,7 @@ import {
   type Character,
   type Expression,
   type Line,
-
+  type Project,
 } from '../types';
 
 const speakersOf = (l: Line): string[] =>
@@ -72,25 +73,169 @@ export function computeStagePositions(
   return arrangePositions(order, sideByName);
 }
 
+/** 미리보기가 한 캐릭터에게 실제로 그리는 그림. assetId 가 없으면 expr 로 임시 이미지를 그린다. */
+export interface SpriteDisplay {
+  expr: Expression;
+  assetId?: string;
+}
+
 /**
- * 한 캐릭터의 (의상·표정) 스프라이트 — 에셋이 있으면 그것, 없으면 Canvas 임시 이미지.
+ * 그 줄에서 미리보기가 그릴 스프라이트 — **생성기(scriptBody)와 같은 그림을 고르는** 단일 판정.
+ * React 없이 테스트할 수 있게 컴포넌트 밖의 순수 함수로 둔다(computeStagePositions 와 같은 이유).
+ *
+ * 예전엔 미리보기가 `spriteAssetId`(그 의상에 그 표정이 없으면 **기본 의상**의 같은 표정)로 그려서,
+ * "의상을 지키고 표정을 neutral 로 내리는" 생성기와 같은 줄에서 **다른 그림**이 나왔다. 이제 두
+ * 축을 모두 생성기에 맞춘다:
+ *  1. **칸 목록**은 generate.ts 의 `spriteSlots`(기본 의상 = 업로드 ∪ 대본 사용 표정 ∪ '기본').
+ *  2. **폴백 판정**은 generate.ts 의 `selectSprite`(의상 유지 → 표정 강등).
+ *  3. **줄 사이 상태**는 생성기 `lastShown.attr` 과 같이 *실제 표시된 속성*을 잇는다 — 논리 표정이
+ *     아니다. A 의상에 '기쁨'이 없어 neutral 로 내려갔다면 B 의상으로 갈아입어도 neutral 이다.
+ *
+ * ⚠️ 기본 의상 스프라이트가 하나도 없는 캐릭터(생성기 `optedIn` 게이트에서 탈락 = **게임에 아예 안
+ * 나온다**)는 비교 대상이 없으므로 **예전 경로(`spriteAssetId`)를 그대로 쓴다.** 이 캐릭터들까지
+ * 새 폴백에 태우면 게임에 없는 그림이 미리보기에서 바뀌는, 목적 밖의 동작 변경이 된다.
+ */
+export function computeSpriteDisplay(
+  project: Pick<Project, 'scenes' | 'characters' | 'outfitRules' | 'expressions'>,
+  scene: Scene,
+  uptoLine: number,
+): Map<string, SpriteDisplay> {
+  const { characters, expressions } = project;
+  const charByName = new Map(characters.map((c) => [c.name, c]));
+  const isNarrOnly = (name: string) => !!charByName.get(name)?.isProtagonist;
+  const hiddenFlags = spriteHiddenFlags(scene);
+  // CG 가 실제로 켜지는 줄(생성기 cgActive 와 같은 4갈래). 한 번 켜지면 장면 끝까지 유지된다 —
+  // 끄는 코드가 생성기에 없다. 그 구간에선 생성기가 숨김 전이·의상 동기화·화자 show 를 전부
+  // 건너뛰어 lastShown 이 얼어붙으므로, 아래 carried 도 같이 얼린다.
+  const cgStart = getFirstEffectiveCgIndex(scene);
+
+  // 대본 전체의 논리 표정 집합 — 생성기 expressionPlan 과 **같은 의미**(승인 장면의 대사, 합동
+  // 대사는 멤버 전개, 미등록 이름 제외). 기본 의상 칸이 "업로드 + 대본 사용 표정"이라 이걸 모르면
+  // 게임에 실제로 있는 칸(플레이스홀더 슬롯)을 못 보고 엉뚱한 폴백을 고른다.
+  // ⚠️ 생성기와 범위가 하나 다르다: **지금 보고 있는 장면이 미승인이면 그 장면만** 더한다(승인하면
+  // 생길 칸을 미리 보여준다). 그 밖의 미승인 장면은 넣지 않는다. 이 정책은 미리보기에만 있고
+  // spriteSlots 는 정책을 모르므로 생성기 출력으로 샐 수 없다.
+  const known = new Set(characters.map((c) => c.name));
+  const scriptExprs = new Map<string, Set<Expression>>();
+  for (const sc of project.scenes) {
+    if (sc.status !== 'approved' && sc.id !== scene.id) continue;
+    for (const l of sc.lines) {
+      if (l.kind !== 'dialogue') continue;
+      const emo = resolveEmotion(l, sc, { expressions });
+      for (const sp of speakersOf(l)) {
+        if (!known.has(sp)) continue;
+        let set = scriptExprs.get(sp);
+        if (!set) scriptExprs.set(sp, (set = new Set<Expression>()));
+        set.add(emo);
+      }
+    }
+  }
+
+  // 칸 목록. ⚠️ 게이트는 생성기와 **같은 식**이어야 한다 — 여기 빠진 캐릭터가 곧 위 주석의 예외다.
+  const slotsByChar = new Map<string, SpriteSlot[]>();
+  for (const c of characters) {
+    if (c.isProtagonist) continue;
+    if (!Object.values(c.expressions).some(Boolean)) continue; // optedIn — generate.ts 와 같은 판정
+    slotsByChar.set(c.name, spriteSlots(c, scriptExprs.get(c.name)));
+  }
+
+  // 줄마다의 의상 — generate.ts(scriptBody)와 공유하는 단일 판정 소스(outfitFlags). 장면 단위
+  // resolveOutfit 을 직접 부르면 장면 도중의 #복장(줄 전환)을 놓쳐 실제 게임과 어긋난다.
+  // (장면,캐릭터)당 한 번만 계산해 재사용한다 — 생성기의 outfitAt 캐시와 같은 이유.
+  const outfitsByChar = new Map<string, string[]>();
+  for (const c of characters) {
+    if (!c.isProtagonist) outfitsByChar.set(c.name, outfitFlags(scene, project.outfitRules, c.name));
+  }
+  const outfitAt = (name: string, k: number) => outfitsByChar.get(name)?.[k] ?? '기본';
+
+  // 현재 줄까지 접는다. 숨김 구간에 처음 말한 화자는 생성기(revealedOrder)와 동일하게 목록에 넣지
+  // 않는다 — 그래야 다시 표시될 때 유령처럼 튀어나오지 않는다. 숨기기 전에 이미 서 있던 캐릭터는
+  // 숨김 구간을 그냥 건너뛰므로 값이 그대로 남아 복원된다(생성기 lastShown 복원과 대칭).
+  //
+  // 두 값을 한 번에 접되 **갱신 게이트가 서로 다르다**(섞으면 안 된다):
+  //  · logical  = Phase 9 이전의 논리 표정 fold **그대로**. 위 예외 캐릭터에만 쓴다.
+  //  · carried  = 생성기 lastShown.attr 대응(실제 표시 속성).
+  const logical = new Map<string, Expression>();
+  const carried = new Map<string, string>();
+  const total = scene.lines.length;
+  for (let k = 0; k <= uptoLine && k < total; k++) {
+    const l = scene.lines[k];
+    const hidden = hiddenFlags[k];
+
+    // ── 기존 논리 표정 fold(의미 무변경: 숨김 줄 건너뜀, 대사 줄의 화자만 갱신) ──
+    if (!hidden && l.kind === 'dialogue') {
+      const emo = resolveEmotion(l, scene, { expressions });
+      for (const sp of speakersOf(l)) if (!isNarrOnly(sp)) logical.set(sp, emo);
+    }
+
+    // ── 실제 표시 속성 fold(생성기의 세 전이에 대응) ──
+    // ⚠️ CG 조건은 **오늘 관측되지 않는다**(테스트로 잡히지 않으니 죽은 코드로 보고 지우지 말 것):
+    // 아래 렌더 게이트가 `uptoLine >= cgStart` 를 전부 빈 Map 으로 돌려주므로, 이 분기를 탄 fold 의
+    // 결과는 어차피 밖으로 안 나간다. 그래도 두는 이유는 이 fold 가 생성기 lastShown 의 **모델**이기
+    // 때문이다 — 생성기도 CG 구간에서 세 전이를 전부 건너뛴다. 지금 CG 가 장면 끝까지 안 꺼지는 것에
+    // 기대어 규칙을 빼면, 나중에 CG 해제가 생기는 순간 조용히 어긋난다.
+    if (hidden || (cgStart !== null && k >= cgStart)) continue; // 숨김·CG 구간은 동결
+    const speakers = l.kind === 'dialogue' ? speakersOf(l).filter((sp) => !isNarrOnly(sp)) : [];
+    // ① 이미 서 있는 비화자의 의상 동기화 + 숨김 복원 — **표시 속성**을 이어받아 다시 폴백을 태운다.
+    for (const [nm, attr] of carried) {
+      if (speakers.includes(nm)) continue; // 화자는 ②가 어차피 최신 상태로 세운다
+      const slots = slotsByChar.get(nm);
+      if (slots?.length) carried.set(nm, selectSprite(slots, outfitAt(nm, k), attr).attr);
+    }
+    // ② 화자 — 여기서만 논리 표정을 새로 계산한다(생성기 화자 show 와 동일).
+    for (const sp of speakers) {
+      const slots = slotsByChar.get(sp);
+      if (!slots?.length) continue;
+      const wantAttr = attrFor(resolveEmotion(l, scene, { expressions }));
+      carried.set(sp, selectSprite(slots, outfitAt(sp, k), wantAttr).attr);
+    }
+  }
+
+  // 렌더 게이트 — CG 가 켜졌거나 지금 줄이 숨김이면 아무도 안 그린다(computeStagePositions 와 대칭).
+  const out = new Map<string, SpriteDisplay>();
+  if (hiddenFlags[uptoLine] || (cgStart !== null && uptoLine >= cgStart)) return out;
+
+  for (const [nm, ex] of logical) {
+    const slots = slotsByChar.get(nm);
+    const attr = carried.get(nm);
+    if (slots?.length && attr !== undefined) {
+      const sel = selectSprite(slots, outfitAt(nm, uptoLine), attr);
+      // ⚠️ 조회 키는 **논리 의상 + 속성**이다. outfitAttr 로 되찾으면 서로 다른 의상 이름이 같은
+      // 속성으로 해시 충돌했을 때 엉뚱한 의상의 칸을 집는다.
+      const slot = slots.find((s) => s.outfit === sel.outfit && s.attr === sel.attr);
+      out.set(nm, { expr: slot?.expr ?? ex, assetId: slot?.assetId });
+      continue;
+    }
+    // 기본 의상 스프라이트가 하나도 없는 캐릭터 — 게임엔 안 나오므로 예전 경로를 그대로 유지한다.
+    const c = charByName.get(nm);
+    out.set(nm, { expr: ex, assetId: c && spriteAssetId(c, outfitAt(nm, uptoLine), ex) });
+  }
+  return out;
+}
+
+/**
+ * 한 캐릭터의 스프라이트 한 칸 — 에셋이 있으면 그것, 없으면 Canvas 임시 이미지.
  * 실제 생성 게임(vn_char, generate.ts)과 같은 구도로 그린다: 머리 위 2% 여백을 두고
  * k(=1.15×characterScale) 배로 키워 발은 화면 아래로 크롭(스테이지의 overflow-hidden 이 잘라냄).
+ *
+ * ⚠️ **어느 그림을 쓸지는 호출측이 이미 정해서 넘긴다**(assetId + placeholder 용 expr). 여기서
+ * 다시 폴백을 판단하면 판정이 둘로 갈린다 — 그게 Phase 9 이전의 divergence 원인이었다.
  */
 function PreviewSprite({
-  char,
+  name,
+  color,
   expr,
-  outfit,
+  assetId,
   xpct,
   k,
 }: {
-  char: Character;
+  name: string;
+  color: string;
   expr: Expression;
-  outfit?: string;
+  assetId?: string;
   xpct: number;
   k: number;
 }) {
-  const assetId = spriteAssetId(char, outfit, expr);
   const [url, setUrl] = useState<string>();
   useEffect(() => {
     let alive = true;
@@ -98,7 +243,7 @@ function PreviewSprite({
     (async () => {
       let blob: Blob | undefined;
       if (assetId) blob = await getAsset(assetId);
-      if (!blob) blob = await canvasSprite(char.name, expr, char.color);
+      if (!blob) blob = await canvasSprite(name, expr, color);
       if (!alive) return;
       obj = URL.createObjectURL(blob);
       setUrl(obj);
@@ -107,7 +252,7 @@ function PreviewSprite({
       alive = false;
       if (obj) URL.revokeObjectURL(obj);
     };
-  }, [char.name, char.color, expr, assetId]);
+  }, [name, color, expr, assetId]);
   if (!url) return null;
   return (
     <img
@@ -218,35 +363,13 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
     };
   }, [cgAssetId, cgDesc, projW, projH]);
 
-  // 인물 숨김 — generate.ts 와 공유하는 단일 판정 소스(spriteHiddenFlags). 지금 줄이 숨김이면
-  // 스프라이트를 아예 그리지 않는다(아래 렌더 게이트). 이 항목이 없으면(필드 미사용) 전부 false라
-  // 기존 동작과 동일.
-  const hiddenFlags = useMemo(() => spriteHiddenFlags(scene), [scene]);
-
-  // 줄마다의 의상 — generate.ts(scriptBody)와 공유하는 단일 판정 소스(outfitFlags). 장면 단위
-  // resolveOutfit 을 직접 부르면 장면 도중의 #복장(줄 전환)을 미리보기가 놓쳐 실제 게임과 어긋난다.
-  // (장면,캐릭터)당 한 번만 계산해 재사용한다 — 생성기의 outfitAt 캐시와 같은 이유.
-  const outfitsByChar = useMemo(() => {
-    const m = new Map<string, string[]>();
-    for (const c of characters) {
-      if (!c.isProtagonist) m.set(c.name, outfitFlags(scene, outfitRules, c.name));
-    }
-    return m;
-  }, [scene, characters, outfitRules]);
-
-  // 현재 줄까지 각 캐릭터의 "최신 표정"(Ren'Py 처럼 마지막 표정 유지). 숨김 구간(hiddenFlags[k])에
-  // 등장한 화자는 생성기(revealedOrder)와 동일하게 목록에 넣지 않는다 — 그래야 다시 표시로 돌아왔을
-  // 때 숨김 중 처음 말한 캐릭터가 유령처럼 튀어나오지 않는다. 숨기기 전에 이미 서 있던 캐릭터는 이
-  // 루프가 그 이전 줄에서 채워둔 값을 그대로 들고 있으므로(숨김 구간은 그냥 건너뜀) 다시 표시될 때
-  // 자동으로 복원된다(생성기의 lastShown 복원과 대칭).
-  const visible = new Map<string, Expression>();
-  for (let k = 0; k <= i && k < total; k++) {
-    if (hiddenFlags[k]) continue;
-    const l = scene.lines[k];
-    if (l.kind !== 'dialogue') continue;
-    const emo = emoOf(l);
-    for (const sp of speakersOf(l)) if (!isNarrOnly(sp)) visible.set(sp, emo);
-  }
+  // 미리보기가 그 줄에 실제로 그릴 스프라이트 — 판정은 전부 순수 함수(computeSpriteDisplay,
+  // 위에서 export)에 맡긴다. 전체 장면 목록이 필요한 이유는 그 함수 주석 참고(기본 의상 슬롯).
+  const allScenes = useStore((s) => s.project.scenes);
+  const spriteDisplay = useMemo(
+    () => computeSpriteDisplay({ scenes: allScenes, characters, outfitRules, expressions }, scene, i),
+    [allScenes, characters, outfitRules, expressions, scene, i],
+  );
 
   const isJoint = cur?.kind === 'dialogue' && !!cur.members?.length;
   const name =
@@ -290,10 +413,18 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
             배경 미생성
           </div>
         )}
-        {activeCgIdx < 0 && !hiddenFlags[i] && [...visible].map(([nm, ex]) => {
+        {[...spriteDisplay].map(([nm, d]) => {
           const c = charByName.get(nm);
           return c ? (
-            <PreviewSprite key={nm} char={c} expr={ex} outfit={outfitsByChar.get(nm)?.[i]} xpct={positions.get(nm) ?? 50} k={charK} />
+            <PreviewSprite
+              key={nm}
+              name={c.name}
+              color={c.color}
+              expr={d.expr}
+              assetId={d.assetId}
+              xpct={positions.get(nm) ?? 50}
+              k={charK}
+            />
           ) : null;
         })}
         {cur && (

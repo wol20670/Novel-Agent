@@ -93,8 +93,17 @@ function asciiSlug(s: string): string {
   return (h >>> 0).toString(36);
 }
 
-/** 표정 → Ren'Py 속성. 알려진 표정은 고정 매핑, 커스텀은 충돌 없는 슬러그. */
-function attrFor(expr: Expression): string {
+/**
+ * 표정 → Ren'Py 속성. 알려진 표정은 고정 매핑, 커스텀은 슬러그.
+ *
+ * ⚠️ **injective 가 아니다**(Phase 9 감사). 커스텀 경로가 32비트 FNV-1a 해시라 서로 다른 표정
+ * 이름이 같은 속성을 낼 수 있다(D5, 알려진 한계 — 이번에 고치지 않는다). 그래서 폴백 판정은
+ * 반드시 **속성(attr) 존재 기준**이어야 하고 Expression identity 로 바꾸면 안 된다(selectSprite).
+ * 반대로 `'neutral'` 은 커스텀이 항상 `'x'` 접두사를 갖기 때문에 **`'기본'` 전용으로 보장**된다 —
+ * base pool 재진입이 항상 `'기본'` 에 착지하는 근거가 이것이다.
+ * 미리보기(ScenePlayer)도 같은 속성을 계산해야 해서 export 한다.
+ */
+export function attrFor(expr: Expression): string {
   return EXPR_ATTR[expr] ?? `x${asciiSlug(expr)}`;
 }
 
@@ -103,18 +112,61 @@ export function outfitAttrFor(outfit: string): string {
   return outfit === '기본' ? 'base' : `o${asciiSlug(outfit)}`;
 }
 
-interface SpriteRef {
-  charId: string; // c_1 …
-  charName: string;
+/**
+ * 한 캐릭터가 화면에 세울 수 있는 (의상, 표정) 칸 하나 — **미리보기와 공유하는 최소 단위**.
+ * Ren'Py 전용 정보(charId·파일명)는 SpriteRef 가 얹는다.
+ */
+export interface SpriteSlot {
   expr: Expression;
   attr: string; // neutral/happy/…
-  /** 의상 이름('기본' 포함). */
+  /** 의상 이름('기본' 포함). 폴백 pool 선택의 **논리 키**다. */
   outfit: string;
   /** 의상 Ren'Py 속성(base/o…). */
   outfitAttr: string;
-  file: string; // sprite_c_1_base_happy.png
-  /** 사용자가 생성/업로드한 스프라이트. 없으면(자동 표정 슬롯) 빌더가 Canvas/AI 로 채운다. */
+  /** 사용자가 생성/업로드한 스프라이트. 없으면(자동 표정 슬롯) 빌더가 Canvas 로 채운다. */
   assetId?: string;
+}
+
+interface SpriteRef extends SpriteSlot {
+  charId: string; // c_1 …
+  charName: string;
+  file: string; // sprite_c_1_base_happy.png
+}
+
+/**
+ * 캐릭터의 슬롯 목록 — `resolveSprites`(생성기)와 ScenePlayer(미리보기)의 **단일 소스**.
+ *
+ * 기본 의상 = 업로드된 표정 ∪ `planExprs` ∪ 리터럴 `'기본'`. `planExprs` 를 **파라미터로 받는** 것이
+ * 핵심이다: 생성기는 `expressionPlan`(승인 장면만)을, 미리보기는 자기 정책(승인 전체 + 지금 보고 있는
+ * 미승인 장면 하나)을 넘긴다 — 이 함수는 정책을 갖지 않으므로 미리보기 정책이 `.rpy` 로 샐 수 없다.
+ *
+ * ⚠️ **삽입 순서가 곧 출력 순서다**(`assets.rpy` 의 image 정의 순서 + 폴백의 `pool[0]`). Set 삽입
+ * 순서·`Object.keys` 순서·의상 선언 순서를 그대로 두어야 한다 — 정렬·Map 왕복·키 재구성 금지.
+ */
+export function spriteSlots(c: Character, planExprs?: Iterable<Expression>): SpriteSlot[] {
+  const out: SpriteSlot[] = [];
+  const stored = c.expressions;
+
+  // 기본 의상: 저장된 표정 + 대본에서 쓰인 표정(자동) + 기본(베이스라인).
+  const baseExprs = new Set<Expression>([
+    ...(Object.keys(stored) as Expression[]).filter((e) => stored[e]),
+    ...(planExprs ?? []),
+    '기본',
+  ]);
+  for (const expr of baseExprs) {
+    out.push({ expr, attr: attrFor(expr), outfit: '기본', outfitAttr: 'base', assetId: stored[expr] });
+  }
+
+  // 추가 의상: 실제 생성된 스프라이트가 있는 표정만 정의(없는 표정은 show 시 폴백 사다리를 탄다).
+  for (const o of c.outfits ?? []) {
+    const oAttr = outfitAttrFor(o.name);
+    const oExprs = (Object.keys(o.expressions) as Expression[]).filter((e) => o.expressions[e]);
+    for (const expr of oExprs) {
+      out.push({ expr, attr: attrFor(expr), outfit: o.name, outfitAttr: oAttr, assetId: o.expressions[expr] });
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -208,72 +260,56 @@ function resolveSprites(
     if (!charId) continue;
     if (c.isProtagonist) continue; // 내레이션·대사 전용(주인공) — 화면에 세우지 않음
 
-    const stored = c.expressions;
-    const optedIn = Object.values(stored).some(Boolean);
+    // ⚠️ 이 게이트는 **spriteSlots 호출보다 반드시 앞**이어야 한다 — spriteSlots 는 리터럴 '기본'
+    // 슬롯을 항상 만들므로, 게이트를 뒤로 미루거나 없애면 "기본 의상 스프라이트가 하나도 없는"
+    // 캐릭터가 새로 게임에 등장한다(기존 동작 변경 = 회귀).
+    const optedIn = Object.values(c.expressions).some(Boolean);
     if (!optedIn) continue; // 스프라이트 미사용 캐릭터
 
-    // 기본 의상: 저장된 표정 + 대본에서 쓰인 표정(자동) + 기본(베이스라인).
-    const baseExprs = new Set<Expression>([
-      ...(Object.keys(stored) as Expression[]).filter((e) => stored[e]),
-      ...(plan.get(charId) ?? []),
-      '기본',
-    ]);
-    for (const expr of baseExprs) {
-      const attr = attrFor(expr);
-      out.push({
-        charId,
-        charName: c.name,
-        expr,
-        attr,
-        outfit: '기본',
-        outfitAttr: 'base',
-        file: `sprite_${charId}_base_${attr}.png`,
-        assetId: stored[expr],
-      });
-    }
-
-    // 추가 의상: 실제 생성된 스프라이트가 있는 표정만 정의(없는 표정은 show 시 기본 의상으로 폴백).
-    for (const o of c.outfits ?? []) {
-      const oAttr = outfitAttrFor(o.name);
-      const oExprs = (Object.keys(o.expressions) as Expression[]).filter((e) => o.expressions[e]);
-      for (const expr of oExprs) {
-        const attr = attrFor(expr);
-        out.push({
-          charId,
-          charName: c.name,
-          expr,
-          attr,
-          outfit: o.name,
-          outfitAttr: oAttr,
-          file: `sprite_${charId}_${oAttr}_${attr}.png`,
-          assetId: o.expressions[expr],
-        });
-      }
+    for (const s of spriteSlots(c, plan.get(charId))) {
+      out.push({ ...s, charId, charName: c.name, file: `sprite_${charId}_${s.outfitAttr}_${s.attr}.png` });
     }
   }
   return out;
 }
 
 /**
- * 한 캐릭터를 화면에 세울 때 쓸 (의상, 표정) 속성 — **기존 폴백 사다리를 그대로 옮긴 것**이다
- * (새 규칙 아님). 화자 show·비화자 의상 동기화·숨김 복원 세 곳이 같은 폴백을 써야 하므로 추출했다.
+ * 한 캐릭터를 화면에 세울 때 쓸 (의상, 표정) — **기존 폴백 사다리 그대로**(새 규칙 아님).
+ * 화자 show·비화자 의상 동기화·숨김 복원 세 곳이 같은 폴백을 써야 하므로 추출했고, Phase 9 부터는
+ * **미리보기(ScenePlayer)도 같은 함수**를 쓴다(예전엔 미리보기가 "표정을 지키고 의상을 버리는"
+ * 반대 규칙이라 같은 줄에서 게임과 다른 그림을 보여줬다).
  *   ① 원하는 의상 → ② '기본' 의상 → ③ 전체 (pool 선택)
  *   ④ 선택된 pool 안에 원하는 표정이 있으면 그것 → ⑤ 없으면 neutral → ⑥ 그것도 없으면 pool[0]
  * wantAttr 은 "가능하면 유지하려는 표정"이지 강제값이 아니다 — 새 의상에 그 표정 스프라이트가
  * 없으면 ⑤⑥으로 내려간다(없는 이미지를 참조하면 런타임에 죽는다).
+ *
+ * 논리 의상(`outfit`)까지 돌려주는 이유: 미리보기가 **어느 의상의 칸이 뽑혔는지**를 알아야 실제
+ * assetId 를 찾을 수 있는데, `outfitAttr` 로 되찾으면 서로 다른 의상 이름이 같은 속성으로 해시
+ * 충돌했을 때(D6) 엉뚱한 의상의 칸을 집는다. 생성기는 이 필드를 쓰지 않는다(pickSpriteAttrs).
  */
+export function selectSprite(
+  slots: readonly SpriteSlot[],
+  wantedOutfit: string,
+  wantAttr: string,
+): { outfit: string; outfitAttr: string; attr: string } {
+  let pool = slots.filter((o) => o.outfit === wantedOutfit);
+  if (!pool.length) pool = slots.filter((o) => o.outfit === '기본');
+  if (!pool.length) pool = slots.slice();
+  // ⚠️ **속성(attr) 존재 여부**로 판정한다. Expression identity 비교로 바꾸면 안 된다 — attrFor 가
+  // injective 가 아니라서(D5) 두 판정이 갈리고, 그 순간 기존 게임 출력이 달라진다.
+  const attr =
+    (pool.some((o) => o.attr === wantAttr) && wantAttr) ||
+    (pool.some((o) => o.attr === 'neutral') ? 'neutral' : pool[0].attr);
+  return { outfit: pool[0].outfit, outfitAttr: pool[0].outfitAttr, attr };
+}
+
+/** 생성기용 wrapper — 기존 반환 계약(속성 두 개) 그대로. 논리 의상은 미리보기만 필요로 한다. */
 function pickSpriteAttrs(
   owned: SpriteRef[],
   wantedOutfit: string,
   wantAttr: string,
 ): { outfitAttr: string; attr: string } {
-  let pool = owned.filter((o) => o.outfit === wantedOutfit);
-  if (!pool.length) pool = owned.filter((o) => o.outfit === '기본');
-  if (!pool.length) pool = owned;
-  const outfitAttr = pool[0].outfitAttr;
-  const attr =
-    (pool.some((o) => o.attr === wantAttr) && wantAttr) ||
-    (pool.some((o) => o.attr === 'neutral') ? 'neutral' : pool[0].attr);
+  const { outfitAttr, attr } = selectSprite(owned, wantedOutfit, wantAttr);
   return { outfitAttr, attr };
 }
 
