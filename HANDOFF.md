@@ -4,11 +4,25 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **복장·표정 자동 추론(LLM) 도입 — Phase 9 까지 확정 완료(GPT actual commit 승인).** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
-  - **다음 Phase 프롬프트를 받기 전까지 새 Phase 를 시작하지 말 것.** Phase 9(Preview↔Export 스프라이트 표시 parity)로 계획된 범위는 끝났다.
-  - Phase 5~9 가 증명한 것은 **구조까지**다 — 표정 선택 품질도, 의상 전환 탐지 품질도 **실키 검증 연기 상태라 증명되지 않았다.**
-  - 후속 후보(착수 전 지시 필요): 실키로 의상 탐지 품질(recall/precision) 실측 · 무시한 제안이 재실행 때 다시 나오는 문제(ignored 기억은 persistent provenance 라 일부러 안 만듦).
+- **복장·표정 자동 추론(LLM) 도입 — Phase 10 까지 확정 완료.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
+  - **다음 Phase 프롬프트를 받기 전까지 새 Phase 를 시작하지 말 것.** Phase 10(Outfit AI 실키 품질 audit)으로 계획된 범위는 끝났다.
+  - **Phase 11 후보 2건(설계 미확정 — 착수 전 지시 필요).** 둘 다 Phase 10 이 실측·재현한 결과가 입력이다:
+    - **A. Outfit AI semantic FP 감소** — purchase/ownership · future intent · other-character outfit reference · transition 완료 시점 구분.
+    - **B. same-run chained suggestion 검증** — 모델 raw 에는 후속 복귀 전환이 있는데 canonical-only `G(no-op)` 가 지운다. **기존 계약(미승인 제안을 canonical 에 overlay 하지 않음)과 충돌하지 않는 해법**이 필요하다.
+    - ⚠️ **해법을 미리 못박지 말 것** — overlay 도입도, 파서 `G` 삭제도, prompt rule 추가도 확정된 바 없다. Phase 11 은 최신 main 과 기존 계약을 다시 audit 한 뒤 **최소 변경안**을 고른다.
+  - 표정 선택 품질은 **여전히 실키 미검증**이다(의상만 Phase 10 에서 쟀다).
+  - 후속 후보(착수 전 지시 필요): 무시한 제안이 재실행 때 다시 나오는 문제(ignored 기억은 persistent provenance 라 일부러 안 만듦) · 실제 제작 대본 기반 품질 측정(Phase 10 은 합성 fixture 한정).
   - known limitations(**명시적 우선순위 지시 전까지 착수하지 않음**, 상세는 PHASES.md Phase 9 절): D3 Export `optedIn` 비대칭 · D4 `availableExpressions` 후보 누수 · D5/D6 커스텀 표정·의상 속성 해시 충돌.
+
+## 📌 Phase 10 이 확정한 것 (다음 Phase 의 baseline)
+- **Outfit AI 품질은 이제 "미측정"이 아니라 "측정됨"이다** — 단 **합성 curated fixture 한정**이고 실제 제작
+  대본은 재지 않았다. `precision 0.810 / recall 0.944 / F1 0.872`(case pass 18/23)를 **실제 게임 대본의
+  품질로 인용하면 안 된다** — "Phase 10 curated synthetic live benchmark 의 Run 1 결과"가 정확한 표현이다.
+- **production 은 한 줄도 안 바뀌었다**(측정 Phase). 확정 커밋은 docs-only.
+- **재현된 failure 2종**: ① 대사 속 의상 언급의 시제·화자 구분 실패로 인한 노출 FP ② 같은 run 안에서
+  이어지는 복귀 전환이 `G(no-op)` 에 걸려 사라지는 구조적 limitation. 둘 다 Phase 11 입력.
+- 측정 harness 는 `audit.local/`(gitignore)에 있고 **커밋하지 않았다** — Phase 11 이 개선 전후를 같은 자로
+  재야 하면 그때 `scripts/` 승격을 검토한다.
 
 ## 📌 Phase 9 가 확정한 계약 (다음 Phase 의 baseline — 깨지 말 것)
 - **미리보기 스프라이트 선택은 Export 와 맞춘 상태다.** `optedIn=true` 캐릭터는 생성기의
@@ -39,4 +53,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 9 확정 — Preview↔Export 스프라이트 표시 parity(`7352ba5`)**: 미리보기가 생성기의 `spriteSlots`/`selectSprite` 를 공유하고 줄 사이에 **실제 표시 attr** 을 잇도록 통합(판정 함수 `computeSpriteDisplay` 로 분리 — React 없이 테스트). 생성기 출력 semantics 무변경이라 `.rpy` 회귀 0(22구성/245파일). 검증 = typecheck · vitest 50파일/729 · 브라우저 e2e 전체 · 미리보기 실기 스모크. 전체 설계는 `PHASES.md` "Phase 9 확정 설계".
+- **Phase 10 확정 — Outfit AI 실키 품질 audit(docs-only, production 무변경)**: frozen 합성 benchmark(live 23 case · expected 18)로 실제 OpenAI 호출 품질을 처음 실측했다. PRIMARY(Run 1 26요청) `TP 17 / FP 4 / FN 1 · precision 0.810 · recall 0.944 · F1 0.872 · case pass 18/23`, stability Run 2·3 에서 10/10 exact-set 재현, deployed UI request-contract parity PASS(9항목 불일치 0). 총 53 POST · 약 $0.0075 usage-based estimate. 전체 결과·failure cluster·limitation 은 `PHASES.md` "Phase 10 확정".

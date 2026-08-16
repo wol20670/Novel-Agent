@@ -32,6 +32,7 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 7 | Outfit AI transition suggestion 구현 | ✅ 확정 (Plan v4 + 구현 diff 리뷰 반영) | `25c2b5e` | typecheck · vitest 46파일/668(549→+119) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 기존 e2e 전체 통과 · 브라우저 targeted smoke · `.npproj.zip` 실제 왕복 |
 | 8 | AI 연출 workflow 통합 audit + 정합성 방어 | ✅ 확정 (Plan v4 + actual diff 리뷰 반영) | `88c4095` | typecheck · vitest 50파일/708(668→+40) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 브라우저 e2e 전체(제안 칩 4경로 + export/import 후속 단계 포함) · `git diff --check` 이상 없음 |
 | 9 | Preview↔Export 스프라이트 표시 parity | ✅ 확정 (Plan v6 + GitHub actual commit 리뷰 반영) | `7352ba5` | typecheck · vitest 50파일/729(708→+21) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 브라우저 e2e 전체 · `git diff --check` 이상 없음 · 미리보기 실기 스모크(콘솔 에러 0) |
+| 10 | Outfit AI 실키 품질 audit(**production 변경 없음** — 측정 Phase) | ✅ 확정 (Plan v3 + dry/GT freeze + actual 결과 리뷰 반영) | 이 문서 | dry 18/18(D0~D16) · live Run 1 26요청 · stability Run 2·3 각 13요청 · deployed UI request-contract parity 1요청 · vitest 50파일/729 · typecheck · production/tests/package/lock/`.gitignore` diff 0 |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -412,6 +413,124 @@ pool 내: wantAttr → 'neutral' → pool[0]
   엉뚱한 의상을 집지는 않는다).
 - D5/D6 충돌 영역에서 **Ren'Py 중복 image 정의의 승자 parity 는 보장 범위 밖**이다. 폴백 attr 선택
   자체는 기존 semantics 를 그대로 보존한다.
+
+## Phase 10 확정 — Outfit AI 실키 품질 audit (production 변경 없음)
+
+**성격**: 구현 Phase 가 아니라 **측정 Phase** 다. Phase 6/7 이 증명한 건 구조까지였고 탐지 품질은
+미검증이었다(`PHASES.md` Phase 7 known limitation). 이번엔 **오늘의 production 을 그대로 둔 채**
+실제 OpenAI 호출로 품질과 failure mode 를 재고, 재현 가능한 evidence 를 남겼다.
+`SYSTEM_PROMPT`·model·temperature·window/chunk·lead-in·parser·validator·suggestion overlay·
+Project schema·save/load·`.npproj.zip`·Preview·Ren'Py export **전부 무변경** → 확정 커밋은 docs-only.
+
+**⚠️ Phase 10 성공 = "품질이 충분하다"가 아니다.** "품질과 failure mode 를 frozen benchmark + 실키 +
+반복성 + UI parity 로 **측정하고 재현 가능한 근거를 확보했다**"는 뜻이다.
+
+**측정 도구**: `audit.local/`(gitignore `*.local`) 의 로컬 harness 3파일. production 함수
+(`collectOutfitTargets`/`planOutfitWindows`/`buildOutfitRequest`/`suggestOutfitsBatch`/`parseOutfitResponse`)를
+그대로 호출하고 transport 도 production `chat()` 그대로다 — 요청을 재구현하지 않았다. raw 응답은
+`globalThis.fetch` **통과형 스파이**가 `res.clone().text()` 로만 복사한다(headers/Authorization 미접근).
+거부 사유 분류기는 **진단 전용**이고 권위는 언제나 `parseOutfitResponse` 다(요청마다 accepted 집합
+동일성 assert). 키는 `OPENAI_API_KEY` **process 환경변수만** 사용했다.
+
+**frozen benchmark**(live 전 freeze, Run 1 중 무변경): live case 23(positive 14 · negative 9) +
+dry-only 1(N10) · expected event 18 · planner 실측 요청 26.
+
+### PRIMARY — Run 1 only (Run 2/3 을 합산하지 않는다)
+
+```
+fetch 26 · retry 0 · ERROR 0
+TP 17 · FP 4 · FN 1
+precision 0.810 · recall 0.944 · F1 0.872
+case PASS 18/23 · FAIL 5/23
+```
+**신뢰구간을 싣지 않는다** — curated synthetic fixture 는 제작 대본 모집단의 확률표본이 아니다.
+Run 2/3 subset 은 Run 1 실패를 oversampling 하므로 합산하면 selection bias 다(산출물도 파일이 분리돼
+있고 stability 쪽엔 precision/recall 필드 자체가 없다).
+
+**Safety(negative)**: N1–N9 중 **최종 노출 FP 3건** — N1(purchase/ownership) · N3(future intent) ·
+N4(other-character outfit mention). parser-defense 3종은 전부 방어 성공: N7 PASS ·
+N8 PASS(raw 를 **F** scene-start 보호가 차단) · N9 PASS(raw `한복` 을 **D** candidate-outside 가 차단).
+
+**P12 추가 FP**: `(60, 민주, 사복)` 은 맞혔지만 `(59, 민주, 사복)` 도 함께 노출됐다(TP 1 · FP 1).
+59 는 "사복으로 갈아입고 올게"라는 future intent 이고, 60 이 완료를 확인하는 첫 writable 줄이다.
+
+### Failure Cluster A — dialogue outfit-reference temporal/semantic grounding
+
+반복 FP 4건이 한 묶음이다: N1 구매/소유 · N3 미래 의도 · N4 타 캐릭터 의상 언급 · P12 line 59 미래 의도.
+⚠️ **"대사에 의상 이름이 나오면 항상 실패한다"고 과장하지 않는다** — P2(완료된 전환을 대사로 말하는
+positive)는 정상 통과했다. 핵심은 **completed actual transition vs purchase/ownership vs future intent
+vs other-character reference** 의 구분 실패다.
+
+### Failure Cluster B — same-run chained suggestion 이 G(no-op)에 걸린다
+
+P3 의 정답은 `(1, 민주, 체육복)` `(3, 민주, 사복)` 둘이고, **모델 raw 는 Run 1/2/3 전부 두 전환을 정확히
+생성했다**. 그런데 매번 `(3, 민주, 사복)` 이 파서 **G(no-op)** 로 제거됐다. 미승인 제안은 canonical 에
+overlay 되지 않으므로(Phase 7 계약) `outfitFlags` 는 장면 내내 `사복` 이고, 그래서 "사복으로 복귀"가
+no-op 으로 보인 것이다. 즉 **model omission 이 아니다** — Layer 1 A(model omission)는 Run 1 에서 **0/18**
+이었다. 원인은 `same-run suggested transition chain + unaccepted suggestion non-overlay +
+canonical-only effective state + G no-op validation` 의 상호작용이다.
+
+### Stability (Run 2/3 — 재현성 전용)
+
+사전 고정 control + Run 1 실패 subset 10 case(P1·P2·P3·P5·P11·P12·N1·N3·N4·N5), 각 run planned 13 /
+actual 13 / retry 0. **10/10 case 가 Run 1/2/3 exact predicted tuple set 동일** → stable 10 · variable 0 ·
+unstable 0. ⚠️ "모델은 결정적이다"라고 쓰지 않는다 — 정확히는 **동일 frozen fixture 와 현재 production
+request contract, 동일 response snapshot/fingerprint 가 관찰된 이번 조건에서 3/3 exact-set 재현**이다.
+
+### deployed UI request-contract parity = **PASS**
+
+`https://novel-agent-pink.vercel.app/` 에 P1 freeze 픽스처(`.npproj.zip`)를 가져와 1회 실행. 협업 기능은
+쓰지 않았다(방 생성·입장·room code 없음). 확인창이 `스캔 대상 4줄 · 예상 요청 1회` 로 planner 와 일치했고,
+실제 POST 1건(CORS preflight `OPTIONS` 1건은 body 가 없어 비교 대상도 요청 수도 아니다).
+endpoint·model·temperature·response_format·max_tokens·messages[0].role/content·messages[1].role/content
+**9항목 전부 PASS**, 불일치 field 0 — system 은 문자열 완전 동일, user 는 raw JSON string 직렬화 결과까지
+동일했고 조건부 키(`initialHidden`/`context`/`fixed`/`markers`)의 **생략 조건도 일치**했다.
+secondary output 이 `(2, 민주, 사복)` 으로 우연히 같았지만 **품질 지표에 합산하지 않는다**(별개 live call).
+API key/Authorization/header 는 수집·저장·출력하지 않았다.
+
+### Telemetry · 비용
+
+| | prompt | completion | cached | usage-based estimate |
+|---|---|---|---|---|
+| Run 1 | 18,439 | 770 | **0** | 약 $0.0032 |
+| Run 2 | 11,775 | 393 | **5,632** | 약 $0.0020 |
+| Run 3 | 11,775 | 391 | **5,632** | 약 $0.0020 |
+
+`responseModel` 은 Run 1/2/3 **52요청 전부** `gpt-4o-mini-2024-07-18`, `system_fingerprint` 는
+`fp_830d456649`, `finish_reason` 은 전부 `stop`(잘린 응답 0). `cached_tokens` 는 Run 1 에서 0 이었고
+Run 2/3 에서는 **각각 3개 요청**(각 run 합계 5,632 — 즉 stability 두 run 합쳐 non-zero cached request
+6건)에서만 관측됐다. 전부 prompt 1,857~2,146 토큰인 긴 요청이다.
+⚠️ harness 의 추정은 `prompt_tokens` 전체에 정가를 곱하므로 **cached 할인을 반영하지 않는 보수적 상한**이며,
+**`actual billed cost` 가 아니다**. Phase 10 전체 POST 53회(Run1 26 · Run2 13 · Run3 13 · parity 1),
+합계 **약 $0.0075 usage-based estimate**.
+
+### dry / structural evidence (유료 호출 0)
+
+`D0~D16` **18/18 PASS** — live no-key fail-closed · `--dry` no-key 실행 가능 · planner 요청 수 ·
+P11 multi-window · P12 lead-in 경계 · CG cutoff · 분류기 self-test · 분류기↔파서 acceptance drift guard ·
+malformed JSON · HTTP failure · **H 발생 시 PASS 금지(ERROR)** · multi-window union/dedupe · index
+invariant · batch 생성 · `estimateOutfitCost.requests === planOutfitWindows` · asset 참조 0 ·
+repeat subset 사전 고정. dry-only **N10** 으로 **effective CG cutoff 이후 줄이 request payload 에 실리지
+않음**을 확인했다(모델이 볼 수조차 없어 억제력 측정 대상이 아니다).
+
+### ⚠️ synthetic-only limitation
+
+이번 측정은 **curated synthetic fixture 한정**이다. 실제 사용자의 제작 프로젝트·실제 VN 대본은 품질
+benchmark 대상으로 **측정하지 않았다**(디스크에 실대본이 없었고 사용자가 synthetic 만으로 확정).
+따라서 `precision 0.810 / recall 0.944 / F1 0.872` 를 **"실제 제작 대본의 Outfit AI 품질"이라고 쓰면
+안 된다** — 정확한 표현은 **"Phase 10 curated synthetic live benchmark 의 Run 1 결과"** 다.
+
+### 결론
+
+production request path 는 dry structural audit + live API benchmark + deployed UI parity 까지 검증됐고,
+대부분의 positive 시나리오는 정상 처리했다. 다만 **사용자에게 노출되는 semantic FP 가 반복 발견**됐고,
+**P3 에서는 모델이 정확히 생성한 same-run 복귀 전환이 production no-op 검증에 의해 제거되는 구조적
+limitation** 이 확인됐다. 두 cluster 모두 이번 측정 조건에서 3/3 재현됐다. **Phase 10 은 production 을
+고치지 않고 evidence 를 Phase 11 입력으로 넘긴다** — Phase 10 자체는 *quality audit/measurement 완료* 로 확정.
+
+**산출물**(gitignore `audit.local/out/`, 원문은 tracked docs 에 복사하지 않는다):
+`…-manifest.md`(frozen GT) · `…-dry.md` · `…-run1.{md,json}`(PRIMARY) ·
+`…-stability.{md,json}` ×2 · `…-parity.md` · `parity-reference-P1.md`
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
