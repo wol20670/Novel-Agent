@@ -4,12 +4,24 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **복장·표정 자동 추론(LLM) 도입 — Phase 11 까지 확정 완료.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
-  - **다음 Phase 프롬프트를 받기 전까지 새 Phase 를 시작하지 말 것.** Phase 11(같은 응답 안의 연쇄 전환 검증 보정)로 계획된 범위는 끝났다.
-  - **Outfit AI semantic FP 는 여전히 미해결이다** — 구매/소유 · 미래 의도 · 타 캐릭터 의상 언급. Phase 11 에서 prompt-only 보강을 실키로 시도했지만 **P12 future-intent 2/3 재발 · P4 stable model omission** 때문에 **production 에서 전부 rollback** 했다(evidence 는 PHASES.md Phase 11 절). ⚠️ **같은 문장 튜닝을 반복하지 말 것** — 다시 다룬다면 그 evidence 를 입력으로 **새 Plan 부터** 설계한다.
+- **복장·표정 자동 추론(LLM) 도입 — Phase 12 까지 확정 완료.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
+  - **Phase 13 = PLANNED / NOT STARTED.** 계약은 이미 확정됐다(아래 📌) — **Phase 13 프롬프트를 받기 전까지 코드를 손대지 말 것.** Phase 13 범위 = *Phase 12 계약 구현 + 무료 결정론 검증 + (사용자 승인 후) live 재측정*. **구현 + 무료 검증을 마치기 전까지, 그리고 사용자 사전 승인 전까지 live API 호출 0.**
+  - **Outfit AI semantic FP 는 아직 production 에서 미해결이다**(구매/소유 · 미래 의도 · 타 캐릭터 의상 언급 · window 끝 미래 의도). Phase 12 는 **고친 Phase 가 아니라 계약을 확정한 분석 Phase** 다.
+  - ⚠️ **Phase 11 A 식 suppression 프롬프트 튜닝을 반복하지 말 것**(P10/P4 raw omission 회귀). Phase 13 도 프롬프트를 바꾸지만 **목적이 다르다** — 억제가 아니라 `kind` 라벨 외부화다.
   - 표정 선택 품질은 **여전히 실키 미검증**이다(의상만 Phase 10/11 에서 쟀다).
-  - 후속 후보(착수 전 지시 필요): semantic FP 후속 설계 · 무시한 제안이 재실행 때 다시 나오는 문제(ignored 기억은 persistent provenance 라 일부러 안 만듦) · 실제 제작 대본 기반 품질 측정(Phase 10/11 은 합성 fixture 한정) · 표정 AI 실키 검증. **무엇을 다음에 할지는 사용자가 정한다.**
+  - 후속 후보(착수 전 지시 필요): P12 window-boundary 축(read-only look-ahead) · 무시한 제안이 재실행 때 다시 나오는 문제 · 실제 제작 대본 기반 품질 측정(Phase 10/11 은 합성 fixture 한정) · 표정 AI 실키 검증. **무엇을 다음에 할지는 사용자가 정한다.**
   - known limitations(**명시적 우선순위 지시 전까지 착수하지 않음**, 상세는 PHASES.md Phase 9 절): D3 Export `optedIn` 비대칭 · D4 `availableExpressions` 후보 누수 · D5/D6 커스텀 표정·의상 속성 해시 충돌.
+
+## 📌 Phase 12 가 확정한 것 (Phase 13 구현 계약 — 재설계 금지)
+- **production 변경 0 · live 호출 0 인 분석/설계 Phase.** baseline 은 Phase 11 production contract(= Phase 10 프롬프트 + Phase 11 B 파서) 그대로.
+- **root-cause**: known semantic FP 4건(`N1` 구매 · `N3` 미래 의도 · `N4` 타 캐릭터 화제 · `P12-59` 미래 의도+window 경계)은 현재 `B~G` 에서 **구조적으로 유효**하다. ⇒ *"현재 known semantic FP cases 를 recall regression 없이 거를 추가적인 언어 독립 parser-only deterministic invariant 를 이번 audit 에서는 찾지 못했다"* — **"더 이상 없다"로 쓰지 말 것.**
+- **wire 계약**: `kind` = **`"transition"` | `"non_transition"` binary**(negative taxonomy 를 enum 으로 늘리지 않는다). `changes[]` 는 **semantic candidate envelope** 이 되지만 **semantic-only widening** 이다 — 후보 캐릭터·exact 의상·scan/writable 범위·fixed/manual·no-op 등 **structural eligibility 는 그대로**.
+- **`S` gate 위치**: `B→C→C2→D→E→F→G→S→seen.add→parsedTransitionByChar.set`. S-rejected 행은 `seen` 도 chronology 도 건드리지 않는다. **반환 직전 filter 로 만들지 말 것**(Phase 11 B 연대기·반환 순서·cross-window 비전파 전부 유지).
+- **fail-open**: `non_transition` 만 추가로 제거하고 **missing·unknown·wrong-type 은 legacy accept**, JSON 자체 malformed 는 기존대로 throw. 이 보장은 **동일 raw row 에 대한 parser-layer conditional guarantee** 이지 end-to-end recall 보장이 아니다 — **prompt 변경에 의한 raw omission FN 은 여전히 가능**하다.
+- **정규화·파싱 3축을 섞지 말 것**: `character/outfit` = 기존 `normalizeOutfitLabel`(**lowercase 없음**, fuzzy 없음) / `kind` = NFKC+trim+공백+**lowercase** 후 두 토큰 exact / `i` = **production 과 동일한 numeric coercion**(`Number(r.i)` + `Number.isFinite`, `{"i":"60"}` 은 60). 파서·harness·raw recall 진단이 같은 해석을 쓰고, harness 는 셋을 **각각 mirror**(generic abstraction 신설 금지).
+- **prompt 경계**: transition-only reporting 문장은 **교체/재작성**(append 금지), structural 지시는 **의미 보존**(표현 정합화만). "파서가 막으니 structurally invalid row 도 다 내라"는 금지.
+- **저장·전파 없음**: `kind` 는 parser-local transient. `OutfitChange`/`OutfitSuggestion`/store/UI/Project/save/`.npproj.zip`/협업/Ren'Py export **전부 무변경**.
+- **측정 계약**: raw candidate recall 은 **owner-window 기준**(그 `i` 를 scan 으로 소유하는 유일한 window 의 raw 에 있어야 emitted, 다른 window 건은 `out-of-owner-window emission` 진단일 뿐) · FN 은 **raw omission / semantic-label(S) / structural(B~G) / final** 로 **단일 attribution** · PRIMARY 는 Run 1 only(23 case·26요청)이고 **Phase 10 산출물을 덮어쓰지 않는다**. ⚠️ `audit.local/out/` 에는 **Phase 10 것만 남아 있다**(Phase 11 raw 없음 → 문서 인용 대조).
 
 ## 📌 Phase 11 이 확정한 것 (다음 Phase 의 baseline)
 - **같은 응답(= 같은 요청·같은 scan window) 안의 연쇄 전환은 파서가 시간순으로 읽는다** — 앞선 valid
@@ -60,4 +72,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 11 확정 — Outfit AI 같은 응답 안의 연쇄 전환 검증 보정(`6da5d77`)**: 파서가 그 응답 안에서만 사는 가정 연대기로 앞선 전환을 반영해 `G(no-op)` 를 판정한다(반환 순서·cross-window 비전파·canonical 단일 소스 유지). B-only frozen PRIMARY `TP 18 / FP 4 / FN 0 · P 0.818 · R 1.000 · F1 0.900 · case 19/23`(Phase 10 대비 delta 는 `P3 (3,민주,사복)` FN→TP **하나뿐**, B-sensitive 새 FP 0). **prompt semantic 보강(A)은 실험 후 production rollback** — 상세는 `PHASES.md` "Phase 11 확정".
+- **Phase 12 확정(docs-only) — Outfit AI semantic contract audit + Phase 13 계약 고정**: production/tests/audit.local 변경 0, live 호출 0. 확정 계약은 위 📌 블록, 전체 근거·후보 비교·테스트 매트릭스·rollback 기준은 `PHASES.md` "Phase 12 확정" 절.

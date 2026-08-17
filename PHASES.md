@@ -33,6 +33,9 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 8 | AI 연출 workflow 통합 audit + 정합성 방어 | ✅ 확정 (Plan v4 + actual diff 리뷰 반영) | `88c4095` | typecheck · vitest 50파일/708(668→+40) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 브라우저 e2e 전체(제안 칩 4경로 + export/import 후속 단계 포함) · `git diff --check` 이상 없음 |
 | 9 | Preview↔Export 스프라이트 표시 parity | ✅ 확정 (Plan v6 + GitHub actual commit 리뷰 반영) | `7352ba5` | typecheck · vitest 50파일/729(708→+21) · `.rpy` 22구성 245파일 회귀 0(`dump:rpy` before/after) · 스크래치 outDir 빌드 · 브라우저 e2e 전체 · `git diff --check` 이상 없음 · 미리보기 실기 스모크(콘솔 에러 0) |
 | 10 | Outfit AI 실키 품질 audit(**production 변경 없음** — 측정 Phase) | ✅ 확정 (Plan v3 + dry/GT freeze + actual 결과 리뷰 반영) | 이 문서 | dry 18/18(D0~D16) · live Run 1 26요청 · stability Run 2·3 각 13요청 · deployed UI request-contract parity 1요청 · vitest 50파일/729 · typecheck · production/tests/package/lock/`.gitignore` diff 0 |
+| 11 | Outfit AI 같은 응답 안의 연쇄 전환 검증 보정(A 는 rollback) | ✅ 확정 | `6da5d77` | typecheck · vitest 50파일/741 · 스크래치 outDir 빌드 · e2e 전체 · `dump:rpy` 22구성 245파일 diff 0 · audit dry D0~D16 · B-only live PRIMARY 26요청 |
+| 12 | Outfit AI semantic contract audit + Phase 13 계약 고정(**코드 변경 없음** — 분석/설계 Phase) | ✅ 확정 (Plan v1→최종, GPT 4차 검토 반영) | 이 문서(docs-only) | — (분석 Phase · live 호출 0 · production/tests/audit diff 0) |
+| 13 | Phase 12 계약 구현 + 결정론적 검증 + (승인 후) live 재측정 | ⏳ planned / not started | — | — |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -620,6 +623,155 @@ production 에는 Phase 10 의 **semantic FP class 가 그대로 남아 있다**
 또 harness 의 `omissionA` 진단은 같은 줄에 여러 캐릭터가 있을 때 member 별 누락을 충분히 표현하지
 못했다(P10 regression 을 A=0/18 로 셌다) — 다만 **exact tuple GT 비교가 그 regression 을 정확히
 검출**했으므로 metric 은 재설계하지 않았다.
+
+## Phase 12 확정 — Outfit AI semantic contract audit + Phase 13 계약 고정 (코드 변경 없음)
+
+**성격**: 구현 Phase 가 아니라 **분석/설계 Phase** 다. production 변경 **0**, live 호출 **0**, 확정 커밋은
+docs-only. Phase 12 가 한 일은 *"Outfit AI 의 semantic FP 를 다시 다루기 전에 production 요청·응답·파서 계약을
+audit 하고, Phase 11 실패 evidence 를 입력으로 **Phase 13 이 구현할 최소 semantic contract 를 확정**한 것"* 이다.
+⚠️ **Phase 12 가 semantic FP 를 production 에서 해결한 게 아니다** — 상태는 `Phase 12 = contract audit + design
+finalized` / `Phase 13 = implementation + deterministic verification + approved live measurement`.
+
+### root-cause audit 결과 (Phase 10 raw 로 재검증)
+
+현재 known semantic FP cases: `N1`(purchase/ownership) · `N3`(future intent) · `N4`(other-character outfit
+topic/reference) · `P12-59`(future intent + **window-boundary amplification**). 네 건 모두 현재 파서의
+`B/C/C2/D/E/F/G` structural validation 에서 **구조적으로 유효**하다(같은 run 에서 N8 은 `F`, N9 는 `D` 로
+정상 차단됐다 — 파서가 약한 게 아니라 거절 근거가 데이터에 없다).
+
+> **현재 known semantic FP cases 를 recall regression 없이 거를 추가적인 언어 독립 parser-only deterministic
+> invariant 를 이번 audit 에서는 찾지 못했다.**
+
+⚠️ "parser-only invariant 는 더 이상 존재하지 않는다" 또는 "수학적으로 파서에서 더 할 게 없다"고 쓰지 말 것 —
+새 evidence 가 나오면 다른 structural invariant 가 발견될 여지는 열어 둔다.
+
+**P12 구조 사실**(문서화 가치 있음): `P12` 는 window 0 이 `scan i=0..59`(60줄 포화), window 1 이
+`context 50..59 · scan 60..69` 다. 59("갈아입고 올게")는 **window 0 scan 의 마지막 줄**이고 완료를 확인하는 60 은
+look-ahead 금지 때문에 그 요청에 **없다** — 두 행은 서로 다른 응답이라 Phase 11 B(same-response chronology)로는
+관계지을 수 없다(의도). 게다가 둘이 같이 남으면 `foldSceneSuggestions` 가 `lineIndex` 오름차순이라 **59(FP)를 먼저
+적용하고 60(TP)은 no-op 으로 skip** 한다 — FP 가 TP 자리를 뺏는다.
+
+**raw evidence 표현(정확히)**: *일부* semantic FP 에서는 raw `reason` 에 semantic cue 가 이미 노출됐다
+(N1 은 구매/소유를 직접 드러냈고 N3 는 future-intent 표현을 인용). ⚠️ 반면 **N4 는 "체육복으로 바뀌었음"으로
+상황을 잘못 해석**했다. 따라서 "모델은 의미를 다 알고 있었는데 표현할 자리가 없었다"고 일반화하지 말 것 —
+근거가 지지하는 결론은 **explicit semantic field 가 있으면 최소 일부 case 에서 모델 내부 구분이 raw output 으로
+외부화될 가능성이 있다**는 수준이다.
+
+### Phase 11 A 반복 금지 (같은 튜닝을 되풀이하지 않는다)
+
+Phase 11 A(prompt-only semantic guard)는 일부 FP 를 줄였지만 **P10 joint member omission · P4 stable raw
+omission · P12 future-intent instability** 를 만들어 **production 에서 전부 rollback** 됐다(프롬프트는 Phase 10
+상태). Phase 13 은 **suppression 지향 prompt tuning 을 반복하지 않는다.** ⚠️ 단 "prompt 접근은 영원히 금지"라고
+쓰지 말 것 — Phase 13 도 프롬프트를 바꾸지만 **목적이 다르다**(억제가 아니라 라벨 외부화).
+
+### Phase 13 구현 계약 (Phase 12 확정 — Phase 13 에서 재설계 금지)
+
+**① wire field(binary)** — `kind`, 허용값은 **정확히 `"transition"` | `"non_transition"` 둘**. negative
+taxonomy 를 production enum 으로 늘리지 않는다(모든 negative 를 파서가 동일하게 reject 하면 추가 production
+invariant 가 0이고 unknown 표면만 커진다. 진단 granularity 는 기존 `reason` + harness raw 저장으로 충분).
+
+**② `changes[]` 의 semantic widening — semantic-only** 다.
+```
+LLM wire changes[]              = semantic candidate envelope (transition / non_transition 모두 가능)
+parseOutfitResponse() 반환      = structural gates + semantic S gate 를 모두 통과한 실제 transition 제안만
+OutfitSuggestion / store / UI   = 기존과 동일(kind·non_transition 행은 도달하지 않는다)
+canonical Line.outfits          = 사용자 accept 이후에만 변경
+```
+⚠️ **structural universe 는 넓히지 않는다**: scan 밖 line · 후보 아닌 character · 후보 아닌 outfit · fuzzy/신규
+outfit · fixed/manual 무시 · canonical no-op · effective CG 이후 · 주인공 등 기존 제외 대상. 즉 *candidate-envelope
+widening 은 semantic classification boundary 만 넓히고 existing structural eligibility 와 canonical/manual/no-op
+계약은 유지한다.*
+
+**③ parser semantic gate `S` 의 위치**
+```
+B → C → C2 → D → E → F → G → S → seen.add → parsedTransitionByChar.set
+```
+`kind:"non_transition"` → `S` reject · `kind:"transition"` → 기존 structural gates 기준. **S-rejected 행은
+`seen` 을 consume 하지 않고 chronology 를 advance 하지 않는다**(같은 `(i, character)` 의 뒤 행은 다시 심사 가능).
+Phase 11 same-response hypothetical chronology 유지 · 반환 순서 = 모델 출력 순서 · cross-window 미승인 제안
+전파 없음. ⚠️ **`S` 를 반환 직전 filter 로 구현하지 않는다**(게이트 루프 밖으로 빼면 거부된 행이 뒤 항목의 `G`
+전제를 바꾼다).
+
+**④ fail-open 정책과 보장 범위**
+```
+known "transition"   → 기존 structural validation 후 accept 가능
+known "non_transition" → S reject
+kind missing / unknown string / wrong type → legacy accept
+whole JSON malformed → 기존처럼 throw
+```
+> 동일한 raw candidate row 가 파서에 들어왔다는 조건에서, missing / unknown / wrong-type `kind` 는 Phase 11
+> parser 보다 **추가 semantic rejection 을 만들지 않는다.**
+
+이것은 **parser-layer conditional guarantee** 이지 **end-to-end model recall guarantee 가 아니다** —
+프롬프트가 바뀌므로 모델이 true candidate 자체를 생략하는 **raw omission FN 은 여전히 가능**하고 fail-open 은
+그 경로를 막지 못한다.
+
+**⑤ normalization / parsing 3축(섞지 말 것)**
+| 축 | 규칙 |
+|---|---|
+| `character`/`outfit` | 기존 `normalizeOutfitLabel` semantics — NFKC + trim + whitespace, **lowercase 없음**, canonical identity **exact**, fuzzy·신규 이름 채택 금지(`"Casual"` 과 `"casual"` 을 임의로 같다고 보지 않는다) |
+| `kind` | **wire-token normalization** — NFKC + trim + whitespace + **lowercase** 후 두 토큰과 exact. `completed_transition`·`transition-ish`·`non-transition`·`not_transition` 은 **unknown → fail-open**(semantic fuzzy match 금지) |
+| `i` | **production parser 와 동일한 numeric coercion** — `typeof r.i === 'number' ? r.i : Number(r.i)` 후 `Number.isFinite` + scan membership. `{"i":"60"}` 은 60 으로 해석된다. `"abc"`·`NaN`·`Infinity` 는 기존 `B` 계열에서 거부 |
+
+파서·audit harness·raw candidate recall 진단이 **모두 같은 해석**을 쓴다. harness 는 세 축을 **각각 mirror**
+하고 **하나의 generic normalization/parsing abstraction 으로 합치지 않는다**(기존 production helper 재사용은 가능).
+
+**⑥ prompt rewrite 경계** — candidate-envelope 계약과 직접 충돌하는 **transition-only reporting 문장은
+교체/재작성**한다(단순 append 금지 — "실제 transition 만 넣어라"와 "non_transition 도 내라"를 동시에 남기지 않는다).
+반대로 **structural invariant 대응 지시는 behavioral 의미를 유지**한다: fixed/manual authoritative ·
+scene-start manual 보호 · canonical no-op 회피 · candidate character 제한 · exact candidate outfit 제한 ·
+writable scan 제한 · `context` 인덱스에 결과 금지 · `markers`/`initialHidden` semantics. `change` → `candidate`
+같은 **표현 정합화만 허용**하고, **"파서가 막으니 structurally invalid row 도 다 내라"는 방향은 금지**다.
+
+**⑦ Phase 13 prompt 가 표현할 semantics(고정)**: ①`changes[]` = semantic candidate rows ②candidate 마다 `kind`
+③값은 두 개 ④실제 effective outfit transition = `transition` ⑤아니면 `non_transition` ⑥purchase/ownership ·
+⑦future intent · ⑧other-character outfit topic/reference 는 `non_transition` 예시 ⑨true completed transition 유지
+⑩multi-subject 는 **member 별 행 유지** ⑪fixed/manual 이후의 실제 completed return transition 유지
+⑫불확실성을 이유로 true candidate 자체를 억제하는 competing instruction 금지 ⑬전부 existing structural
+eligibility 안에서. **영어 문장 선택만 Phase 13 작업이고 semantics 는 바꾸지 않는다.**
+
+**⑧ 저장·전파 없음** — `kind` 는 **parser-local transient wire metadata** 다. `OutfitChange`·`OutfitSuggestion`·
+store·UI·Project schema·save/load·`.npproj.zip`·협업·Ren'Py export **전부 무변경**, cross-window 전달 없음.
+
+### Phase 13 측정 계약 (benchmark)
+
+**raw candidate recall — owner-window 기준**: expected tuple `(i, character, outfit)` 의 owner 는 **그 `i` 를
+writable scan 으로 소유하는 유일한 planned window**(disjoint scan 계약상 정확히 하나). **owner window 의 raw
+`changes[]`** 에 있을 때만 `Raw emitted = YES` 이고, 다른 window(read-only context 를 보고 낸 것 포함)에서 나온
+동일 tuple 은 **`out-of-owner-window emission` 진단으로만** 기록하며 raw recall 을 만족시키지 않는다. tuple 비교는
+위 3축(`i` coercion / identity / kind)을 그대로 쓴다.
+
+**FN attribution(중복 없이 first disappearance stage 기준 단일 분류)**
+| 축 | 정의 |
+|---|---|
+| A. raw omission FN | expected tuple 이 **owner window raw 에 없음**(다른 window 에 잘못 나왔어도 A 다) |
+| B. semantic-label FN | owner raw 에 있으나 `kind == non_transition` → `S` reject (새 계약 고유의 recall regression) |
+| C. structural/parser FN | owner raw 에 있으나 `S` 가 아닌 기존 `B~G` 가 제거 (기존 parser/harness regression 신호) |
+| final FN | end-to-end expected tuple 미생존 |
+
+**필수 진단**: `Expected tuples total · Raw expected tuples emitted · Raw omission FN · Raw candidate recall ·
+Out-of-owner-window emission · Semantic-label FN · Structural/parser FN · Final TP/FP/FN · Precision · Recall · F1`.
+positive protection = `P2` · `P3`(각 tuple) · `P4` · `P10`(각 member) · `P12-60`, known semantic FP = `N1`·`N3`·`N4`·`P12-59`.
+추가로 **candidate-envelope expansion FP**(Phase 10 raw 에 없던 신규 tuple 이 envelope 때문에 생겼고 그중
+`transition` 으로 최종 accept 된 신규 FP)를 따로 센다.
+
+**live 규약**: 구현 + 무료 검증(typecheck·vitest·스크래치 빌드·`dump:rpy` diff 0·audit dry) 이후,
+**사용자 사전 승인 전 live 호출 0**. 승인 요청 시 최소 `model gpt-4o-mini · requests 26 · 예상 비용` 제시.
+PRIMARY 는 **Run 1 only**(23 case · expected 18 · 26요청), stability(Run 2/3)는 PRIMARY 를 본 뒤 필요할 때만.
+**Phase 10 산출물을 덮어쓰지 않는다.** ⚠️ known limitation: `audit.local/out/` 에는 **Phase 10 산출물만 남아 있고
+Phase 11 B-only PRIMARY·A 실험의 raw/JSON 은 디스크에 없다** — tuple-level 대조 정본은 Phase 10 `run1.json` 이고
+Phase 11 수치는 **문서 인용 대조**로만 쓴다.
+
+### Phase 13 out of scope (이번 계약에 넣지 않는다)
+
+2-pass classifier · Structured Outputs migration(`json_object` 유지) · semantic regex/blacklist · look-ahead ·
+cross-window 미승인 제안 전파 · ignored suggestion persistence · Project/save schema 재설계 · generic AI framework ·
+Expression AI 실키 · TTS · D3/D4/D5/D6 · stable Line ID · Preview/Export 재설계 · Phase 11 B refactor.
+⚠️ `P12-59` 의 window-boundary 축(read-only look-ahead)은 **N1/N3/N4 에 효과가 없고** 동시 투입하면 live delta
+attribution 이 불가능해져 **이번 계약과 함께 고치지 않는다**(후속 Phase 후보).
+
+**전체본**(후보 비교·기각 사유·테스트 매트릭스·rollback 기준)은 계획 파일
+`~/.claude/plans/novel-agent-phase-12-dazzling-kettle.md` 최종본.
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
