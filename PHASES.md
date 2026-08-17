@@ -843,6 +843,161 @@ Phase 10 대비 **FP 4→1 · F1 0.872→0.944**. ⚠️ 합성 curated fixture 
 (`…T10-58-06-run1.{json,md}`)·corrected(`…T11-33-55-run1.{json,md}`) 원본을 byte-identical 복사해 뒀다.
 Phase 10 산출물(`audit.local/out/`)은 무수정이다.
 
+## Phase 14 확정 — Outfit AI 동결 (분석 Phase · production 변경 0 · live 0)
+
+**성격**: 구현 Phase 가 아니라 **결정 Phase** 다. 물음은 하나였다 — *"Outfit AI 에 production correction 을
+한 번 더 넣을지, 아니면 지금 상태로 동결하고 Expression AI 로 넘어갈지."* 답은 **동결**이다.
+production·tests·audit·fixture·프롬프트 변경 **0**, **live 호출 0**, 확정 커밋은 docs-only.
+보존 evidence(`audit.local/phase13/` pre·corrected · `audit.local/out/` Phase 10 run1 + stability run2/3)만
+읽어 판단했다.
+
+> ⚠️ **이 절의 서술 원칙(사용자 지시)**: `증명`·`배제`·`유일한 원인`·`유일한 해법` 같은 causal 확정 표현을
+> 쓰지 않는다. evidence 가 지지하는 것은 **contributing factor** 수준이고, 관측은 **관측으로만** 적는다
+> (발생 확률·stability 를 추론하지 않는다).
+
+### `P12-59` vs `P12-60` — frozen evidence
+
+`P12` = 70줄 장면. window 0 `scan 0..59`(context 없음) · window 1 `scan 60..69 · context 50..59`.
+두 행은 **서로 다른 요청**에서 나왔고 두 요청 모두 pre/corrected 사이 **byte-identical** 이다.
+
+| axis | `P12-59` | `P12-60` | 차이 |
+|---|---|---|---|
+| 줄 | `[민주] 나 잠깐 사복으로 갈아입고 올게.` | `잠시 후 민주가 돌아와 옆자리에 앉았다.` | 59=선언 · 60=복귀 사실 |
+| 의미 | 미래 의도 | 완료된 전환의 결과 상태 | 59 는 완료 진술이 아니다 |
+| owner window | planIdx 0 | planIdx 1 | 서로 다른 요청 |
+| 다음 줄 가시성 | **없음** — 59 가 scan 종단, 60 은 no-look-ahead 로 부재 | 59 를 read-only context 로 **가짐** | 정보 비대칭 |
+| currentOutfit/source · outfits · fixed · markers · initialHidden | `기본`/`default` · `['기본','사복']` · 없음 · 없음 · false | 전부 동일 | 통제됨 |
+| raw `kind` | `transition` | `transition` | 59 를 완료로 분류 |
+| parser | 전 게이트 통과 → **FP** | 통과 → **TP** | S 는 못 막는다(라벨이 transition) |
+| 파서가 아는 정보 | `i∈scan`·후보·no-op·fixed·firstTextual 뿐 | 동일 | "선언 vs 완료" 필드가 없다 |
+
+두 행은 최종 결과에 **공존**한다(`predicted = [59, 60]`) — 59 가 60 을 지우지 않는다.
+
+**window-boundary 가중 가능성을 강하게 지지하는 대조**: 유사한 미래 의도 구문이 **완료 줄과 같은 window
+안에** 있는 두 case 에서는 모델이 선언 줄을 후보로도 내지 않고 완료 줄만 냈다(각 두 run 동일 관측) —
+`P1`(선언 i=1 · 완료 i=2 → **i=2 만**) · `P14`(선언 i=2 · 완료 i=3 → **i=3 만**). `P12`#0 은 같은 종류의
+선언이 scan 종단(i=59)에 있고 완료(i=60)가 window 밖이며 **i=59 를 `transition` 으로** 냈다(두 run 동일).
+⚠️ **이 대조는 통제된 causal experiment 가 아니다** — 세 문장은 유사하지만 byte-identical 이 아니고 문맥·
+장면 길이·window 구성도 함께 다르며, `P12-59` 문장 자체에 이미 미래 의도 cue 가 있다. 따라서 **boundary
+가중 가능성을 강하게 지지하는 자료**이지 "boundary 가 유일한 원인"·"prompt semantics 문제가 아니다" 의
+근거가 아니다. (참고: `N3` = 완료가 장면 어디에도 없는 case 는 두 run 모두 `non_transition` 라벨.)
+
+### root cause 는 이 수준으로만 확정한다
+
+```
+P12-59 는 여전히 raw model semantic misclassification 이다.
+다만 P1/P14 대조와 P12 window 구조를 보면, non-final window 종단에서 downstream completion
+evidence 를 볼 수 없는 no-look-ahead 구조가 이 오판의 가장 강하게 의심되는
+structural contributing factor 다.
+현재 frozen evidence 만으로 "boundary 가 유일한 root cause" 또는
+"prompt semantics 문제는 아니다" 까지 causal 하게 확정하지 않는다.
+```
+
+### 검토한 minimal fix 를 채택하지 않은 이유
+
+**이번 Phase 에서 검토한 작은 correction 중 positive recall 위험을 제한하면서 채택할 만한 것을 발견하지
+못했다.** ⚠️ 미래 설계 가능성을 배제하는 문장으로 읽지 말 것.
+
+- **D1 parser invariant `i === scanEnd` ∧ 뒤에 writable 잔존 → reject**: P12-59 를 거르고 P12-60 을 살리며
+  언어 독립·현재 파서 정보로 계산 가능하다. **그런데 판정 근거가 의미가 아니라 60줄·3500자 chunking 의
+  위치 artifact 다** — 진짜 transition 이 정확히 `scanEnd` 에 오면 **그 index 의 owner window 는 하나뿐이라
+  복구 경로가 없고 silent FN** 이 된다(fixture 에 그 case 도 없다: P11 정답은 10·125).
+- **D2 cross-window dedup**: 미승인 제안의 cross-window 전파·철회는 신규 시스템이고, 뒤 window 가 raw
+  omission 하면(P3 가 그런 사례) FP 가 그대로 남는다.
+- **D3 화자·문형 판정**: `P12-59` 도 `P2`(TP)도 민주 본인 대사라 화자 축으로 분리되지 않고, 시제·어미
+  기반은 금지된 semantic regex/blacklist 다.
+- **D4 prompt boundary suppression("window 종단 선언은 `non_transition`")**: 형태는 국소적이지만 실패
+  모드가 비대칭이다 — 지금은 **59 FP 와 60 TP 가 함께 제안되어 보이고 거부로 복구**되는데, D4 는 종단 줄의
+  **진짜 완료 전환**을 `non_transition` → S reject 로 **조용히** 없앨 수 있고(그 index 의 owner window 는
+  하나) 틀린 의상이 다음 변화까지 carry 된다. 그 위치의 fixture case 가 없어 무료 검증으로 회귀를 잡을 수도
+  없다. **F1 0.944 baseline 에서 채택 근거가 없다.**
+- **D5 read-only look-ahead** — *"P12 boundary 정보 결손을 직접 줄이는 가장 명확한 structural candidate 중
+  하나지만, 현재 no-look-ahead 계약을 바꾸는 별도 시스템 변경이므로 이번 Phase 범위 밖이다."* 파급:
+  `aiSelect.ts` causal-window 계약 · payload/prompt 신규 키 · `estimate.ts` 견적 · 다중 window 장면 비용.
+  **자동으로 다음 Phase 가 아니다**(사용자 별도 지시 시에만). overlapping scan · cross-window
+  reconciliation · 2-pass 등 다른 대규모 설계는 이번에 연구·나열하지 않았다.
+
+### `P3` — 두 종류의 evidence 를 섞지 말 것
+
+**① 직접적인 same-input evidence(이것이 근거다)**
+```
+Phase 13 pre / corrected: 26 requests
+byte-identical request pair 24쌍   (다른 것은 P4#0 · P5#0 = FIXED_RULE 보정 대상 둘뿐)
+그 24쌍 중 tuple decision set(i|character|outfit|kind) 일치 = 23/24
+유일한 decision divergence = P3#0   (pre: emitted / corrected: omitted)
+※ 나머지 7건은 reason 문구·공백만 차이(파서가 표시용으로만 쓰고 저장하지 않는다)
+```
+⇒ **same-input raw emission variability 가 실제 존재한다.** `temperature 0` 이어도 deterministic 이라고
+간주할 수 없다.
+
+**② 역사적 참고 관측(rate 로 해석하지 않는다)** — `(3,민주,사복)` 행: Phase 10 run1 emitted · stability
+run2 emitted · run3 emitted · Phase 13 pre emitted · Phase 13 corrected **omitted** ⇒ 보존 관측 총
+**4 emitted / 1 omitted**. ⚠️ **이 5회는 동일 prompt/input 반복 실험이 아니다**(Phase 10 은 semantic-kind
+도입 **전** 프롬프트). 따라서 4/5 를 same-input probability 나 emission rate 로 해석하지 않는다.
+
+**③ production bug evidence — 없음**: Phase 13 pre 에서 같은 두 행이 모두 accepted(P3 PASS, tp=2) ·
+Phase 10 의 P3 FN 은 raw omission 이 아니라 **`G`(no-op) 구조 거부**였고(raw 엔 두 행 다 있었다) Phase 11 B
+가 이미 고친 축이다 · corrected P3 `rawAudit` = `ownerCount 1` · `matching []` · verdict `A` ·
+`ownerInvariantOk true`. ⇒ planner payload drift · parser bug · window ownership bug · fixed/manual bug
+**어느 근거도 없다.** **추가 stability campaign 불필요 — stability run 을 더 돌리지 않는다.**
+
+### `FIXED_RULE` / F1 attribution 정정
+
+```
+Phase 13 pre        TP/FP/FN = 17/1/1   FAIL = P4, P12
+Phase 13 corrected  TP/FP/FN = 17/1/1   FAIL = P3, P12
+```
+`FIXED_RULE` correction 은 겨냥한 `P4` 를 실제로 고쳤지만, 같은 corrected run 에서 **독립적인** `P3` raw
+omission 이 발생해 **aggregate delta 는 0 으로 상쇄**됐다. 따라서 attribution 은 이 수준으로 쓴다:
+
+```
+Phase 10 baseline 대비 Phase 13 semantic-kind configuration 에서 관측 aggregate 가
+F1 0.872 → 0.944 로 개선됐다.
+mechanism-level 로는
+  · N3 등 실제 non_transition row 는 S 가 reject 한 관측이 있음
+  · N1/N4 는 raw candidate 자체가 사라졌으므로 S 의 직접 효과라고 할 수 없음
+  · FIXED_RULE 은 P4 를 실제 보정했으나 해당 pre/corrected run pair 의 aggregate delta 는
+    독립적인 P3 omission 으로 상쇄됨
+⇒ 전체 F1 향상을 S 단독 또는 FIXED_RULE 단독에 귀속하지 않는다.
+```
+⚠️ **Phase 13 절의 기존 수치는 이력이므로 수정하지 않았다** — 정정은 이 절에만 있다.
+
+### `N1` / `N4`
+
+Phase 10 에서는 둘 다 raw 후보를 내 최종 **FP** 였다(`N1 (0,민주,사복)` · `N4 (0,지수,체육복)`).
+**Phase 13 의 보존된 두 run 에서는 모두 raw 미출력(`{"changes":[]}`)이 관측됐다**(요청은 byte-identical),
+최종 FP 0 · case PASS. ⚠️ 그 이상의 발생 확률·stability 는 추론하지 않는다. 제품 관점에서 **고칠 문제가
+없고**, candidate-envelope 이론상 이상적이지 않다는 이유만으로 다시 emit 시키려 프롬프트를 흔들지 않는다.
+**"`S` 가 N1/N4 를 해결했다"고 쓰지 말 것** — S 직접 효과가 관측된 case 는 `N3` 다.
+
+### Outfit freeze 기준 (동결 시점의 상태)
+
+**완성된 것** — 계약: `changes[]` = semantic candidate envelope · `kind` = binary parser-local transient ·
+게이트 순서 `B→C→C2→D→E→F→G→S→seen.add→chronology` · fail-open · 정규화 3축 분리 · `FIXED_RULE` 이중
+의미. 비침습성: `OutfitChange`·`OutfitSuggestion`·store·UI·Project schema·save/load·`.npproj.zip`·협업·
+Ren'Py export **전부 무변경**, 값의 단일 소스는 계속 `outfitFlags`. 안전망: `tests/outfit-ai.test.ts`
+(`S` 전용 블록 — fail-open·정규화 누수·게이트 위치) · `outfit-apply.test.ts` · `outfit-store.test.ts` ·
+`dump:rpy` 22구성 회귀 0. 측정: corrected PRIMARY `17/1/1 · F1 .944 · case pass 21/23`(**합성 fixture 한정**).
+
+**허용(=동결)하는 limitation**
+1. **`P12-59` residual FP** — no-look-ahead window 의 **종단** 미래 의도가 `transition` 으로 남을 수 있다
+   (원인 표현은 위 결론 블록 그대로). **현재 P12 fixture 에서 관측된 bulk-apply 영향**: 59 FP 와 60 TP 가
+   모두 제안으로 존재하고, `foldSceneSuggestions` 가 `lineIndex` 오름차순이라 59 가 먼저 적용되고 60 은
+   working-scene 기준 no-op 으로 skip 되어 **이 fixture 에서는 전환이 한 줄 일찍 시작**한다. 개별 검수에서
+   59 를 거부하면 P12 는 정상화 가능하다. ⚠️ 이 관측을 **모든 boundary FP 의 일반적 피해 상한으로 쓰지 말 것.**
+   ⚠️ **blanket boundary suppression(D4)으로 고치려 하지 말 것.**
+2. **same-input raw emission variability** — 위 ① 그대로. ②의 4/5 를 rate 로 인용하지 말 것.
+3. **`N1`/`N4` raw 미출력** — FP 는 없지만 `S` 의 직접 효과가 아니다. 재emit 유도 금지.
+4. **합성 fixture 한정 측정** — 실제 제작 대본 기반 품질은 여전히 미측정.
+5. 기존 유지: cross-window 미승인 제안 비전파(의도) · 무시한 제안의 재등장 · D3/D4/D5/D6.
+
+**Outfit backlog(사용자 별도 지시가 있을 때만 재검토 — 자동으로 다음 Phase 가 아니다)**:
+read-only look-ahead(D5) · 실제 제작 대본 기반 품질 측정 · 무시한 제안 재등장 방지.
+
+> **결론**: Outfit AI 를 **현재 상태 그대로 실사용 baseline 으로 동결**한다. 남은 항목은 **현재 활성 해결
+> 과제가 아니라** 문서화된 **accepted limitation / backlog** 다. **다음 Phase = Expression AI 실사용 audit +
+> production 개선.**
+
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
 **표정 파이프라인은 이미 존재한다.** LLM 배정도 들어와 있다.

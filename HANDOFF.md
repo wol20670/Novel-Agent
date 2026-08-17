@@ -4,14 +4,22 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **복장·표정 자동 추론(LLM) 도입 — Phase 13 까지 확정 완료.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
-  - **Phase 14 = PLANNED / NOT STARTED — 성격은 `Outfit AI residual/stability audit`.** **분석/Plan 부터 시작하고(코드부터 고치지 말 것) 착수 전 사용자 지시가 필요하다.** 초기 목표: ① Phase 13 보존 evidence 로 **raw candidate emission 안정성/재현성** audit ② `P12-59`(미래 의도 + window 경계) residual FP 별도 분석 ③ **`N1`/`N4` 의 raw 미출력을 "S 가 해결했다"로 오해하지 않기** ④ 프롬프트를 다시 튜닝하기 **전에** stability evidence 와 failure attribution 을 먼저 본다. stability live run·prompt correction·P12-59 fix·2-pass classifier·Structured Outputs·semantic regex·cross-window 전파는 **미리 구현하지 않는다.**
-  - **Phase 13 이 남긴 residual(정확히)**: `P12-59` 는 `kind=transition` 으로 살아남는 **미해결 semantic FP** · `N1`/`N4` 는 **raw 미출력**으로 사라진 것이지 S reject 가 아니다 · `P3` 는 corrected run 에서 raw omission(A) 이 났는데 **그 요청 프롬프트는 두 run 이 byte-identical** 이었다 ⇒ **같은 입력에서도 single-run emission 이 ±1 event 흔들린다**(temperature 0 = deterministic 이라고 쓰지 말 것) · `P4` 는 `FIXED_RULE` 보정 후 TP 로 관측(보장 아님) · `P5` 복귀 보호 유지.
+- **Outfit AI 는 Phase 14 에서 동결됐다(Outcome B). 다음 작업은 `Expression AI 실사용 audit + production 개선`.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
+  - **표정 선택 품질은 여전히 실키 미검증**이다(의상만 Phase 10/11/13 에서 쟀다). 코드는 이미 있으니 `src/generators/emotion/` 부터 — `aiSelect.ts`(문맥/target 두 축) · `resolve.ts`(판정 단일 소스) · Phase 5 문맥 품질 확인 목록(PHASES.md). **분석/Plan 부터 시작하고 착수 전 사용자 지시가 필요하다.**
+  - **Outfit 은 열린 TODO 가 아니다** — 아래 셋은 **accepted limitation**(문서화하고 안고 간다, 상세는 PHASES.md "Phase 14 확정" 절):
+    - `P12-59` residual FP(no-look-ahead window **종단**의 미래 의도). 원인은 raw semantic misclassification 이고 **window boundary 는 가장 강하게 의심되는 contributing factor 지만 유일한 causal root cause 로 확정하지 않는다.** ⚠️ **"window 끝 행은 non_transition/reject" 류 blanket boundary suppression 을 넣지 말 것**(진짜 종단 transition 이 silent FN 이 된다).
+    - **same-input raw emission variability** — byte-identical 요청 24쌍 중 decision 일치 23/24, 유일한 divergence 가 `P3#0`. `temperature 0` 을 deterministic 이라고 쓰지 말 것. ⚠️ 보존 관측 "4 emitted / 1 omitted"는 **같은 입력 반복 실험이 아니므로 rate 로 인용 금지.**
+    - `N1`/`N4` raw 미출력 — FP 는 없지만 **`S` 의 직접 효과가 아니다**(S 관측 case 는 `N3`). 재emit 유도 금지.
+  - **Outfit backlog(사용자 별도 지시가 있을 때만 — 자동으로 다음 Phase 가 아니다)**: read-only look-ahead(P12 boundary 를 직접 줄이는 가장 명확한 structural candidate 중 하나지만 no-look-ahead 계약을 바꾸는 **별도 architecture 변경**) · 실제 제작 대본 기반 품질 측정(Phase 10/13 은 합성 fixture 한정) · 무시한 제안이 재실행 때 다시 나오는 문제.
   - ⚠️ **Phase 11 A 식 suppression 프롬프트 튜닝을 반복하지 말 것**(P10/P4 raw omission 회귀). candidate **개수**에 대한 sparsity prior 도 같은 억제 압력이라 넣지 않는다.
-  - 표정 선택 품질은 **여전히 실키 미검증**이다(의상만 Phase 10/11/13 에서 쟀다).
-  - 후속 후보(착수 전 지시 필요): 무시한 제안이 재실행 때 다시 나오는 문제 · 실제 제작 대본 기반 품질 측정(Phase 10/13 은 합성 fixture 한정) · 표정 AI 실키 검증. **무엇을 다음에 할지는 사용자가 정한다.**
   - known limitations(**명시적 우선순위 지시 전까지 착수하지 않음**, 상세는 PHASES.md Phase 9 절): D3 Export `optedIn` 비대칭 · D4 `availableExpressions` 후보 누수 · D5/D6 커스텀 표정·의상 속성 해시 충돌.
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore, 커밋 안 함)에 pre-correction·corrected 둘 다 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 Phase 14 가 확정한 것 (Outfit 동결 — 자동으로 다시 열지 말 것)
+- **Outcome B — Outfit AI 를 현재 상태 그대로 실사용 baseline 으로 동결.** production/tests/audit/fixture/프롬프트 변경 **0**, live **0**. 남은 항목은 해결 과제가 아니라 위 🎯 의 **accepted limitation / backlog** 다.
+- **`P12-59` 원인 표현의 상한**: raw semantic misclassification 이고 **no-look-ahead window 종단이 가장 강하게 의심되는 structural contributing factor**. `P1`/`P14` in-window 대조는 그 **가중 가능성을 강하게 지지**할 뿐 통제 실험이 아니다 — "boundary 가 유일한 원인"·"prompt semantics 문제가 아니다"로 쓰지 말 것.
+- **검토했고 채택하지 않은 fix**: parser `i === scanEnd` reject(chunking **위치 artifact** → 종단의 진짜 전환이 복구 불가 silent FN) · cross-window dedup(신규 시스템) · 화자/문형(P2 와 분리 불가·regex 금지) · **prompt boundary suppression**(보이고 복구 가능한 FP 를 조용한 FN + carry 로 교환). ⇒ *"이번 Phase 에서 안전한 minimal fix 를 발견하지 못했다"* 이지 미래 설계 배제가 아니다.
+- **`FIXED_RULE` attribution 정정**: pre·corrected **두 run 모두 `17/1/1`**(FAIL 이 P4→P3 로 이동) ⇒ 그 run pair 의 aggregate delta 는 **0**. `F1 0.872→0.944` 를 `S` 단독 또는 `FIXED_RULE` 단독에 귀속하지 말 것(N1/N4 는 raw 미출력이라 S 효과가 아니다). Phase 13 절 수치는 이력이라 **수정하지 않았다**.
 
 ## 📌 Phase 13 이 확정한 것 (다음 Phase 의 baseline — 깨지 말 것)
 - **`changes[]` 는 semantic candidate envelope 이고 `kind` 는 binary wire 필드**(`transition`|`non_transition`)다. 파서 **`S` 게이트**가 `non_transition` 만 거른다. **위치가 계약**: `B→C→C2→D→E→F→G→S→seen.add→chronology` — 반환 직전 filter 로 옮기면 거부 행이 뒤 항목의 `G` 전제를 바꾼다.
@@ -80,4 +88,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 13 확정 — Outfit AI binary semantic `kind` 계약 + `FIXED_RULE` 보정**(구현 `81b7f7f`): 파서 `S` 게이트·fail-open·정규화 3축, corrected LIVE PRIMARY 로 FP 4→1 · F1 0.872→0.944. 남은 것과 정확한 해석(P12-59 잔존 · N1/N4 미출력 · P3 stability)은 위 📌 와 `PHASES.md` "Phase 13 확정" 절.
+- **Phase 14 확정 — Outfit AI 동결(Outcome B)**: docs-only. 보존 evidence 재분석으로 `P12-59` 원인 표현 상한·채택하지 않은 fix 4종·`P3` same-input evidence 와 역사적 관측 분리·`FIXED_RULE` attribution 정정을 `PHASES.md` "Phase 14 확정" 절에 기록. 다음은 **Expression AI 실사용 audit**.
