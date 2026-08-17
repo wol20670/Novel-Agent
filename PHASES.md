@@ -35,7 +35,8 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 10 | Outfit AI 실키 품질 audit(**production 변경 없음** — 측정 Phase) | ✅ 확정 (Plan v3 + dry/GT freeze + actual 결과 리뷰 반영) | 이 문서 | dry 18/18(D0~D16) · live Run 1 26요청 · stability Run 2·3 각 13요청 · deployed UI request-contract parity 1요청 · vitest 50파일/729 · typecheck · production/tests/package/lock/`.gitignore` diff 0 |
 | 11 | Outfit AI 같은 응답 안의 연쇄 전환 검증 보정(A 는 rollback) | ✅ 확정 | `6da5d77` | typecheck · vitest 50파일/741 · 스크래치 outDir 빌드 · e2e 전체 · `dump:rpy` 22구성 245파일 diff 0 · audit dry D0~D16 · B-only live PRIMARY 26요청 |
 | 12 | Outfit AI semantic contract audit + Phase 13 계약 고정(**코드 변경 없음** — 분석/설계 Phase) | ✅ 확정 (Plan v1→최종, GPT 4차 검토 반영) | 이 문서(docs-only) | — (분석 Phase · live 호출 0 · production/tests/audit diff 0) |
-| 13 | Phase 12 계약 구현 + 결정론적 검증 + (승인 후) live 재측정 | ⏳ planned / not started | — | — |
+| 13 | Outfit AI binary semantic `kind` 계약 구현 + `FIXED_RULE` 보정 | ✅ 확정 (구현 → live PRIMARY → P4 회귀 분석 → 최소 보정 → corrected PRIMARY, GPT 4차 검토 반영) | `81b7f7f` | typecheck · vitest 50파일/762(741→+21) · audit dry D0~D19 21/21 · `dump:rpy` 22구성 245파일 diff 0 · pre-correction live PRIMARY 26요청 · corrected live PRIMARY 26요청(TP/FP/FN 17/1/1 · F1 0.944) |
+| 14 | Outfit AI residual/stability audit(**분석부터** — 착수 전 지시 필요) | ⏳ planned / not started | — | — |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -772,6 +773,75 @@ attribution 이 불가능해져 **이번 계약과 함께 고치지 않는다**(
 
 **전체본**(후보 비교·기각 사유·테스트 매트릭스·rollback 기준)은 계획 파일
 `~/.claude/plans/novel-agent-phase-12-dazzling-kettle.md` 최종본.
+
+## Phase 13 확정 — Outfit AI binary semantic `kind` 계약 (구현 `81b7f7f`)
+
+**성격**: Phase 12 가 확정한 계약의 **구현 Phase**. 프롬프트가 semantic 판단을 억제(Phase 11 A)하는 대신
+**candidate 생성과 semantic 분류를 같은 응답 안에서 분리**하고, 파서가 라벨 하나만 보고 거른다.
+
+### 구현 계약 (깨지 말 것)
+
+```
+LLM wire changes[]            = semantic candidate envelope (transition / non_transition 둘 다 옴)
+kind                          = "transition" | "non_transition" (binary, negative taxonomy 없음)
+parseOutfitResponse() 반환    = B/C/C2/D/E/F/G/S 를 모두 통과한 실제 transition 제안만
+OutfitSuggestion/store/UI/save = 기존 schema 그대로(= kind 는 여기 도달하지 않는다)
+```
+
+**S 게이트 위치가 계약이다**: `B → C → C2 → D → E → F → G → S → seen.add → chronology update`.
+S 거부 행은 `seen` 도 hypothetical chronology 도 건드리지 않는다(같은 `(i,character)` 의 뒤 행 재심사 가능).
+**반환 직전 filter 로 옮기지 말 것** — 거부 행이 뒤 항목의 `G(no-op)` 전제를 바꾼다.
+
+**fail-open**: `transition` → 기존 structural validation · `non_transition` → S reject ·
+**missing / unknown 문자열 / wrong type → legacy accept**(모르는 값을 `non_transition` 으로 넘겨짚지 않는다) ·
+JSON 자체 malformed → 기존대로 throw. ⚠️ 이건 **같은 raw row 에 대한 parser-layer 보장**이지 end-to-end
+recall 보장이 아니다(프롬프트가 바뀌므로 raw omission 은 여전히 가능 — 실제로 아래 P3/P4 에서 관측됐다).
+
+**정규화 3축을 섞지 말 것**: `character/outfit` = NFKC+trim+공백, **lowercase 없음**, fuzzy 없음 /
+`kind` = NFKC+trim+공백+**lowercase** 후 두 토큰 exact / `i` = 기존 numeric coercion + finite + scan membership.
+
+**`FIXED_RULE` 보정(P4 회귀 대응)**: 작가가 적어둔 fixed 행은 **실제 전환이어도 authoritative context 라
+AI candidate 가 아니며**(`kind` 재분류가 아니라 candidate universe 밖), 그 뒤의 **later completed transition 은
+window 시작 의상으로의 복귀 여부와 무관하게 계속 심사**한다.
+
+### 검증
+
+결정론(무료): typecheck · vitest 50파일/762 · audit dry `D0~D19` 21/21 · `dump:rpy` 22구성 245파일 **diff 0** ·
+`git diff --check`. **corrected LIVE PRIMARY**(23 case · expected 18 · 26 planned/26 actual · retry 0 · H 0 · VALID):
+
+```
+Raw expected emitted 17/18 · Raw candidate recall 94.4%
+A(raw omission) 1 · B(semantic-label) 0 · C(structural) 0
+TP/FP/FN 17/1/1 · precision 0.944 · recall 0.944 · F1 0.944 · case pass 21/23
+kind compliance 21/21 (transition 20 · non_transition 1 · missing/unknown/wrong-type 0)
+```
+Phase 10 대비 **FP 4→1 · F1 0.872→0.944**. ⚠️ 합성 curated fixture 한정 수치다.
+
+### 남은 것과 정확한 해석 (과장 금지)
+
+- **P4**: pre-correction 에서 fixed `i=1` 을 후보로 재출력(→ `E` 거부)하고 정답 `i=3` 이 raw 에서 누락됐다.
+  `FIXED_RULE` 보정 후 corrected PRIMARY 에서 **오출력 소멸 + `i=3` emitted → accepted → TP**.
+  ⇒ *"의도한 방향으로 관측됐다"* 수준이고 **deterministic guarantee 가 아니다**.
+- **P5**: 복귀 보호 유지(TP) — 보정이 기존 계약을 깨지 않았다.
+- **P3**: corrected PRIMARY 의 **유일한 FN**(`(3,민주,사복)` raw omission). ⚠️ 두 run 사이 **P3 의
+  system/user 프롬프트는 byte-identical** 이었다(프롬프트가 달라진 요청은 P4/P5 둘뿐). 즉 이 회귀는
+  이번 보정으로 설명되지 않으며, **같은 모델·같은 fingerprint·같은 입력에서도 single-run raw emission 이
+  ±1 expected-event 수준으로 흔들린다**는 evidence다. "temperature 0 이면 deterministic" 이라고 쓰지 말 것.
+- **N3**: `raw candidate 출력 → kind=non_transition → S reject → FP 아님`. **Phase 13 메커니즘이 실제로
+  관측된 유일한 case** 다.
+- **N1 · N4**: raw candidate 자체가 **출력되지 않아** FP 가 사라졌다. **S 가 해결한 것이 아니다** —
+  프롬프트 변경에 따른 emission 변화이며, envelope 이 Phase 10 보다 **좁아졌다**(raw tuple 24→21).
+- **P12-59**: `kind=transition` 으로 살아남는 **residual semantic FP**(미해결). window-boundary 축은
+  Phase 13 범위 밖이었다.
+
+> **결론**: Phase 13 은 binary `kind` 계약과 파서 `S` 게이트를 기존 structural·chronology 계약을 깨지 않고
+> production 에 도입했고, corrected PRIMARY 에서 Phase 10 대비 FP 4→1 · F1 0.872→0.944 를 얻었다.
+> **모든 semantic FP 를 해결했다고 주장하지 않으며**(P12-59 잔존), **raw recall 을 보장하지도 않는다**
+> (P3/P4 raw omission 관측). 다음 과제는 raw candidate emission 의 **안정성(stability) 측정**이다.
+
+**live evidence 보존**(gitignore `*.local`, 커밋하지 않음): `audit.local/phase13/` 에 pre-correction
+(`…T10-58-06-run1.{json,md}`)·corrected(`…T11-33-55-run1.{json,md}`) 원본을 byte-identical 복사해 뒀다.
+Phase 10 산출물(`audit.local/out/`)은 무수정이다.
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
