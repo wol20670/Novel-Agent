@@ -532,6 +532,95 @@ limitation** 이 확인됐다. 두 cluster 모두 이번 측정 조건에서 3/3
 `…-manifest.md`(frozen GT) · `…-dry.md` · `…-run1.{md,json}`(PRIMARY) ·
 `…-stability.{md,json}` ×2 · `…-parity.md` · `parity-reference-P1.md`
 
+## Phase 11 확정 — Outfit AI 같은 응답 안의 연쇄 전환 검증 보정 (구현 `6da5d77`)
+
+**성격**: Phase 10 이 실측한 failure 2종을 audit 해 **결정론적 파서 결함(B)만 채택**하고,
+**프롬프트 semantic 보강(A)은 실험 후 production 에서 전부 rollback** 했다. 최종 production 상태는
+**Phase 10 `BASE_SYSTEM_PROMPT` + Phase 11 B 파서 수정**이다(프롬프트는 origin/main 과 바이트 동일).
+
+### B — 채택 (범위를 과장하지 말 것)
+
+정확한 범위는 **same-response / same-window parser-local chronology correction** 이다. "same-run chain
+전체 해결"이 아니다. 하는 일은 하나뿐: **같은 `parseOutfitResponse` 호출(= 같은 요청·같은 scan window)
+안에서 앞선 valid transition 을 함수-local 가정 연대기로만 고려해 뒤 항목의 `G(no-op)` 를 판정한다.**
+
+문제의 구조: 미승인 제안은 canonical 에 overlay 되지 않으므로(Phase 7 계약) `outfitFlags` 는 장면 내내
+그대로고, 그래서 `A→B→A` 의 마지막 복귀가 "이미 그 옷"으로 보여 파서가 지웠다. **apply 쪽
+`foldSceneSuggestions` 는 원래 working scene 순차 재검증을 하고 있었다** — parse 쪽만 원본 canonical
+스냅샷에 독립 판정하던 **비대칭**이 원인이었다(P5 = 중간 전환이 manual 이라 정상 통과, P3 = 같은 응답의
+제안이라 실패. 두 케이스의 차이가 곧 버그의 정의였다).
+
+**production 변경은 `src/generators/outfit/aiSelect.ts` 한 파일**(`parseOutfitResponse` + 주석 2곳):
+- `parsedTransitionByChar` = 그 호출 안에서만 사는 **가정 연대기**(캐릭터당 최신 1건). canonical 상태가
+  아니고 **사용자 수락을 뜻하지도 않는다** — Project·Scene/Line·store·다음 요청 어디에도 안 나간다.
+- **검증 순서와 반환 순서는 다른 축**이다: 판정만 `i` 오름차순(같은 `i` 는 모델 출력 순서 — 중복
+  semantics 보존), **반환 배열은 예전과 동일한 모델 출력 순서**(store 가 그대로 검수 목록에 넣는다).
+- no-op 비교 기준은 **기본이 언제나 canonical `outfitFlags`**(값의 단일 소스 불변). 가정은 그 사이에
+  **canonical manual 변경점이 없을 때만** 우선하고, manual 은 **앞선 가정 하나만** 끊는다(그 뒤 새로
+  통과한 전환은 다시 전제가 된다).
+- **모든 게이트(B/C/C2/D/E/F/G)를 통과한 항목만** 가정을 전진시킨다 — 거부·중복 항목은 영향 0.
+- 망가진 row(`null`·primitive·비객체·비숫자 `i`)는 **정렬 전에 객체 여부를 확인**해 예전처럼 조용히
+  무시한다(정렬 때문에 응답 하나가 통째로 예외가 되면 안 된다).
+- `G` 자체 유지 · cross-window 비전파 유지 · 파서 시그니처 무변경 · schema/store/apply/UI 무변경.
+
+**tests**: `tests/outfit-ai.test.ts`(연쇄 복원 · 역순 raw · 선행 없는 canonical no-op 유지 · manual
+경계 · manual 뒤 새 전제 · 캐릭터별 독립 · 거부/중복 row 의 state 미오염 · cross-window 비전파 ·
+반환 순서 보존 · malformed row 방어) + `tests/outfit-store.test.ts`(연쇄 2건이 `outfitSuggestions`
+까지 도달하고 canonical 은 무변경). 개별 적용·일괄 fold·ignore·stale 은 기존 O20/O26/O27/O24 가
+이미 지키므로 복제하지 않았다.
+
+**무료 검증**(최종 B-only 트리): typecheck PASS · vitest **50파일 741** PASS · 스크래치 outDir 빌드 PASS ·
+e2e 전체 PASS · `dump:rpy` **22구성 245파일 diff 0** · audit dry **D0~D16 PASS** · classifier↔parser
+drift guard PASS.
+
+### B-only live PRIMARY (Phase 10 수치를 덮어쓰지 않는다)
+
+같은 frozen benchmark(23 case · expected 18 · 26요청), 같은 모델(`gpt-4o-mini-2024-07-18`,
+fingerprint `fp_830d456649`), **Phase 10 프롬프트 그대로 + B 파서만**:
+
+```
+TP 18 · FP 4 · FN 0 · precision 0.818 · recall 1.000 · F1 0.900 · case pass 19/23
+(prompt 18,439 tok · completion 770 tok — Phase 10 Run 1 과 동일, 약 $0.0032)
+```
+
+⚠️ **curated synthetic fixture 한정**이며 실제 제작 대본 품질이 아니다.
+
+**exact delta — 이쪽이 정본이다**(aggregate 아님):
+- `P3 (3, 민주, 사복)`: **FN → TP**. 23 case 중 production predicted tuple set 이 Phase 10 과 달라진
+  case 는 **P3 하나뿐**이었다.
+- 26요청 전체에서 legacy canonical-only `G` 와 판정이 갈린 accepted row 는 **정확히 1건**(위 P3 tuple)
+  이고 그건 GT expected 다 ⇒ **B-sensitive parser-exposed FP = 0**.
+- 기존 TP → 새 FN **0** · structural defense regression **0**(live rejection 은 N8 `F` · N9 `D` 로
+  Phase 10 과 동일, Phase 10 의 `P3 w0 G` 만 의도대로 사라졌다).
+
+### A — 실험했고 production 에는 채택하지 않았다 (같은 튜닝을 반복하지 말 것)
+
+`BASE_SYSTEM_PROMPT` 에 completed vs 미래 의도 · 구매/소유 · 현재 상태 언급 · 타 캐릭터 의상 화제 ·
+행위자 grounding · 예고와 완료의 자리를 원리로 적어 넣고 **실키로 재봤다**(합성 fixture 한정).
+
+- 1차: `N1·N3·N4·P12-59` FP 4건이 **raw 단계에서** 사라졌고 P2·P12-60 은 유지됐다. 그러나 기존 TP
+  `P10 (1, 지수, 사복)` 이 **raw model-level FN** 이 됐다(한 지문이 두 사람의 전환을 말하는 joint).
+- 2차(actor 문장을 복수 주체까지 포함하도록 교체): P10 두 member 복구 · A target FP 0. 대신
+  `P4 (3, 민주, 사복)` 이 새 model-level FN 이 됐다(모델이 이미 manual 로 확정된 line 1 만 재보고).
+- 같은 프롬프트로 **3-run stability**: `P4` FN **3/3**(raw 문자열까지 동일) · `P12-59` future-intent
+  FP **2/3 재발**(Run 1 만 없음) · 반면 `N1/N3/N4` FP 0/3 · `P2`·`P12-60`·`P10` 두 member ·`P3` 두
+  tuple 은 3/3 TP.
+
+**결론**: prompt-only semantic guard 는 일부 FP 축을 개선했지만 **P12 future-intent 가 불안정하게
+재발했고 P4 에서 stable model omission regression 이 발생**했다. 합성 fixture 에 맞춘 추가 prompt
+tuning 을 계속하지 않고 **production 에서는 전부 rollback** 했다. ⚠️ *직접 원인은 확정하지 않았다* —
+특정 문장이 P4 를 깨뜨렸다고 단정하지 말고, prompt 접근이 영구히 틀렸다고도 쓰지 말 것. semantic FP 를
+다시 다룬다면 이 evidence 를 입력으로 **새 Plan 부터** 검토한다.
+
+### known limitation (숨기지 말 것)
+
+production 에는 Phase 10 의 **semantic FP class 가 그대로 남아 있다** — 구매/소유 · 미래 의도 ·
+타 캐릭터 의상 언급. B-only live 에서도 Phase 10 과 **동일한 FP 4건**(`N1`·`N3`·`N4`·`P12-59`)이
+재현됐다. Phase 11 의 성공을 "semantic FP 해결"로 쓰면 안 된다.
+또 harness 의 `omissionA` 진단은 같은 줄에 여러 캐릭터가 있을 때 member 별 누락을 충분히 표현하지
+못했다(P10 regression 을 A=0/18 로 셌다) — 다만 **exact tuple GT 비교가 그 regression 을 정확히
+검출**했으므로 metric 은 재설계하지 않았다.
+
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
 **표정 파이프라인은 이미 존재한다.** LLM 배정도 들어와 있다.

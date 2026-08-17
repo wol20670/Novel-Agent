@@ -4,15 +4,22 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **복장·표정 자동 추론(LLM) 도입 — Phase 10 까지 확정 완료.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
-  - **다음 Phase 프롬프트를 받기 전까지 새 Phase 를 시작하지 말 것.** Phase 10(Outfit AI 실키 품질 audit)으로 계획된 범위는 끝났다.
-  - **Phase 11 후보 2건(설계 미확정 — 착수 전 지시 필요).** 둘 다 Phase 10 이 실측·재현한 결과가 입력이다:
-    - **A. Outfit AI semantic FP 감소** — purchase/ownership · future intent · other-character outfit reference · transition 완료 시점 구분.
-    - **B. same-run chained suggestion 검증** — 모델 raw 에는 후속 복귀 전환이 있는데 canonical-only `G(no-op)` 가 지운다. **기존 계약(미승인 제안을 canonical 에 overlay 하지 않음)과 충돌하지 않는 해법**이 필요하다.
-    - ⚠️ **해법을 미리 못박지 말 것** — overlay 도입도, 파서 `G` 삭제도, prompt rule 추가도 확정된 바 없다. Phase 11 은 최신 main 과 기존 계약을 다시 audit 한 뒤 **최소 변경안**을 고른다.
-  - 표정 선택 품질은 **여전히 실키 미검증**이다(의상만 Phase 10 에서 쟀다).
-  - 후속 후보(착수 전 지시 필요): 무시한 제안이 재실행 때 다시 나오는 문제(ignored 기억은 persistent provenance 라 일부러 안 만듦) · 실제 제작 대본 기반 품질 측정(Phase 10 은 합성 fixture 한정).
+- **복장·표정 자동 추론(LLM) 도입 — Phase 11 까지 확정 완료.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
+  - **다음 Phase 프롬프트를 받기 전까지 새 Phase 를 시작하지 말 것.** Phase 11(같은 응답 안의 연쇄 전환 검증 보정)로 계획된 범위는 끝났다.
+  - **Outfit AI semantic FP 는 여전히 미해결이다** — 구매/소유 · 미래 의도 · 타 캐릭터 의상 언급. Phase 11 에서 prompt-only 보강을 실키로 시도했지만 **P12 future-intent 2/3 재발 · P4 stable model omission** 때문에 **production 에서 전부 rollback** 했다(evidence 는 PHASES.md Phase 11 절). ⚠️ **같은 문장 튜닝을 반복하지 말 것** — 다시 다룬다면 그 evidence 를 입력으로 **새 Plan 부터** 설계한다.
+  - 표정 선택 품질은 **여전히 실키 미검증**이다(의상만 Phase 10/11 에서 쟀다).
+  - 후속 후보(착수 전 지시 필요): semantic FP 후속 설계 · 무시한 제안이 재실행 때 다시 나오는 문제(ignored 기억은 persistent provenance 라 일부러 안 만듦) · 실제 제작 대본 기반 품질 측정(Phase 10/11 은 합성 fixture 한정) · 표정 AI 실키 검증. **무엇을 다음에 할지는 사용자가 정한다.**
   - known limitations(**명시적 우선순위 지시 전까지 착수하지 않음**, 상세는 PHASES.md Phase 9 절): D3 Export `optedIn` 비대칭 · D4 `availableExpressions` 후보 누수 · D5/D6 커스텀 표정·의상 속성 해시 충돌.
+
+## 📌 Phase 11 이 확정한 것 (다음 Phase 의 baseline)
+- **같은 응답(= 같은 요청·같은 scan window) 안의 연쇄 전환은 파서가 시간순으로 읽는다** — 앞선 valid
+  transition 을 함수-local 가정으로만 반영해 뒤 항목의 `G(no-op)` 를 판정한다. **canonical 상태도,
+  사용자 수락도 아니다**: 다음 window·store·Project 로 전파되지 않고 저장·zip·협업에도 안 실린다.
+  범위를 "same-run chain 전체 해결"로 과장하지 말 것 — **cross-window 는 여전히 비전파(의도)** 다.
+- **검증 순서와 반환 순서는 다른 축**이다. 판정만 `i` 오름차순이고 **반환은 모델 출력 순서 그대로**.
+- 값의 단일 소스는 계속 `outfitFlags` 다. 중간에 사람이 적은 manual 이 있으면 **그쪽이 이긴다**.
+- **semantic FP 는 이 Phase 가 고친 게 아니다** — B-only live 에서도 Phase 10 과 동일한 FP 4건이
+  재현됐다(`N1`·`N3`·`N4`·`P12-59`). 합성 fixture 한정 수치이며 실대본 품질이 아니다.
 
 ## 📌 Phase 10 이 확정한 것 (다음 Phase 의 baseline)
 - **Outfit AI 품질은 이제 "미측정"이 아니라 "측정됨"이다** — 단 **합성 curated fixture 한정**이고 실제 제작
@@ -53,4 +60,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 10 확정 — Outfit AI 실키 품질 audit(docs-only, production 무변경)**: frozen 합성 benchmark(live 23 case · expected 18)로 실제 OpenAI 호출 품질을 처음 실측했다. PRIMARY(Run 1 26요청) `TP 17 / FP 4 / FN 1 · precision 0.810 · recall 0.944 · F1 0.872 · case pass 18/23`, stability Run 2·3 에서 10/10 exact-set 재현, deployed UI request-contract parity PASS(9항목 불일치 0). 총 53 POST · 약 $0.0075 usage-based estimate. 전체 결과·failure cluster·limitation 은 `PHASES.md` "Phase 10 확정".
+- **Phase 11 확정 — Outfit AI 같은 응답 안의 연쇄 전환 검증 보정(`6da5d77`)**: 파서가 그 응답 안에서만 사는 가정 연대기로 앞선 전환을 반영해 `G(no-op)` 를 판정한다(반환 순서·cross-window 비전파·canonical 단일 소스 유지). B-only frozen PRIMARY `TP 18 / FP 4 / FN 0 · P 0.818 · R 1.000 · F1 0.900 · case 19/23`(Phase 10 대비 delta 는 `P3 (3,민주,사복)` FN→TP **하나뿐**, B-sensitive 새 FP 0). **prompt semantic 보강(A)은 실험 후 production rollback** — 상세는 `PHASES.md` "Phase 11 확정".
