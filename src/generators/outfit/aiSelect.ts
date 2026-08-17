@@ -13,6 +13,9 @@
 //  · hide 는 **상태(initialHidden)와 전이(markers)가 다른 개념**이다. spriteHiddenFlags 가
 //    "그 줄의 override 를 적용한 뒤" 값을 담으므로 전이 판정은 flags[i-1] vs flags[i] 여야 한다.
 //  · 후보(정답 공간)는 characterOutfits 원문뿐 — fuzzy 매칭도 새 이름 생성도 없다.
+//  · **같은 응답 안의 연쇄 전환**(A→B→A)만 파서가 시간순으로 읽는다(parseOutfitResponse 의
+//    parsedTransitionByChar). 그건 G(no-op) 판정 전용의 함수-local 가정이고 canonical 상태가
+//    아니다 — 다음 window·store·Project 어디에도 나가지 않는다(cross-window overlay 금지 유지).
 
 import { aiConfig } from '../../config/aiConfig';
 import { retryWithBackoff } from '../shared/retry';
@@ -486,6 +489,10 @@ export function buildOutfitRequest(
  *  · 그 (i,character)를 사람이 이미 지정함(fixed) · 장면 첫 텍스트 줄인데 baseline 이 scene-manual
  *  · 그 줄의 현재 effective outfit 과 같은 no-op · 같은 (i,character) 중복
  * 저장은 항상 **후보 원문**(characterOutfits 표기)이라 canonical identity 가 유지된다.
+ *
+ * ⚠️ no-op 판정만 **같은 응답 안에서 시간순**으로 본다(A→B→A 복귀가 사라지던 문제): 앞선 전환이
+ * 사실이라고 가정하면 뒤의 복귀는 진짜 전환이다. 가정은 이 함수 안에서만 살고, 검증 순서와
+ * **반환 순서는 다른 축**이다 — 반환은 예전과 똑같이 모델이 낸 순서다.
  */
 export function parseOutfitResponse(
   raw: string,
@@ -507,9 +514,50 @@ export function parseOutfitResponse(
 
   const scanIdx = new Set(plan.scan.map((l) => l.i)); // ← 쓰기 경계: lead-in 인덱스는 여기 없다
   const seen = new Set<string>();
-  const out: OutfitChange[] = [];
+  const accepted: { order: number; change: OutfitChange }[] = [];
 
-  for (const row of arr) {
+  /**
+   * 정렬 키. ⚠️ 여기서 row 를 **객체로 가정하면 안 된다** — null·문자열 같은 망가진 항목은 예전에도
+   * 조용히 무시됐고(아래 첫 게이트) 그 계약을 정렬 때문에 깨면 응답 하나가 통째로 예외가 된다.
+   * 숫자가 아닌 i 는 어차피 거부되므로 뒤로 몰아 원본 순서만 유지한다.
+   */
+  const chronoKey = (row: unknown): number => {
+    if (!row || typeof row !== 'object') return Number.POSITIVE_INFINITY;
+    const v = (row as Record<string, unknown>).i;
+    const n = typeof v === 'number' ? v : Number(v);
+    return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+  };
+  // 검증 순서만 시간순(i 오름차순 → 같은 i 면 모델이 낸 순서). Infinity 끼리 빼면 NaN 이라 비교는
+  // 대소로 한다. 원본 순서는 order 로 보존해 **반환 직전에 되돌린다**.
+  const byChronology = arr
+    .map((row, order) => ({ row, order, key: chronoKey(row) }))
+    .sort((a, b) => (a.key === b.key ? a.order - b.order : a.key < b.key ? -1 : 1));
+
+  /**
+   * 같은 응답 안에서 **모든 게이트를 통과해 실제 output 후보가 된** 앞선 전환만 담는다(캐릭터당 최신 1개).
+   * response-local hypothetical chronology for parser G(no-op) validation only — canonical outfit
+   * state 가 아니다: Project·Scene/Line·store·다음 요청 어디에도 나가지 않고, 저장·zip·협업에도
+   * 실리지 않으며, **사용자가 "수락"한 제안을 뜻하지도 않는다**(수락은 검수 후 Line.outfits 에
+   * manual 로 쓰는 행위다). 거부된 항목은 절대 여기에 들어오지 않는다.
+   */
+  const parsedTransitionByChar = new Map<string, { from: number; outfit: string }>();
+
+  /**
+   * no-op 비교의 기준값 하나. 기본은 언제나 canonical `outfitFlags`(값의 단일 소스)이고, 같은 응답의
+   * 앞선 전환은 **그 사이에 canonical manual 변경점이 없을 때만** 기준이 된다 — 사람이 적은 값이
+   * 중간에 있으면 그쪽이 이긴다. manual 이 끊는 것은 **그 앞의 가정 하나**일 뿐이라, 그 뒤에 새로
+   * 통과한 전환은 다시 기준이 될 수 있다.
+   */
+  const noOpBasisAt = (character: string, i: number): string => {
+    const t = parsedTransitionByChar.get(character);
+    if (t && t.from <= i) {
+      const manual = batch.manualLineIdxByChar.get(character) ?? [];
+      if (!manual.some((k) => k > t.from && k <= i)) return t.outfit;
+    }
+    return batch.flagsByChar.get(character)![i];
+  };
+
+  for (const { row, order } of byChronology) {
     if (!row || typeof row !== 'object') continue;
     const r = row as Record<string, unknown>;
     const i = typeof r.i === 'number' ? r.i : Number(r.i);
@@ -533,21 +581,29 @@ export function parseOutfitResponse(
     if (batch.manualByIndex.get(i)?.some((f) => f.character === character)) continue;
     // Scene-start 보호 — baseline 정정과 실제 state change 를 deterministic 하게 못 가른다(v1 은 recall 희생).
     if (i === plan.firstTextualIndex && plan.sceneManualChars.has(character)) continue;
-    // 그 줄의 현재 effective outfit 과 같으면 아무 일도 안 하는 제안이다.
-    if (batch.flagsByChar.get(character)![i] === outfit) continue;
+    // 그 줄의 시점 기준으로 아무 일도 안 하는 제안이면 버린다(같은 응답의 앞선 전환을 가정한 뒤).
+    if (noOpBasisAt(character, i) === outfit) continue;
 
     seen.add(dupKey);
+    // ⚠️ **여기까지 통과한 항목만** 가정 연대기를 전진시킨다 — 중복(dupKey)·후보 밖·manual 선점 등으로
+    // 거부된 항목이 뒤 항목의 전제를 바꾸면 안 된다(거부된 값은 output 후보가 아니다).
+    parsedTransitionByChar.set(character, { from: i, outfit });
     const reasonRaw = typeof r.reason === 'string' ? r.reason.trim() : '';
-    out.push({
-      i,
-      character,
-      outfit,
-      // 프롬프트가 요구하는 40자와 같은 상한으로 자른다(검수 표시 전용 — project 에 저장되지 않는다).
-      reason: reasonRaw ? reasonRaw.slice(0, MAX_REASON_CHARS) : undefined,
+    accepted.push({
+      order,
+      change: {
+        i,
+        character,
+        outfit,
+        // 프롬프트가 요구하는 40자와 같은 상한으로 자른다(검수 표시 전용 — project 에 저장되지 않는다).
+        reason: reasonRaw ? reasonRaw.slice(0, MAX_REASON_CHARS) : undefined,
+      },
     });
   }
 
-  return out;
+  // 반환 순서는 예전과 동일한 **모델 출력 순서**다(store 가 이 배열을 그대로 검수 목록에 넣는다).
+  accepted.sort((a, b) => a.order - b.order);
+  return accepted.map((a) => a.change);
 }
 
 async function chat(system: string, user: string, apiKey: string): Promise<string> {

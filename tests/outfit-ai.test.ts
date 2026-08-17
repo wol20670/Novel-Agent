@@ -606,3 +606,260 @@ describe('O4·O6·O7·O21 — 응답 파서의 항목별 거부(추측 보정 �
     expect(() => parseOutfitResponse('그냥 텍스트', plans[0], batch)).toThrow();
   });
 });
+
+// ── Phase 11 · B ────────────────────────────────────────────────────────────
+// **같은 응답 안**(= 같은 요청·같은 scan window)의 연쇄 전환만 시간순으로 읽는다. 앞선 전환이
+// 사실이라고 가정하면 뒤의 복귀는 진짜 변화다(예전엔 canonical 스냅샷에 독립 판정해 A→B→A 의
+// 마지막 A 가 통째로 사라졌다). 가정은 파서 함수 안에서만 살고 **다음 window·store·canonical 로
+// 전파되지 않는다** — cross-window 비전파는 아래에서 따로 고정한다.
+describe('P11 — 같은 응답 안의 연쇄 전환(response-local chronology)', () => {
+  /** 장면 시작 '사복' + 5줄 — P3(사복 → 체육복 → 사복) 형상. */
+  function chainProject(outfits = ['사복', '체육복']): Project {
+    return projectWith(
+      [
+        scene({
+          outfits: { 민주: '사복' },
+          lines: [
+            narration('가방을 고쳐 멨다'),
+            narration('체육복으로 갈아입고 나갔다'),
+            dialogue('민주', '한 바퀴만 뛸게'),
+            narration('다시 사복으로 갈아입고 돌아왔다'),
+            dialogue('민주', '이제 가자'),
+          ],
+        }),
+      ],
+      { characters: [heroine('민주', outfits)] },
+    );
+  }
+
+  it('A→B→A 두 전환이 모두 남는다(canonical 은 장면 내내 사복이라 예전엔 뒤가 사라졌다)', () => {
+    const { batch, plans } = planOf(chainProject());
+    expect(batch.flagsByChar.get('민주')).toEqual(['사복', '사복', '사복', '사복', '사복']);
+
+    const out = parseOutfitResponse(
+      reply([
+        { i: 1, character: '민주', outfit: '체육복' },
+        { i: 3, character: '민주', outfit: '사복' },
+      ]),
+      plans[0],
+      batch,
+    );
+    expect(out).toEqual([
+      { i: 1, character: '민주', outfit: '체육복' },
+      { i: 3, character: '민주', outfit: '사복' },
+    ]);
+  });
+
+  it('선행 전환이 없으면 그 복귀는 여전히 canonical no-op 으로 버려진다', () => {
+    const { batch, plans } = planOf(chainProject());
+    expect(parseOutfitResponse(reply([{ i: 3, character: '민주', outfit: '사복' }]), plans[0], batch)).toEqual([]);
+  });
+
+  it('모델이 역순으로 내도 판정은 같고, **반환 순서는 모델 출력 순서 그대로**다', () => {
+    const { batch, plans } = planOf(chainProject());
+    const out = parseOutfitResponse(
+      reply([
+        { i: 3, character: '민주', outfit: '사복' },
+        { i: 1, character: '민주', outfit: '체육복' },
+      ]),
+      plans[0],
+      batch,
+    );
+    // 판정: 둘 다 통과(시간순으로 읽었다) / 순서: 모델이 낸 그대로(3 → 1)
+    expect(out).toEqual([
+      { i: 3, character: '민주', outfit: '사복' },
+      { i: 1, character: '민주', outfit: '체육복' },
+    ]);
+  });
+
+  it('중간의 canonical manual 이 앞선 가정을 끊는다(사람 값이 이긴다)', () => {
+    // base '기본' + i=2 에 사람이 '사복' 을 박아 둠 → i=3 시점 canonical 은 이미 사복이다.
+    const p = projectWith(
+      [
+        scene({
+          lines: [
+            dialogue('민주', 'a'),
+            dialogue('민주', 'b'),
+            dialogue('민주', 'c', { outfits: { 민주: '사복' } }),
+            dialogue('민주', 'd'),
+          ],
+        }),
+      ],
+      { characters: [heroine('민주', ['사복', '체육복'])] },
+    );
+    const { batch, plans } = planOf(p);
+    expect(batch.flagsByChar.get('민주')).toEqual(['기본', '기본', '사복', '사복']);
+
+    const out = parseOutfitResponse(
+      reply([
+        { i: 1, character: '민주', outfit: '체육복' },
+        { i: 3, character: '민주', outfit: '사복' }, // manual 로 이미 사복 → 진짜 no-op
+      ]),
+      plans[0],
+      batch,
+    );
+    expect(out).toEqual([{ i: 1, character: '민주', outfit: '체육복' }]);
+  });
+
+  it('manual 뒤에 새로 통과한 전환은 다시 기준이 된다(manual 은 앞 가정만 끊는다)', () => {
+    const p = projectWith(
+      [
+        scene({
+          lines: [
+            dialogue('민주', 'a'),
+            dialogue('민주', 'b'),
+            dialogue('민주', 'c', { outfits: { 민주: '사복' } }),
+            dialogue('민주', 'd'),
+            dialogue('민주', 'e'),
+            dialogue('민주', 'f'),
+          ],
+        }),
+      ],
+      { characters: [heroine('민주', ['사복', '체육복', '교복'])] },
+    );
+    const { batch, plans } = planOf(p);
+
+    const out = parseOutfitResponse(
+      reply([
+        { i: 1, character: '민주', outfit: '체육복' }, // 가정 ①
+        { i: 3, character: '민주', outfit: '교복' }, // manual(i=2)이 ①을 끊음 → 사복 기준, 교복은 변화
+        { i: 5, character: '민주', outfit: '사복' }, // 교복 기준 → 사복 복귀는 진짜 변화
+      ]),
+      plans[0],
+      batch,
+    );
+    expect(out.map((c) => `${c.i}:${c.outfit}`)).toEqual(['1:체육복', '3:교복', '5:사복']);
+  });
+
+  it('가정은 캐릭터별로 독립이다', () => {
+    const p = projectWith(
+      [
+        scene({
+          lines: [
+            dialogue('민주', 'a'),
+            dialogue('지수', 'b'),
+            dialogue('민주', 'c'),
+            dialogue('민주', 'd'),
+          ],
+        }),
+      ],
+      { characters: [heroine('민주', ['사복', '체육복']), heroine('지수', ['사복', '체육복'])] },
+    );
+    const { batch, plans } = planOf(p);
+
+    // 지수의 전환은 민주의 기준을 바꾸지 않는다 → 민주 '기본' 제안은 canonical no-op 그대로.
+    expect(
+      parseOutfitResponse(
+        reply([
+          { i: 1, character: '지수', outfit: '체육복' },
+          { i: 2, character: '민주', outfit: '기본' },
+        ]),
+        plans[0],
+        batch,
+      ),
+    ).toEqual([{ i: 1, character: '지수', outfit: '체육복' }]);
+
+    // 반대로 민주 자신의 전환 뒤 복귀는 통과한다.
+    expect(
+      parseOutfitResponse(
+        reply([
+          { i: 1, character: '민주', outfit: '체육복' },
+          { i: 3, character: '민주', outfit: '기본' },
+        ]),
+        plans[0],
+        batch,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('거부된 항목은 가정을 전진시키지 않는다(유령 인덱스·후보 밖)', () => {
+    const { batch, plans } = planOf(chainProject());
+    const out = parseOutfitResponse(
+      reply([
+        { i: 99, character: '민주', outfit: '체육복' }, // B — scan 밖
+        { i: 1, character: '민주', outfit: '드레스' }, // D — 후보 밖
+        { i: 3, character: '민주', outfit: '사복' }, // 앞 두 개가 전제가 됐다면 통과했을 것
+      ]),
+      plans[0],
+      batch,
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('사람이 선점한 자리(E)의 거부도 가정을 전진시키지 않는다', () => {
+    const p = projectWith(
+      [
+        scene({
+          outfits: { 민주: '사복' },
+          lines: [
+            dialogue('민주', 'a'),
+            dialogue('민주', 'b', { outfits: { 민주: '사복' } }), // 사람이 '사복' 을 못 박음
+            dialogue('민주', 'c'),
+          ],
+        }),
+      ],
+      { characters: [heroine('민주', ['사복', '체육복'])] },
+    );
+    const { batch, plans } = planOf(p);
+    const out = parseOutfitResponse(
+      reply([
+        { i: 1, character: '민주', outfit: '체육복' }, // E 로 거부(그 자리는 사람 값)
+        { i: 2, character: '민주', outfit: '사복' }, // 위가 전제였다면 복귀로 통과했을 것
+      ]),
+      plans[0],
+      batch,
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('같은 (i,character) 중복은 먼저 낸 유효 항목이 이기고, 거부된 중복은 가정을 덮지 않는다', () => {
+    const { batch, plans } = planOf(chainProject(['사복', '체육복', '교복']));
+    const out = parseOutfitResponse(
+      reply([
+        { i: 1, character: '민주', outfit: '체육복' }, // 유효
+        { i: 1, character: '민주', outfit: '교복' }, // C2 중복 → 거부
+        { i: 3, character: '민주', outfit: '체육복' }, // 가정이 '교복' 으로 덮였다면 통과했을 것
+      ]),
+      plans[0],
+      batch,
+    );
+    expect(out).toEqual([{ i: 1, character: '민주', outfit: '체육복' }]);
+  });
+
+  it('window 사이에는 가정이 전달되지 않는다(cross-window 비전파)', () => {
+    const lines: Line[] = Array.from({ length: 70 }, (_, i) => dialogue('민주', `s${i}`));
+    const { batch, plans } = planOf(
+      projectWith([scene({ lines })], { characters: [heroine('민주', ['사복', '체육복'])] }),
+    );
+    expect(plans.length).toBeGreaterThan(1);
+
+    // window 1 에서 '체육복' 전환이 통과해도…
+    expect(
+      parseOutfitResponse(reply([{ i: 1, character: '민주', outfit: '체육복' }]), plans[0], batch),
+    ).toHaveLength(1);
+
+    // …window 2 의 기준은 여전히 canonical('기본')이라 '기본' 복귀 제안은 no-op 이다.
+    const second = plans[1];
+    expect(second.characters[0].currentOutfit).toBe('기본'); // 계획 쪽도 canonical 만 본다
+    const i2 = second.scan[1].i;
+    expect(parseOutfitResponse(reply([{ i: i2, character: '민주', outfit: '기본' }]), second, batch)).toEqual([]);
+  });
+
+  it('망가진 항목은 예전처럼 조용히 무시된다(정렬 때문에 예외가 나면 안 된다)', () => {
+    const { batch, plans } = planOf(chainProject());
+    const raw = JSON.stringify({
+      changes: [
+        null,
+        42,
+        '문자열',
+        [],
+        {},
+        { i: 'abc', character: '민주', outfit: '체육복' },
+        { i: 1, character: '민주', outfit: '체육복' },
+      ],
+    });
+    expect(parseOutfitResponse(raw, plans[0], batch)).toEqual([{ i: 1, character: '민주', outfit: '체육복' }]);
+    // changes 자체가 배열이 아니면 빈 결과(예외 아님)
+    expect(parseOutfitResponse(JSON.stringify({ changes: null }), plans[0], batch)).toEqual([]);
+  });
+});

@@ -436,6 +436,65 @@ describe('O24 — in-flight run stale-commit guard', () => {
   });
 });
 
+// ── Phase 11 · B ────────────────────────────────────────────────────────────
+// 파서가 살려낸 **같은 응답 안의 연쇄 전환**(A→B→A)이 검수 목록까지 온전히 도달하는지만 본다.
+// 개별 적용·일괄 적용·무시·stale 의 semantics 는 위 O26/O27/O24 가 이미 고정하므로 복제하지 않는다.
+describe('P11 — 연쇄 전환 2건이 검수 목록까지 도달한다(canonical 은 그대로)', () => {
+  it('장면 시작 사복 → 1번 체육복 → 3번 사복 복귀가 둘 다 제안으로 남는다', async () => {
+    const sc = scene({
+      id: SCENE_ID,
+      outfits: { 민주: '사복' },
+      lines: [
+        dialogue('민주', 'a'),
+        dialogue('민주', 'b'),
+        dialogue('민주', 'c'),
+        dialogue('민주', 'd'),
+      ],
+    });
+    useStore.setState({
+      project: projectWith([sc], { characters: [heroine('민주', ['사복', '체육복'])] }),
+      outfitSuggestions: {},
+      outfitSuggestionRevision: 0,
+      openaiKey: 'test-key',
+    });
+
+    const fetchMock = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    changes: [
+                      { i: 1, character: '민주', outfit: '체육복' },
+                      { i: 3, character: '민주', outfit: '사복' },
+                    ],
+                  }),
+                },
+              },
+            ],
+          }),
+        }) as unknown as Response,
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await useStore.getState().autoSuggestOutfitsAll();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 4줄 = 1 window
+    expect(suggestions()[SCENE_ID]).toHaveLength(2);
+    expect(suggestions()[SCENE_ID].map((s) => [s.lineIndex, s.outfit])).toEqual([
+      [1, '체육복'],
+      [3, '사복'],
+    ]);
+    // 제안은 canonical 을 건드리지 않는다(수락은 사용자 몫).
+    expect(lineOutfits(1)).toBeUndefined();
+    expect(lineOutfits(3)).toBeUndefined();
+  });
+});
+
 // ── Phase 8 · C2 ────────────────────────────────────────────────────────────
 // 무효화 자체는 계약대로 옳다(제목·배경은 Outfit AI 의 LLM 문맥 입력이다). 결함이었던 건 **침묵**이다:
 // 유료로 받은 검수 목록이 장면 제목 한 글자에 통째로 사라지는데 아무 안내가 없어, 사용자는 스크롤하다
