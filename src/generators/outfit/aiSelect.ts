@@ -369,14 +369,51 @@ export function normalizeOutfitLabel(s: string): string {
   return s.normalize('NFKC').trim().replace(/\s+/g, ' ');
 }
 
+/**
+ * wire 의 semantic discriminator `kind` 전용 정규화 — **identity 정규화와 다른 축이다.**
+ * ⚠️ `normalizeOutfitLabel` 과 합치지 말 것: 이쪽만 `lowercase` 를 하고(두 wire 토큰은 대소문자를
+ * 구분할 이유가 없다), 캐릭터·의상 identity 는 lowercase 하면 `"Casual"` 과 `"casual"` 이 같아져
+ * canonical exact match 계약이 깨진다.
+ * 두 토큰과 **exact** 일치만 known 이고 나머지는 전부 `'unknown'` 이다 — `non-transition`·
+ * `not_transition`·`completed_transition` 같은 근사값을 semantic fuzzy match 로 끌어오지 않는다.
+ * unknown·missing·wrong type 은 호출측에서 **fail-open**(legacy accept)으로 다룬다.
+ */
+function normalizeOutfitKind(v: unknown) {
+  if (typeof v !== 'string') return 'unknown'; // missing · number · object · null → fail-open
+  const t = v.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+  return t === 'transition' || t === 'non_transition' ? t : 'unknown';
+}
+
 const BASE_SYSTEM_PROMPT =
-  'You are a visual-novel script editor detecting OUTFIT CHANGES. ' +
-  'The script is already playable; your only job is to find the few places where the text itself ' +
-  'states that a character has changed clothes (went to change and came back, a narration saying they ' +
-  'now wear something else, etc.). This is a SPARSE task: most requests should return few or NO changes. ' +
-  'Report a change ONLY at the line from which the new outfit applies, and ONLY for characters listed ' +
-  'in "characters". Copy an outfit string EXACTLY from that character\'s "outfits" array — never invent, ' +
-  'translate or reformat a name. ' +
+  'You are a visual-novel script editor analysing OUTFIT CHANGES. ' +
+  'The script is already playable. Your job has two parts: (1) list the places where the text itself ' +
+  'talks about one of the listed characters together with one of THAT character\'s listed outfits in a ' +
+  'way an outfit-change detector could take for a real change, and (2) label each candidate with "kind". ' +
+  // ⚠️ 최상위 원칙이 먼저다 — 아래 non_transition 예시는 그 **아래**에 놓인다. 예시가 원칙을 이기면
+  // "다른 캐릭터 얘기면 무조건 아님" 식으로 읽혀 실제 완료된 전환(P10 member 포함)이 사라진다.
+  'Labelling rule: if the text states the character has ACTUALLY completed the change and wears that ' +
+  'outfit from that line onward, the candidate is "transition"; anything else is "non_transition". ' +
+  'Typical "non_transition" cases — none of which override an actually completed change — are: buying or ' +
+  'owning an outfit, planning, promising or being told to put it on later, and merely discussing ANOTHER ' +
+  'character\'s outfit when that character does not actually complete a change on that line. ' +
+  // ⚠️ Phase 11 A 의 suppression 튜닝을 되풀이하지 않는다: 불확실성은 행을 빼는 이유가 아니라 kind 로
+  // 표현할 대상이다(억제하면 true candidate 가 raw 에서 통째로 사라진다). candidate **개수**에 대한
+  // sparsity prior("드무니 적게 내라")도 같은 억제 압력이라 넣지 않는다 — 제한은 아래 structural
+  // 조건뿐이고, 판단은 kind 가 나른다.
+  'Do not invent candidates from unrelated outfit mentions or from text that is not eligible under the ' +
+  'rules below; but do not withhold an eligible candidate merely because its classification is ' +
+  'uncertain — report it and let "kind" carry your judgement. ' +
+  'Report candidates ONLY for characters listed in "characters". ' +
+  // ⚠️ non_transition 후보에는 "그 옷이 적용되기 시작하는 줄"이 없다(구매·미래 의도·타 캐릭터 언급).
+  // 예전 문장("Place a candidate at the line from which that outfit would apply")을 그대로 두면 그런
+  // 후보의 i 를 모델이 지어내야 해서 wire 계약과 충돌한다.
+  'For every candidate set "i" to the eligible line in "lines" whose text is the evidence for it: for ' +
+  '"transition" that must be the line from which the completed change takes effect; for ' +
+  '"non_transition" it is the line holding that misleading outfit evidence — never invent a future line ' +
+  'where the outfit might apply. ' +
+  'Copy an outfit string EXACTLY from that character\'s "outfits" array — never invent, ' +
+  'translate or reformat a name. When one line completes the change for several characters at once, ' +
+  'give one candidate per character. ' +
   // ⚠️ currentOutfit 은 **window 시작 시점(lines 의 첫 i)의 canonical 상태**일 뿐, 그 의상을 이 요청
   // 내내 쓰지 말라는 금지 목록이 아니다. 같은 window 안에 fixed transition 이 있으면 그 뒤의 effective
   // outfit 은 달라지므로, 나중에 window 시작 의상으로 **되돌아가는 것도 정상 transition** 이다.
@@ -384,13 +421,16 @@ const BASE_SYSTEM_PROMPT =
   // 억제했다 — 파서는 그 줄 시점 fold 로 판정하므로 code 는 원래 받아들일 수 있었다.)
   '"currentOutfit" is the canonical outfit in effect at the FIRST index in "lines"; it is the ' +
   'window-start state, not a ban on using that outfit later in the window. ' +
-  'Skip a change only when the proposed outfit would leave the effective outfit unchanged at that ' +
+  'Skip a candidate only when the proposed outfit would leave the effective outfit unchanged at that ' +
   'point in the chronology. ' +
   'Do NOT infer outfits from the background, and do NOT suggest hide/show, scene ' +
   'splits, poses or facial expressions. "reason" must be Korean, at most 40 characters. ' +
   'Output STRICT JSON only, no markdown, no commentary: ' +
-  '{"changes":[{"i":0,"character":"...","outfit":"...","reason":"..."}]}. ' +
-  'If nothing in the text states an outfit change, return {"changes":[]}. ' +
+  '{"changes":[{"i":0,"character":"...","outfit":"...","kind":"transition","reason":"..."}]}. ' +
+  '"kind" MUST be exactly "transition" or "non_transition". ' +
+  // ⚠️ "의상 단어가 나오는 모든 줄"이 아니다 — envelope 은 기존 structural domain 안에서 전환으로
+  // 오인될 만한 후보까지다(semantic-only widening).
+  'If the text holds no such candidate, return {"changes":[]}. ' +
   'The "i" MUST be an index that appears in "lines".';
 
 /** 읽기 전용 앞문맥이 실릴 때만(결과 인덱스 오염 방지). */
@@ -403,21 +443,34 @@ const CONTEXT_RULE =
  * 다음 transition 까지 유효**하다는 점을 알려야, 그 뒤에 window 시작 의상으로 돌아가는 정상 전환을
  * 모델이 no-op 으로 오해하지 않는다. 반대로 fixed 가 scan 첫 줄에 있으면 그 값은 이미 currentOutfit
  * 에 반영돼 있으므로 별도의 두 번째 transition 으로 읽게 만들면 안 된다.
+ *
+ * ⚠️ Phase 13 PRIMARY Run 1 의 `P4` raw omission 이 여기서 나왔다(가장 강한 working hypothesis):
+ *  ① candidate envelope 상위 문장("완료된 변화면 transition")이 **fixed 줄 자체를 정당한 후보로** 만들어
+ *     제외 지시와 경쟁했고 — 모델은 fixed 줄 하나만 내고 정답 줄을 건너뛰었다.
+ *  ② 그 뒤를 지키는 문장이 **"window 시작 의상으로의 복귀"에만** 걸려 있어(P5 는 해당, P4 는 비해당)
+ *     복귀가 아닌 이후 전환에는 안전망이 없었다.
+ * 그래서 두 축만 정밀화한다: fixed 행은 **candidate universe 밖**(semantic non_transition 이 아니다 —
+ * 실제 전환이지만 이미 authoritative 라 AI 후보가 아닐 뿐), 그리고 fixed 이후의 실제 전환은 **복귀든
+ * 아니든** 보호. "later eligible line completes another outfit transition" 조건은 유지해야
+ * 이후의 모든 의상 언급이 후보가 되지 않는다.
  */
 const FIXED_RULE =
   ' "fixed" lists outfit changes the author already wrote down. Each entry is the authoritative, settled ' +
   'outfit state at that "i", and it stays in effect from that point onward until another transition. ' +
-  'Never repeat or contradict a (i, character) pair listed there. ' +
+  'A "fixed" entry is authoritative context, not an AI candidate: never emit a candidate for a ' +
+  '(i, character) pair listed there, even when that line explicitly describes a completed outfit change, ' +
+  'and never contradict it. ' +
   'If a "fixed" entry sits on the first supplied line, it is already reflected in "currentOutfit" — do not ' +
-  'treat it as a separate additional change. ' +
-  'Because of an intervening "fixed" transition, a later return to the window-start "currentOutfit" can ' +
-  'itself be a real outfit change worth reporting.';
+  'treat it as a separate additional candidate. ' +
+  'Keep reading the lines after a "fixed" entry: if a later eligible line completes another outfit ' +
+  'transition for that character, report that later line as its own "transition" candidate — this ' +
+  'includes, but is not limited to, a return to the window-start "currentOutfit".';
 
 /** 마커가 실제로 있을 때만. */
 const MARKER_RULE =
   ' "markers" are read-only stage events at those indices: "hidden" = character sprites stop being shown, ' +
   '"shown" = they are shown again, "cg" = the scene switches to a CG illustration and this request ends there. ' +
-  'A character may change clothes while hidden; that is a normal change to report.';
+  'A character may change clothes while hidden; that is a normal completed change to report as "transition".';
 
 /** 첫 포함 줄 이전부터 이미 숨겨져 있을 때만. */
 const INITIAL_HIDDEN_RULE =
@@ -426,7 +479,7 @@ const INITIAL_HIDDEN_RULE =
 /** 장면 시작 의상을 사람이 직접 지정한 캐릭터가 있을 때만(baseline 정정과 실제 전환을 못 가른다). */
 const SCENE_MANUAL_RULE =
   ' For characters whose "outfitSource" is "scene-manual", the author fixed the outfit at the start of ' +
-  'this scene: do NOT report a change for them on the very first line of the scene.';
+  'this scene: do NOT report a candidate for them on the very first line of the scene.';
 
 export interface OutfitPromptCtx {
   sceneTitle: string;
@@ -488,7 +541,13 @@ export function buildOutfitRequest(
  *  · scan 밖 인덱스(lead-in·미래·유령) · 후보 캐릭터 밖 · 후보 의상 밖(정규화 후 exact match 실패)
  *  · 그 (i,character)를 사람이 이미 지정함(fixed) · 장면 첫 텍스트 줄인데 baseline 이 scene-manual
  *  · 그 줄의 현재 effective outfit 과 같은 no-op · 같은 (i,character) 중복
+ *  · 모델이 `kind:"non_transition"` 으로 라벨한 semantic 후보(S) — **그 값 하나만** 추가로 거른다
  * 저장은 항상 **후보 원문**(characterOutfits 표기)이라 canonical identity 가 유지된다.
+ *
+ * ⚠️ `changes[]` 는 이제 **semantic candidate envelope** 다(transition/non_transition 둘 다 올 수 있다).
+ * 넓어진 건 semantic 경계뿐이고 structural 자격(scan·후보 캐릭터·exact 의상·fixed/manual·no-op)은
+ * 그대로라, 이 함수가 돌려주는 건 예전과 같이 **실제 transition 제안만**이다. `kind` 는 여기서만
+ * 쓰이고 밖으로 나가지 않는다(OutfitChange·store·Project·저장 전부 무변경).
  *
  * ⚠️ no-op 판정만 **같은 응답 안에서 시간순**으로 본다(A→B→A 복귀가 사라지던 문제): 앞선 전환이
  * 사실이라고 가정하면 뒤의 복귀는 진짜 전환이다. 가정은 이 함수 안에서만 살고, 검증 순서와
@@ -583,6 +642,13 @@ export function parseOutfitResponse(
     if (i === plan.firstTextualIndex && plan.sceneManualChars.has(character)) continue;
     // 그 줄의 시점 기준으로 아무 일도 안 하는 제안이면 버린다(같은 응답의 앞선 전환을 가정한 뒤).
     if (noOpBasisAt(character, i) === outfit) continue;
+    // S(semantic) — 모델이 스스로 "전환이 아니다"라고 라벨한 후보만 뺀다. changes[] 가 candidate
+    // envelope 이 된 짝이고, **structural universe 는 넓히지 않는다**(위 게이트는 그대로다).
+    // ⚠️ 위치가 계약이다: G 직후 · seen.add 와 가정 연대기 전진 **직전**. 여기서 `continue` 하므로
+    // 거부된 행은 seen 도 chronology 도 건드리지 않아 같은 (i,character) 의 뒤 행이 다시 심사된다.
+    // **반환 직전 filter 로 옮기지 말 것** — 그러면 거부된 행이 뒤 항목의 G 전제를 바꾼다.
+    // fail-open: missing·unknown·wrong type 은 여기서 걸리지 않는다(legacy accept).
+    if (normalizeOutfitKind(r.kind) === 'non_transition') continue;
 
     seen.add(dupKey);
     // ⚠️ **여기까지 통과한 항목만** 가정 연대기를 전진시킨다 — 중복(dupKey)·후보 밖·manual 선점 등으로
