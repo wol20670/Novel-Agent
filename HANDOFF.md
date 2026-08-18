@@ -4,9 +4,9 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **Outfit 은 Phase 14, Expression F-1 은 Phase 15 에서 확정됐다. 다음 Phase 는 정해져 있지 않다 — 착수 전 사용자 지시가 필요하다.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
-  - **표정 선택 품질은 여전히 실키 미검증**이다(의상만 Phase 10/11/13 에서 쟀다). Phase 15 는 결정론적 계약 불일치를 고쳤을 뿐 **모델의 선택 품질을 잰 게 아니다**. 재개하면 `src/generators/emotion/` 부터 — `aiSelect.ts`(문맥/target 두 축) · `resolve.ts`(판정 단일 소스) · Phase 5 문맥 품질 확인 목록(PHASES.md).
-  - **Expression backlog(사용자 별도 지시가 있을 때만 — 자동으로 다음 Phase 가 아니다)**: **F-2** 청크 경계를 넘는 연속성 정보 0(고치려면 러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경** — 순진하게 문맥에 넣으면 requestKey 축 9 가 전부 불일치해 2번째 이후 청크가 전량 skip 된다) · **F-3** target 수집에 export `optedIn` 게이트 없음(D3 와 결합) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고.
+- **Outfit 은 Phase 14, Expression 은 Phase 15(F-1 후보 pool)·Phase 16(연속성 소유 범위)에서 확정됐다. 다음 Phase 는 정해져 있지 않다 — 착수 전 사용자 지시가 필요하다.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
+  - **표정 선택 품질은 여전히 미입증**이다. Phase 15·16 은 둘 다 **결정론적 계약 불일치**를 고친 것이고 모델의 선택 품질을 잰 게 아니다. Phase 16 이 live 를 6회 돌렸지만 **synthetic fixture 3개 한정**이고 baseline 부터 이미 옳게 골라 **before/after 선택이 전부 동일**했다 — 개선도 회귀도 입증되지 않았다. 재개하면 `src/generators/emotion/` 부터 — `aiSelect.ts`(문맥/target 두 축) · `resolve.ts`(판정 단일 소스) · Phase 5 문맥 품질 확인 목록(PHASES.md).
+  - **Expression backlog(사용자 별도 지시가 있을 때만 — 자동으로 다음 Phase 가 아니다)**: **F-2** 청크 경계를 넘는 연속성 정보 0(고치려면 러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경** — 순진하게 문맥에 넣으면 requestKey 축 9 가 전부 불일치해 2번째 이후 청크가 전량 skip 된다) · **F-3** target 수집에 export `optedIn` 게이트 없음(D3 와 결합) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · **`P16-F2`** 표정 denotation 정의 부재(부정·시제·타인 감정 언급 — evidence 가 *부재* 라 등급이 낮고 `"나 진짜 화났어"` 류를 함께 억누를 suppression 위험. **Phase 16 프롬프트에 섞지 않았다**).
   - **Outfit 은 열린 TODO 가 아니다** — 아래 셋은 **accepted limitation**(문서화하고 안고 간다, 상세는 PHASES.md "Phase 14 확정" 절):
     - `P12-59` residual FP(no-look-ahead window **종단**의 미래 의도). 원인은 raw semantic misclassification 이고 **window boundary 는 가장 강하게 의심되는 contributing factor 지만 유일한 causal root cause 로 확정하지 않는다.** ⚠️ **"window 끝 행은 non_transition/reject" 류 blanket boundary suppression 을 넣지 말 것**(진짜 종단 transition 이 silent FN 이 된다).
     - **same-input raw emission variability** — byte-identical 요청 24쌍 중 decision 일치 23/24, 유일한 divergence 가 `P3#0`. `temperature 0` 을 deterministic 이라고 쓰지 말 것. ⚠️ 보존 관측 "4 emitted / 1 omitted"는 **같은 입력 반복 실험이 아니므로 rate 로 인용 금지.**
@@ -15,6 +15,25 @@
   - ⚠️ **Phase 11 A 식 suppression 프롬프트 튜닝을 반복하지 말 것**(P10/P4 raw omission 회귀). candidate **개수**에 대한 sparsity prior 도 같은 억제 압력이라 넣지 않는다.
   - known limitations(**명시적 우선순위 지시 전까지 착수하지 않음**, 상세는 PHASES.md Phase 9 절): D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌. (**D4 `availableExpressions` 후보 누수는 Phase 15 `e9311f3` 에서 해결됨** — 아래 📌 참고.)
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore, 커밋 안 함)에 pre-correction·corrected 둘 다 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 Phase 16 이 확정한 것 (Expression AI 연속성 소유 범위 — 깨지 말 것)
+- **latest implementation = `931a2cc`** `fix: Expression AI 연속성 소유 범위를 화자 단위로 한정 (Phase 16)`.
+- **두 축을 분리한다**(`src/generators/emotion/aiSelect.ts` 의 `BASE_SYSTEM_PROMPT`·`CONTEXT_RULE`):
+  ```
+  semantic evidence (감정 판단 근거)      = 전체 scene/context — 타 화자 대사·지문·scene 메타 계속 사용
+  continuity ownership (previous state) = 그 화자 자신의 이전 표정만, 타 캐릭터 승계 금지
+  ```
+  ⚠️ **범위를 좁힌다고 "같은 화자의 이전 줄만 보라"로 쓰지 말 것** — 타 화자·지문이 판단 근거에서
+  빠지는 **정반대 회귀**다(테스트 T-B 가 그 전용 가드). anti-flicker 는 **없앤 게 아니라 범위만** 좁혔다.
+  ⚠️ 변경 **횟수** sparsity prior·기본 표정 선호 같은 억제 문구를 추가하지 말 것(Phase 11 A 교훈).
+- **production 은 프롬프트 문자열 2곳 + 주석뿐**이다 — planner·payload·parser·estimate·resolve·
+  renderer·store·schema·save/load·`.npproj.zip`·협업·Ren'Py export **전부 무변경**(`dump:rpy` diff 0).
+- **⚠️ live 결과를 과장하지 말 것**: `gpt-4o-mini` · synthetic fixture 3개 · before/after 각 1회 · 총 6회.
+  **baseline 부터 이미 올바른 선택이었고 before/after 가 전부 동일**했다. ⇒ *"cross-speaker bleed 를
+  고쳤다"·"semantic FP 해결"·"선택 품질 개선"·"live 에서 개선 확인"* 으로 쓰면 안 된다.
+  정확한 문장: **"invalid continuity scope 는 deterministic 하게 확인됐으나 이번 최소 live fixture 에서는
+  baseline user-facing bleed 가 재현되지 않음"** — 방향성 regression 도 관측되지 않았다.
+  **same-input variance·stability campaign 으로 확대하지 않는다.**
 
 ## 📌 Phase 15 가 확정한 것 (Expression AI 후보 pool — 깨지 말 것)
 - **latest implementation = `e9311f3`** `fix: Expression AI 후보를 실제 의상 렌더 pool과 일치시킴 (Phase 15)`.
@@ -114,5 +133,5 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 15 확정 — Expression AI F-1 후보 pool correction(`e9311f3`)**: `availableExpressions` 의 표정 단위 base 폴백을 렌더러(`selectSprite`)의 의상 pool 폴백에 맞춤. production 1파일 + 테스트 3파일. typecheck · vitest 50파일/772 · `dump:rpy` 245파일 diff 0 · 스크래치 빌드 · live 0 · mutation check 8건.
-- **Phase 15 docs finalization**: `PHASES.md` Phase 15 확정 절 + 로그 표(14행 상태 정정 포함) · Phase 9 D4 해결 표기 · 이 파일 · `CLAUDE.md` 후보 pool 계약 한 줄.
+- **Phase 16 확정 — Expression AI 연속성 소유 범위 correction(`931a2cc`)**: `BASE_SYSTEM_PROMPT`·`CONTEXT_RULE` 의 continuity 를 same-speaker ownership 으로 한정(감정 판단 근거는 전체 context 유지). production 1파일(프롬프트 2곳) + 테스트 1파일. typecheck · vitest 50파일/775 · mutation check 8건 · `dump:rpy` 245파일 diff 0 · 스크래치 빌드 · **live 6회(before/after 전부 동일 — 개선 미입증·회귀 미관측)**.
+- **Phase 16 docs finalization**: `PHASES.md` Phase 16 확정 절 + 로그 표 16행 · 이 파일 · `CLAUDE.md` 연속성 소유 계약 한 줄.

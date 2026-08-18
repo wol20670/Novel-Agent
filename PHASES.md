@@ -38,6 +38,7 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 13 | Outfit AI binary semantic `kind` 계약 구현 + `FIXED_RULE` 보정 | ✅ 확정 (구현 → live PRIMARY → P4 회귀 분석 → 최소 보정 → corrected PRIMARY, GPT 4차 검토 반영) | `81b7f7f` | typecheck · vitest 50파일/762(741→+21) · audit dry D0~D19 21/21 · `dump:rpy` 22구성 245파일 diff 0 · pre-correction live PRIMARY 26요청 · corrected live PRIMARY 26요청(TP/FP/FN 17/1/1 · F1 0.944) |
 | 14 | Outfit AI residual/stability audit → **동결 결정**(분석 Phase) | ✅ 확정 (Outcome B) | `4f1f115`(docs-only) | — (분석 Phase · production/tests/프롬프트 변경 0 · live 0) |
 | 15 | Expression AI 실사용 audit → **F-1 후보 pool correction** | ✅ 확정 (Plan v1 → GPT 3차 검토 → 구현 → 구현 리뷰) | `e9311f3` | typecheck · vitest 50파일/772(762→+10) · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 · live 0 · mutation check 8건 |
+| 16 | Expression AI **연속성 소유 범위**(continuity ownership) prompt-contract correction | ✅ 확정 (Plan rev.2 → GPT 검토 → 구현 → 구현 리뷰 PASS) | `931a2cc` | typecheck · vitest 50파일/775(772→+3) · mutation check 8건 · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 · **live 6회**(fixture 3 × before/after 1) |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -1068,6 +1069,74 @@ attr 를 그 의상 pool 이 실제로 표현 가능**(렌더러에 직접 결�
 target 수집에 export `optedIn` 게이트 없음(D3 와 결합, 비용·UI 노이즈만) · 후보 1개뿐인 줄의 호출 생략
 (답이 강제됨) · 파서가 "후보 밖"으로 버린 건수 미보고 · `contextWindow` 단일 초장문 줄 edge.
 **표정 선택 품질 자체는 여전히 실키 미검증**이다(이번 Phase 는 결정론적 계약 불일치를 고쳤을 뿐).
+
+## Phase 16 확정 — Expression AI 연속성 소유 범위 (구현 `931a2cc`)
+
+**성격**: Phase 15 와 같은 *"production 경로의 defect 하나를 evidence 기반으로 골라 작은 correction 으로
+연결한다"* — Outcome A. 후보 3건(`P16-F1` continuity ownership · `P16-F2` denotation 정의 부재 ·
+`P16-F3` parser 폐기 건수 미보고) 중 **`P16-F1` 만** 고쳤다.
+
+**root cause (deterministic)** — `BASE_SYSTEM_PROMPT` 의 연속성 문장이 소유 범위를 **줄 단위**로 썼다:
+`"if it is unchanged from the previous line, repeat the same expression (avoid flickering between lines)"`.
+그런데 Phase 5 이후 payload 는 **여러 화자와 지문이 뒤섞인 하나의 시간축**이다(`items` 는 `chunkItems` 가
+원본 줄 순서로 자르고, `context` 는 주인공·지문·타 화자를 같은 `i` 축에 싣는다 — 기존 T7 이 고정).
+⇒ *다른 화자의 표정을 현재 화자의 previous state 로 삼으라*는 지시가 성립했다. `CONTEXT_RULE` 의
+`use it for continuity only` 도 그 `expr` 이 **누구 것인지** 말하지 않아 같은 문제였다.
+
+**확정 계약 — 두 축을 분리한다(하나로 합치지 말 것)**
+```
+semantic evidence (감정 판단 근거)      = 전체 scene/context — 타 화자 대사·지문·scene 메타 계속 사용
+continuity ownership (previous state) = 그 화자 자신의 이전 표정만, 타 캐릭터 승계 금지
+```
+· ⚠️ **범위를 좁힌다고 "같은 화자의 이전 줄만 보라"로 쓰면 안 된다** — 그 순간 타 화자·지문이 판단
+  근거에서 빠지는 **정반대 회귀**가 된다. 그래서 BASE 첫 문장이 evidence 범위를(`including other
+  characters' lines and narration`), `CONTEXT_RULE` 이 `every context line still informs what is
+  happening` 을 명시적으로 못박는다. 테스트 **T-B** 가 그 방향 회귀 전용 가드다.
+· ⚠️ anti-flicker 는 **없앤 게 아니라 범위만 좁혔다** — 같은 화자 안에서는 강도 그대로다.
+· ⚠️ 변경 **횟수**에 대한 sparsity prior·기본 표정 선호 같은 억제 문구를 추가하지 말 것(Phase 11 A 교훈).
+
+**변경 범위** — production 은 `src/generators/emotion/aiSelect.ts` 의 **프롬프트 문자열 2곳 + 그 머리
+주석**뿐이다. `collectEmotionTargets`·`contextWindow`·`planEmotionChunks`·payload 구조·
+`parseEmotionResponse`·`validateEmotionUpdates`·`estimate.ts`·`resolve.ts`/`availableExpressions`·
+renderer·store·schema·save/load·`.npproj.zip`·협업·Ren'Py export **전부 무변경**. Outfit 은 Phase 14 동결 그대로.
+`PROMPT_OVERHEAD_TOKENS_PER_REQUEST = 250` 은 근사 estimator 계약이라 **손대지 않았다**(새 문안이 ~35토큰
+더 길어 그만큼 과소 추정이 된다 — 근사 성격 유지가 사용자 결정).
+
+**고정한 regression 축**(`tests/emotion-ai.test.ts`): 로컬 프롬프트 **사본** 갱신(조건부 게이트가 무조건
+켜지는 회귀 + 모르는 사이의 프롬프트 변경 방지) · **T-A** 옛 줄 단위 문구 부재 + 화자 소유 문구 존재 +
+same-speaker anti-flicker 생존 · **T-B** evidence 축소 방지 · **T-C** 문맥 `expr` 소유자 명시 + 문맥 줄이
+계속 정보원 + 기존 계약(문맥 인덱스로 답 금지·답은 후보에서만) 생존 · 기존 2화자 fixture 에 **items 가
+화자별 그룹이 아니라 원본 줄 순서 interleave** 라는 전제 assertion 보강(context 쪽 전제는 기존 T7 이 이미
+고정하므로 독립 테스트를 새로 만들지 않았다). mutation check: 옛 프롬프트로 되돌리면 **8건 실패**.
+
+**검증** — typecheck · vitest 50파일/**775**(772→+3, 기존 772 회귀 0) · mutation check 8건 ·
+`dump:rpy` 22구성 245파일 **diff 0** · 스크래치 outDir 빌드 · **live 6회**.
+
+**live 실측(정확히 이만큼)** — `gpt-4o-mini` · curated **synthetic** fixture 3개 · before/after 각 1회 ·
+**총 6회** · 반복 측정 없음. 두 트리(`268faf7` vs 구현)의 **user payload 바이트 동일**을 먼저 확인해
+차이를 system prompt 하나로 통제했다.
+
+| fixture | before | after |
+|---|---|---|
+| `P16-A` cross-speaker carry | 민주=화남 / 지수=슬픔 / 민주=화남 | **동일** |
+| `P16-B` same-speaker 유지(대조군) | 민주=기쁨 / 민주=기쁨 | **동일** |
+| `P16-C` context expr ownership | 지수=기본 | **동일** |
+
+**⚠️ limitation — 과장해서 인용하지 말 것**
+- **`invalid continuity scope` 는 deterministic 하게 확인됐으나, 이번 최소 live fixture 에서는
+  baseline user-facing cross-speaker bleed 가 재현되지 않았다.** baseline 부터 이미 올바른 선택이었고
+  before/after 선택도 **모두 동일**했다.
+- ⇒ **실제 사용자 영향 크기와 표정 선택 품질 개선은 입증되지 않았다.** *"cross-speaker bleed 를 고쳤다"*,
+  *"semantic FP 를 해결했다"*, *"선택 품질을 개선했다"*, *"live 에서 개선을 확인했다"* 로 쓰지 말 것.
+- 다만 corrected side 의 **방향성 regression 도 관측되지 않았다**(P16-B guard 악화·신규 flicker 없음).
+- synthetic curated fixture 한정이다(Phase 10/13 과 같은 등급). **same-input variance·stability
+  campaign 으로 확대하지 않는다.**
+
+**이번에 해결하지 않은 것**(해결 과제가 아니라 기록, Phase 15 목록 그대로 유지 + 1건 추가):
+**F-2** 청크 간 run-local 연속성 정보 0 · **F-3** target 수집에 export `optedIn` 게이트 없음 ·
+후보 1개뿐인 줄의 호출 생략 · 파서가 "후보 밖"으로 버린 건수 미보고 · **`P16-F2`** 표정의 denotation
+정의 부재(부정·시제·타인 감정 언급) — evidence 가 *부재* 라 등급이 낮고 `"나 진짜 화났어"` 류를 함께
+억누를 suppression 회귀 위험이 있어 **별도 evidence 확보 시 독립 Phase**.
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
