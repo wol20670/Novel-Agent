@@ -1215,8 +1215,8 @@ evidence 요약**이다 — local artifact 존재에 의존하지 않는다.)
 
 **동결 baseline** — Expression AI production baseline = **`931a2cc`**(Phase 16 구현) 코드 상태.
 ```
-git diff --name-only 931a2cc..HEAD                     → CLAUDE.md · HANDOFF.md · PHASES.md
-git diff --stat 931a2cc..HEAD -- src tests scripts package.json package-lock.json → (empty)
+git diff --name-only 931a2cc..b1adab3                  → CLAUDE.md · HANDOFF.md · PHASES.md
+git diff --stat 931a2cc..b1adab3 -- src tests scripts package.json package-lock.json → (empty)
 ```
 ⇒ Phase 17 이후의 tracked code tree 는 Phase 16 구현과 **동일**하다(Outcome C 라 구현 커밋이 없고, 폐기한
 임시 correction 은 트리에 남지 않았다). **그래서 Phase 18 은 재검증 ceremony 를 돌리지 않았다** — 같은

@@ -4,7 +4,7 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **Phase 19 에서 Novel-Agent v1 production baseline 이 확정됐고, 계획된 핵심 개발은 종료됐다**(Outcome A · docs-only). 전 제품 checkpoint 결과·verification·동결 상태의 **정본은 [`PHASES.md`](./PHASES.md) "Phase 19 확정" 절**이다. **production implementation baseline = `931a2cc`**(Phase 16 구현 — Phase 17~19 내내 `src`/`tests`/`scripts` 무변경).
+- **Phase 19 에서 Novel-Agent v1 production baseline 이 확정됐고, 계획된 핵심 개발은 종료됐다**(Outcome A · docs-only). 전 제품 checkpoint 결과·verification·동결 상태의 **정본은 [`PHASES.md`](./PHASES.md) "Phase 19 확정" 절**이다. **v1 frozen production implementation baseline = `931a2cc`**(Phase 16 구현 — Phase 17~19 동안 `src`/`tests`/`scripts` 무변경으로 유지) · **Phase 19 final v1 repository checkpoint = `5902dc8`**. ⚠️ 이후의 **post-v1 correction** 은 이 역사적 baseline 을 재정의하지 않지만, **현재 HEAD 의 `src`/`tests` 트리가 `931a2cc` 와 동일하다는 뜻도 아니다**.
 - **정해진 다음 필수 작업은 없다.** ⚠️ **새 blocker 가 없는 한 Phase 20+ 를 만들지 말 것** — backlog 가 존재한다는 사실만으로 Phase 를 추가하지 않는다. ⚠️ 종료의 뜻은 *"영원히 완성"* 이 아니라 **현재 계획된 v1 핵심 개발의 종료**다 — 실제 제작 중 새 blocker 가 나오면 그때 별도로 판단한다.
 - **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
 - **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
@@ -19,11 +19,11 @@
 - **새 v1 blocker 0** — Preview · parity · save/load · `.npproj.zip` · Ren'Py export · Outfit/Expression AI 실행·재실행 · estimate · 병합 · 협업 · build/typecheck/tests 전 경로.
 - ⚠️ **AI semantic accuracy 100% 는 v1 조건이 아니다** — production contract 는 **"AI 초벌 → 사람 검수"** 이고, 개별 semantic 오답은 그 자체로 blocker 가 아니다.
 - ⚠️ **Expression AI 브라우저 e2e 는 리포에 없다**(실측). Phase 19 는 **만들지 않았고**, 실행/커밋/회수는 기존 vitest(`emotion-ai`·`emotion-commit`·`emotion-recovery`·`emotion-resolve`·`emotion-estimate`·`integration-workflow`)가 덮는다.
-- ⚠️ **baseline 두 축을 섞지 말 것**: production implementation = `931a2cc` / final v1 repository checkpoint = **Phase 19 확정 commit**(verification 을 돌린 `b1adab3` 가 아니다).
+- ⚠️ **baseline 두 축을 섞지 말 것**: **v1 frozen production implementation baseline = `931a2cc`** / **Phase 19 final v1 repository checkpoint = `5902dc8`**(verification 을 돌린 `b1adab3` 가 아니다). ⚠️ post-v1 correction 의 **현재 HEAD** 를 이 두 historical checkpoint 와 혼동하지 말 것 — `production implementation baseline` 을 커밋마다 새 SHA 로 갱신하는 체계를 만들지 않는다.
 
 ## 📌 Phase 18 이 확정한 것 (Expression AI 동결 — 자동으로 다시 열지 말 것)
 - **Outcome A — docs-only finalization.** production/tests/프롬프트 변경 **0** · live **0** · 새 benchmark **0**. 동결 baseline = **`931a2cc`**(Phase 16 구현) 코드 상태.
-- **재검증 ceremony 를 돌리지 않은 근거**: `git diff --stat 931a2cc..HEAD -- src tests scripts package.json` 이 **비어 있다**(Phase 17 은 Outcome C 라 구현 커밋이 없고 폐기한 correction 도 트리에 안 남았다). ⇒ Phase 16 시점 검증(typecheck · vitest 50파일/775 · mutation 8건 · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 빌드)이 **그대로 유효**하다.
+- **재검증 ceremony 를 돌리지 않은 근거**: `git diff --stat 931a2cc..b1adab3 -- src tests scripts package.json` 이 **비어 있다**(Phase 17 은 Outcome C 라 구현 커밋이 없고 폐기한 correction 도 트리에 안 남았다). ⇒ Phase 16 시점 검증(typecheck · vitest 50파일/775 · mutation 8건 · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 빌드)이 **그대로 유효**하다.
 - **동결 계약은 파일+symbol 로 기록했다**(줄 번호를 정본에 심지 않는다 — 금방 낡는다). Phase 18 은 **새 limitation 발굴 Phase 가 아니라서** 기존 확정분만 승계했다.
 - ⚠️ **live evidence 범위**: 소규모 curated **synthetic** fixture 한정이고 실제 제작 대본 전반의 **일반화된 품질 평가는 수행하지 않았다**. 이것을 *"production baseline 으로 쓸 수 없다"* 로 연결하지 말 것 — freeze 판정은 deterministic contract · integration path(Preview/export/save/전송/병합) · known limitation · 사람 검수 workflow(`emotion` 우선 · `clearEmotionAuto` · 🤖 표시)를 함께 본 것이다.
 - ⚠️ **deterministic 통과를 품질 개선으로 인용하지 말 것**(Phase 17 이 그 반례).
@@ -165,4 +165,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 19 확정 — Novel-Agent v1 production baseline(Outcome A · docs-only)**: canonical verification 6단계 전부 PASS · 새 blocker 0 → production/test 변경 0. v1 checkpoint·verification evidence·동결 상태를 `PHASES.md` 에 정본화. docs 4파일(`PHASES.md` Phase 19 절 + 로그 19행 · 이 파일 · `CLAUDE.md` 한 줄 · `README.md` stale fact 5건 최소 정정).
+- **post-v1 correction — 엑셀 다운로드 템플릿 작성법을 실제 parser contract 에 맞춤**(Phase 아님): `src/template.ts` 안내문 정정 + `tests/template.test.ts` 신규. parser·생성기·AI·schema 동작 변경 0.
