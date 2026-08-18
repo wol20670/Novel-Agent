@@ -167,7 +167,9 @@ describe('W1 — Outfit 수락 → outfitFlags → 표정 AI 후보, 그리고 �
 
     expect(dlg(sceneOf(S2), 1).outfits).toEqual({ 민주: '교복' }); // ordinary manual 값으로 들어간다
     expect(outfitFlags(sceneOf(S2), undefined, '민주')[1]).toBe('교복');
-    expect(candidatesAt(useStore.getState().project, S2, 1)).toEqual(['기본', '기쁨', '화남']);
+    // Phase 15: 후보는 그 의상이 **직접** 가진 칸뿐이다(화면의 pool 규칙). 교복 = {기본, 화남} 이라
+    // 기본 의상에만 있는 '기쁨' 은 교복 줄에서 표시될 수 없어(neutral 로 강등) 후보에서 빠진다.
+    expect(candidatesAt(useStore.getState().project, S2, 1)).toEqual(['기본', '화남']);
   });
 
   it('수락은 그 항목만 빼고 기존 표정 값은 절대 지우지 않는다', () => {
@@ -217,8 +219,8 @@ describe('W1 — Outfit 수락 → outfitFlags → 표정 AI 후보, 그리고 �
     useStore.getState().clearEmotionAuto(); // ← 사용자가 명시적으로 누르는 유일한 복구 경로
 
     expect(dlg(sceneOf(S2), 1).emotionAuto).toBeUndefined();
-    // 이제 새 의상(교복) 기준 후보로 다시 대상이 된다.
-    expect(candidatesAt(useStore.getState().project, S2, 1)).toEqual(['기본', '기쁨', '화남']);
+    // 이제 새 의상(교복) 기준 후보로 다시 대상이 된다(교복이 직접 가진 칸 = 기본·화남).
+    expect(candidatesAt(useStore.getState().project, S2, 1)).toEqual(['기본', '화남']);
   });
 
   it('Scene 경계는 전파되지 않는다 — 장면2 수락이 장면1 baseline 을 건드리지 않는다', () => {

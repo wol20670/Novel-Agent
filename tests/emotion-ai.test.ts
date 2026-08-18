@@ -7,6 +7,8 @@ import {
   selectEmotionsBatch,
   type EmotionItem,
 } from '../src/generators/emotion/aiSelect';
+import { estimateEmotionCost } from '../src/generators/emotion/estimate';
+import { attrFor, selectSprite, spriteSlots } from '../src/renpy/generate';
 import { outfitFlags, type Character, type Expression, type Line } from '../src/types';
 import { scene, projectWith, dialogue } from './fixtures';
 
@@ -186,7 +188,9 @@ describe('collectEmotionTargets: "AI 표정 배정이 필요한 대사"만 장�
     const batches = collectEmotionTargets(p);
     expect(batches[0].items[0].outfit).toBe('수영복');
     expect(batches[0].candidatesByKey.size).toBe(1);
-    expect(batches[0].candidatesByKey.get(candidateKey('민주', '수영복'))).toEqual(['기본', '화남']);
+    // Phase 15: 수영복 pool = [화남] 뿐이라 기본 의상의 '기본' 은 그 의상으로 **표시될 수 없다**
+    // (화면은 pool 단위 폴백 — 칸이 하나라도 있으면 기본 의상 pool 을 보지 않는다). 후보에서 빠진다.
+    expect(batches[0].candidatesByKey.get(candidateKey('민주', '수영복'))).toEqual(['화남']);
   });
 });
 
@@ -205,16 +209,19 @@ describe('collectEmotionTargets(F1): 같은 장면·같은 청크에서 A→B→
     const [batch] = collectEmotionTargets(project);
     const candOf = (it: EmotionItem) => batch.candidatesByKey.get(candidateKey(it.speaker, it.outfit))!;
 
-    // A(교복): 교복전용 포함 · 나머지 전용 제외
-    expect(candOf(batch.items[0])).toEqual(['기본', '교복전용']);
+    // Phase 15: 세 의상 모두 자기 칸을 갖고 있으므로 화면은 기본 의상 pool 을 보지 않는다 —
+    // 기본 의상에만 있는 '기본' 은 어느 의상 줄에서도 표시될 수 없어 후보에서 빠진다.
+    // A(교복): 교복전용만 · 나머지 전용 제외
+    expect(candOf(batch.items[0])).toEqual(['교복전용']);
     expect(candOf(batch.items[0])).not.toContain('수영복전용');
     expect(candOf(batch.items[0])).not.toContain('파티복전용');
+    expect(candOf(batch.items[0])).not.toContain('기본');
     // B(수영복): 새 의상 전용이 들어오고 이전 의상 전용은 빠진다
-    expect(candOf(batch.items[1])).toEqual(['기본', '수영복전용']);
+    expect(candOf(batch.items[1])).toEqual(['수영복전용']);
     expect(candOf(batch.items[1])).not.toContain('교복전용');
     expect(candOf(batch.items[1])).not.toContain('파티복전용');
     // C(파티복): 앞선 두 의상 전용이 모두 빠진다
-    expect(candOf(batch.items[2])).toEqual(['기본', '파티복전용']);
+    expect(candOf(batch.items[2])).toEqual(['파티복전용']);
     expect(candOf(batch.items[2])).not.toContain('교복전용');
     expect(candOf(batch.items[2])).not.toContain('수영복전용');
   });
@@ -250,6 +257,144 @@ describe('collectEmotionTargets(F1): 같은 장면·같은 청크에서 A→B→
     const [batch] = collectEmotionTargets(p);
     expect(batch.items.map((it) => it.text)).toEqual(['교복 줄']);
     expect(batch.items[0].outfit).toBe('교복');
+  });
+});
+
+/**
+ * Phase 15 — AI 후보 집합을 **화면의 폴백 사다리(selectSprite)** 에 맞춘 뒤의 계약.
+ *
+ * 화면은 폴백을 *표정 단위*가 아니라 **pool 단위**로 한다: 요청 의상의 칸이 하나라도 있으면 그 pool
+ * 안에서만 고르고(없는 표정은 neutral → pool[0] 로 강등), **칸이 0개일 때만** 기본 의상 pool 로
+ * 내려간다. 예전 후보 함수는 spriteAssetId(표정 단위 기본 의상 폴백)로 판정해 "그 의상으로는 절대
+ * 표시될 수 없는" 표정을 후보로 실었다(Phase 9 D4).
+ */
+describe('collectEmotionTargets(Phase 15): 후보는 그 의상이 실제 표시할 수 있는 표정뿐', () => {
+  /** asset 삽입 순서와 project 선언 순서를 **일부러 어긋나게** 만든 fixture(T4 판별력). */
+  function orderProject() {
+    const sc = scene({
+      lines: [dialogue('민주', '기본 의상 줄'), dialogue('민주', '사복 줄', { outfits: { 민주: '사복' } })],
+    });
+    return projectWith([sc], {
+      expressions: ['기본', '슬픔', '기쁨', '화남'], // ← 순서의 정본(선언 순서)
+      characters: [
+        char('민주', {
+          // asset 삽입 순서는 선언 순서와 반대에 가깝다 — 이 순서가 후보 배열로 새면 실패한다.
+          expressions: { 화남: 'b1', 기쁨: 'b2', 기본: 'b3', 슬픔: 'b4' },
+          outfits: [{ name: '사복', expressions: { 화남: 'o1', 기본: 'o2' } }],
+        }),
+      ],
+    });
+  }
+
+  it('T4 최종 후보 배열의 순서는 project 선언 순서다(asset 삽입 순서가 아니다) — 기본 의상', () => {
+    const [batch] = collectEmotionTargets(orderProject());
+    expect(batch.candidatesByKey.get(candidateKey('민주', '기본'))).toEqual(['기본', '슬픔', '기쁨', '화남']);
+  });
+
+  it('T4b 살아남은 후보끼리의 상대 순서도 선언 순서를 유지한다 — 부분 업로드 추가 의상', () => {
+    const [batch] = collectEmotionTargets(orderProject());
+    // 사복이 직접 가진 것은 {화남, 기본} — 선언 순서대로 '기본' 이 먼저여야 한다(삽입 순서면 '화남' 이 먼저).
+    expect(batch.candidatesByKey.get(candidateKey('민주', '사복'))).toEqual(['기본', '화남']);
+  });
+
+  it('T5 effectiveExpressions 교집합 후 후보가 0이면 그 줄은 target 이 아니다(견적도 같은 판단)', () => {
+    const sc = scene({
+      lines: [dialogue('민주', '기본 의상 줄'), dialogue('민주', '체육복 줄', { outfits: { 민주: '체육복' } })],
+    });
+    const p = projectWith([sc], {
+      // '화남' 은 **선언되지 않았다** — 체육복이 가진 유일한 그림이 선언 목록 밖이다.
+      expressions: ['기본'],
+      characters: [
+        char('민주', {
+          expressions: { 기본: 'a1' },
+          outfits: [{ name: '체육복', expressions: { 화남: 'a2' } }],
+        }),
+      ],
+    });
+
+    const batches = collectEmotionTargets(p);
+    // 체육복 줄: avail={화남} ∩ declared=['기본'] = [] → 무엇을 골라도 화면은 체육복/화남 하나뿐이라
+    // AI 가 기여할 정보가 0 이다. 유료 호출을 태우고 emotionAuto 로 재실행을 막는 것이 순손해라 제외한다.
+    expect(batches).toHaveLength(1);
+    expect(batches[0].items.map((it) => it.i)).toEqual([0]);
+    expect(batches[0].items[0].outfit).toBe('기본');
+    // 후보 맵엔 빈 항목이 남지만(길이 검사 **전에** set 하는 기존 동작) items 에 없으므로
+    // buildEmotionRequest 의 usedKeys 필터에서 걸려 요청 페이로드에는 실리지 않는다.
+    expect(batches[0].candidatesByKey.get(candidateKey('민주', '체육복'))).toEqual([]);
+
+    // ⚠️ 보존해야 할 계약은 "기존 숫자"가 아니라 **견적↔실행 parity** 다(같은 planner 를 쓴다).
+    const est = estimateEmotionCost(p);
+    const targetLines = batches.reduce((n, b) => n + b.items.length, 0);
+    const requests = batches.reduce((n, b) => n + planEmotionChunks(b).length, 0);
+    expect(est.targetLines).toBe(targetLines);
+    expect(est.requests).toBe(requests);
+    expect(est.targetLines).toBe(1);
+  });
+
+  it('T5b 그 화자의 모든 줄이 그렇게 빠지면 장면 자체가 배치에서 사라지고 견적도 0이다', () => {
+    const sc = scene({ lines: [dialogue('민주', '체육복 줄')], outfits: { 민주: '체육복' } });
+    const p = projectWith([sc], {
+      expressions: ['기본'],
+      characters: [
+        char('민주', { expressions: { 기본: 'a1' }, outfits: [{ name: '체육복', expressions: { 화남: 'a2' } }] }),
+      ],
+    });
+    expect(collectEmotionTargets(p)).toEqual([]);
+    expect(estimateEmotionCost(p)).toEqual({ targetLines: 0, requests: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
+  });
+
+  /**
+   * T6 — 후보 계약을 **렌더러에 직접 결속**한다(기대값을 손으로 박지 않는다).
+   *
+   * 이 단언이 증명하는 것은 Expression identity 자체가 아니라 *"AI 후보가 요구하는 **attr** 를 현재
+   * 의상의 renderer pool 이 실제로 표현할 수 있다"* 는 계약이다 — selectSprite 의 판정 기준이
+   * attr 존재 여부이기 때문이다. D5(속성 해시 충돌)로 서로 다른 표정이 같은 attr 를 가질 수 있는
+   * 문제는 pool 내부 승자 문제라 **기존대로 범위 밖**이고 이 테스트가 다루지 않는다.
+   */
+  it('T6 모든 후보의 attr 를 그 의상 pool 이 실제로 표현할 수 있다(강등이 일어나지 않는다)', () => {
+    const sc = scene({
+      outfits: { 민주: '사복' },
+      lines: [
+        dialogue('민주', '사복 줄'),
+        dialogue('민주', '체육복 줄', { outfits: { 민주: '체육복' } }),
+        dialogue('민주', '기본 줄', { outfits: { 민주: '기본' } }),
+        dialogue('지수', '교복 줄'),
+      ],
+    });
+    const p = projectWith([sc], {
+      expressions: ['기본', '슬픔', '기쁨', '화남'],
+      characters: [
+        char('민주', {
+          expressions: { 기본: 'b-base', 기쁨: 'b-joy', 슬픔: 'b-sad' },
+          outfits: [
+            { name: '사복', expressions: { 기본: 's-base' } }, // 부분 업로드
+            { name: '체육복', expressions: {} }, // 칸 0개 → base pool 재진입
+          ],
+        }),
+        char('지수', {
+          expressions: { 슬픔: 'j-sad' },
+          outfits: [{ name: '교복', expressions: { 기쁨: 'j-joy' } }], // 정반대 강등 재현 형태
+        }),
+      ],
+    });
+
+    const charByName = new Map(p.characters.map((c) => [c.name, c]));
+    const batches = collectEmotionTargets(p);
+    expect(batches).toHaveLength(1);
+
+    let checked = 0;
+    for (const batch of batches) {
+      for (const it of batch.items) {
+        const c = charByName.get(it.speaker)!;
+        const slots = spriteSlots(c); // 정책(planExprs)은 넣지 않는다 — 업로드된 칸만 본다
+        for (const e of batch.candidatesByKey.get(candidateKey(it.speaker, it.outfit))!) {
+          const want = attrFor(e);
+          expect(selectSprite(slots, it.outfit, want).attr, [it.speaker, it.outfit, e].join('/')).toBe(want);
+          checked += 1;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0); // 후보가 0이라 아무것도 검사 못 하는 무의미한 통과 방지
   });
 });
 
