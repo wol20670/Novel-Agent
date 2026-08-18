@@ -6,6 +6,10 @@
 ## 🎯 다음 할 일
 - **Phase 19 에서 Novel-Agent v1 production baseline 이 확정됐고, 계획된 핵심 개발은 종료됐다**(Outcome A · docs-only). 전 제품 checkpoint 결과·verification·동결 상태의 **정본은 [`PHASES.md`](./PHASES.md) "Phase 19 확정" 절**이다. **v1 frozen production implementation baseline = `931a2cc`**(Phase 16 구현 — Phase 17~19 동안 `src`/`tests`/`scripts` 무변경으로 유지) · **Phase 19 final v1 repository checkpoint = `5902dc8`**. ⚠️ 이후의 **post-v1 correction** 은 이 역사적 baseline 을 재정의하지 않지만, **현재 HEAD 의 `src`/`tests` 트리가 `931a2cc` 와 동일하다는 뜻도 아니다**.
 - **정해진 다음 필수 작업은 없다.** ⚠️ **새 blocker 가 없는 한 Phase 20+ 를 만들지 말 것** — backlog 가 존재한다는 사실만으로 Phase 를 추가하지 않는다. ⚠️ 종료의 뜻은 *"영원히 완성"* 이 아니라 **현재 계획된 v1 핵심 개발의 종료**다 — 실제 제작 중 새 blocker 가 나오면 그때 별도로 판단한다.
+- **post-v1 번역 개선 로드맵** — **Phase 1 완료(`78644d5`)**: 번역 누락 탐지 + 누락분만 번역 UX. 아래는 **후보일 뿐**이고 ⚠️ **사용자 지시가 있을 때만 연다**(v1 이후 원칙 유지 — 기존식 Phase 번호도 만들지 않는다).
+  - **Phase 2 — 원문 ↔ 번역 유효성**: ① `setLineText` 가 KO 원문만 바꾸고 기존 `i18n` 을 남긴다(수동 stale) ② `autoTranslateAll` 은 실행 중 줄 수정·삽입·삭제·재분석에 대한 **line-index anchor 재검증이 없다**(stale commit).
+  - **Phase 3** 번역 품질 QA·의심 번역 탐지 · **Phase 4** Phase 3 결과가 실제로 필요할 때만 선택적 고품질 재검수·재번역.
+  - adjacent/backlog(위 계약과 섞지 말 것): LeftPanel 키 안내문의 모델 표기 불일치(`gpt-4o-mini` vs 고품질 `gpt-4o`) · "누락만 보기"류 누락 위치 탐색 UX.
 - **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
 - **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
@@ -165,4 +169,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **post-v1 correction — 엑셀 다운로드 템플릿 작성법을 실제 parser contract 에 맞춤**(Phase 아님): `src/template.ts` 안내문 정정 + `tests/template.test.ts` 신규. parser·생성기·AI·schema 동작 변경 0.
+- **post-v1 번역 개선 Phase 1 — 누락 번역 UX**(`78644d5`, 기존식 Phase 아님): 버튼을 **🌐 누락 번역 채우기**로 바꾸고 EN/JA 누락 수·대상 줄 수를 실행 전에 표시. **backend 는 원래 selective 라 재구현하지 않았고**, 누락 0건 판정을 OpenAI 키 검사보다 **먼저** 하도록 guard 순서만 교정했다. 기존 번역 유지 · parser·Preview·save/load·`.npproj.zip`·Ren'Py export·Outfit/Expression AI 의미 변경 0.
