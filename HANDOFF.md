@@ -6,9 +6,10 @@
 ## 🎯 다음 할 일
 - **Phase 19 에서 Novel-Agent v1 production baseline 이 확정됐고, 계획된 핵심 개발은 종료됐다**(Outcome A · docs-only). 전 제품 checkpoint 결과·verification·동결 상태의 **정본은 [`PHASES.md`](./PHASES.md) "Phase 19 확정" 절**이다. **v1 frozen production implementation baseline = `931a2cc`**(Phase 16 구현 — Phase 17~19 동안 `src`/`tests`/`scripts` 무변경으로 유지) · **Phase 19 final v1 repository checkpoint = `5902dc8`**. ⚠️ 이후의 **post-v1 correction** 은 이 역사적 baseline 을 재정의하지 않지만, **현재 HEAD 의 `src`/`tests` 트리가 `931a2cc` 와 동일하다는 뜻도 아니다**.
 - **정해진 다음 필수 작업은 없다.** ⚠️ **새 blocker 가 없는 한 Phase 20+ 를 만들지 말 것** — backlog 가 존재한다는 사실만으로 Phase 를 추가하지 않는다. ⚠️ 종료의 뜻은 *"영원히 완성"* 이 아니라 **현재 계획된 v1 핵심 개발의 종료**다 — 실제 제작 중 새 blocker 가 나오면 그때 별도로 판단한다.
-- **post-v1 번역 개선 로드맵** — **Phase 1 완료(`78644d5`)**: 번역 누락 탐지 + 누락분만 번역 UX. 아래는 **후보일 뿐**이고 ⚠️ **사용자 지시가 있을 때만 연다**(v1 이후 원칙 유지 — 기존식 Phase 번호도 만들지 않는다).
-  - **Phase 2 — 원문 ↔ 번역 유효성**: ① `setLineText` 가 KO 원문만 바꾸고 기존 `i18n` 을 남긴다(수동 stale) ② `autoTranslateAll` 은 실행 중 줄 수정·삽입·삭제·재분석에 대한 **line-index anchor 재검증이 없다**(stale commit).
-  - **Phase 3** 번역 품질 QA·의심 번역 탐지 · **Phase 4** Phase 3 결과가 실제로 필요할 때만 선택적 고품질 재검수·재번역.
+- **post-v1 번역 개선 로드맵** — ⚠️ **v1 Phase 번호 체계와 섞지 말 것**(별도 축이고, 기존식 Phase 20+ 를 만들지 않는다). 남은 것은 **후보일 뿐**이고 ⚠️ **사용자 지시가 있을 때만 연다**.
+  - **Phase 1 ✅ 완료(구현 `78644d5`)** — 번역 누락 탐지 + 누락분만 번역 UX.
+  - **Phase 2 ✅ 완료(구현 `567dc67`)** — 원문 ↔ 번역 유효성. 계약·검증·accepted limitation 은 아래 📌 절이 정본.
+  - **Phase 3 ← 다음 후보** 번역 품질 QA·의심 번역 탐지 · **Phase 4** Phase 3 결과가 실제로 필요할 때만 선택적 고품질 재검수·재번역.
   - adjacent/backlog(위 계약과 섞지 말 것): LeftPanel 키 안내문의 모델 표기 불일치(`gpt-4o-mini` vs 고품질 `gpt-4o`) · "누락만 보기"류 누락 위치 탐색 UX.
 - **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
 - **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
@@ -16,6 +17,47 @@
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 post-v1 번역 Phase 2 가 확정한 것 (원문 ↔ 번역 유효성 — 깨지 말 것)
+> ⚠️ 아래 📌 Phase 8~19 는 **v1 Phase 번호**다. 이 절은 **post-v1 번역 로드맵의 Phase 2** 이고 같은 축이 아니다.
+
+- **구현 = `567dc67`** `fix: 원문 변경 및 번역 race의 stale 커밋 방지`(production 4 + tests 2).
+- **핵심 불변식: `Line.i18n` 은 그 줄의 *현재* KO 원문에 대한 번역일 때만 유효하다.** 종속을 강제하는
+  지점이 재분석 병합 한 곳뿐이라 나머지 두 경로가 `(sceneId, lineIndex)` 좌표만 믿던 것이 원인이었다.
+- **동치 관계는 하나다** — `sameLooseText(a, b)`(`src/project/mergeScenes.ts`, 병합 `loosePronKey` 의 정규식을
+  그대로 공유). **엑셀 병합 · 앱 직접 편집 · 자동 번역 커밋 세 경로가 같은 답을 낸다.**
+  ⚠️ 두 번째 구현을 만들거나 `Line` 을 받는 범용 identity 추상으로 키우지 말 것(kind·화자 비교는 필요한 호출측만 한다).
+- **manual(`setLineText`)**: 공백·문장부호만 바뀐 편집은 번역 **유지**, loose-equivalent 가 아닌 의미 변경은
+  **원문을 쓰는 같은 state update 안에서** `i18n` 제거 + 1회 고지. `emotionAuto`·`voiceAssetIds` 는 무변경.
+  ⚠️ **편집 종료(완료 버튼) 시점으로 미루지 말 것** — 이 액션은 키 입력마다 autoSave(localStorage·협업
+  push)를 태우므로, 미루면 "새 원문 + 옛 번역"이 저장·전송·내보내기를 통과하는 시간창이 생긴다.
+  그 창을 없애는 대신 **오타 왕복으로 손댄 번역이 사라지는 UX 비용**을 감수했다(편집 세션 복원안은 이월).
+- **async(`autoTranslateAll`)**: 요청 시점 anchor(`ko`·`speaker`·`narration`)를 그대로 들고 가 커밋 직전
+  현재 줄과 대조한다. 장면·줄 소실 · kind/지문 변화 · 화자 변화 · 원문 불일치는 **그 항목만** skip 하고
+  **run 전체를 폐기하지 않는다**(dense·유료). 쓰기 base 는 **현재 `project.scenes`**, 검증~`setScenes` 사이
+  **`await` 금지**. 검증은 **pending 을 바깥 루프로 도는 2-pass** — 현재 scenes 를 map 하며 `updates.get(i)`
+  를 보는 구조로 되돌리면 **index 가 사라진 결과는 방문조차 못 해 조용히 유실**된다.
+- **Phase 1 selective 계약의 async 확장**: pending 중 사람이 채운 로케일은 AI 가 **덮지 않고**, 같은 줄의
+  아직 빈 로케일만 커밋한다 — **줄 단위가 아니라 로케일 칸 단위** partial commit / non-overwrite.
+- **완료 보고도 로케일 칸 단위**(`committed`/`skipped`). stale·소실·수동 선점으로 커밋되지 않은 AI 결과를
+  **조용한 성공으로 보고하지 않는다**(예전 `done` 은 응답 시점 집계라 전건 성공처럼 보였다).
+- **새 persistent identity 시스템은 도입하지 않았다** — Line UUID · translation source hash/version ·
+  global revision epoch · 표정 `requestKey` 복제 · schema migration **전부 없음**.
+  ⚠️ 특히 `requestKey`(요청 원문 전체 비교)를 번역에 들여오지 말 것 — 번역 payload 엔 문맥 전용 줄이
+  없어서 무관한 한 글자 편집이 40줄 청크를 통째로 폐기한다(토큰 재과금).
+- **검증**: typecheck · vitest **52파일/796**(기존 회귀 0) · `dump:rpy` **22구성 245파일 diff 0** · 스크래치
+  outDir 빌드. 고정된 regression: 의미 편집→제거 / 문장부호·공백 편집→유지 / async 원문 stale→skip /
+  줄 삽입→엉뚱한 줄 무오염 / target index 소실→skipped 집계 / pending 중 수동 EN→EN 보존 + 남은 로케일만
+  커밋 / 같은 KO 화자 변경→skip / 대사↔지문 변경→skip / pending 중 문장부호만 편집→정상 커밋 /
+  엑셀 병합 loose i18n 승계 parity.
+- ⚠️ **mutation 실측**: 새 가드는 각각 확인됐으나 **kind/지문 검사는 화자 검사에 대해 구조적으로 중복**이라
+  단독으로 kill 되지 않는다(narration 의 화자 파생값이 항상 `undefined` 라 화자 검사가 먼저 잡는다).
+  production bug 가 아니며, **테스트 가능하게 만들려고 구조를 바꾸지 말 것**(코드 주석에 명시돼 있다).
+- ⚠️ **accepted limitation — 소급 정리는 하지 않는다**: Phase 2 는 **구현 이후의 write path** 만 보장한다.
+  fix 이전에 이미 저장된 stale `i18n` 은 **자동 탐지·정리하지 않는다** — 기존 project 에는 그 번역이 어느
+  KO 원문에서 나왔는지 판별할 provenance/hash 가 없다. 이걸 해결하려고 persistent hash · translation
+  version · Line UUID · migration · global validity registry · Phase 3 QA 를 **추가하지 않았다**.
+  ⚠️ *"Phase 2 가 기존 데이터를 다 정리해준다"* 로 쓰지 말 것.
 
 ## 📌 Phase 19 가 확정한 것 (v1 checkpoint — 다시 열지 말 것)
 - **Outcome A — docs-only.** production/tests/프롬프트 변경 **0** · live **0** · 새 benchmark/harness/e2e **0**.
@@ -169,4 +211,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **post-v1 번역 개선 Phase 1 — 누락 번역 UX**(`78644d5`, 기존식 Phase 아님): 버튼을 **🌐 누락 번역 채우기**로 바꾸고 EN/JA 누락 수·대상 줄 수를 실행 전에 표시. **backend 는 원래 selective 라 재구현하지 않았고**, 누락 0건 판정을 OpenAI 키 검사보다 **먼저** 하도록 guard 순서만 교정했다. 기존 번역 유지 · parser·Preview·save/load·`.npproj.zip`·Ren'Py export·Outfit/Expression AI 의미 변경 0.
+- **post-v1 번역 개선 Phase 2 — 원문 ↔ 번역 유효성**(`567dc67`, 기존식 Phase 아님): 원문을 고치거나 번역 배치 실행 중 대본이 바뀌면 옛 번역이 새 원문에 남던 stale 을 막았다. 동치 관계·계약·검증·accepted limitation 은 위 📌 절이 정본. parser·Preview·save/load·`.npproj.zip`·Ren'Py export 생성 로직·Outfit/Expression AI 의미 변경 0(`dump:rpy` diff 0).
