@@ -41,6 +41,7 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 16 | Expression AI **연속성 소유 범위**(continuity ownership) prompt-contract correction | ✅ 확정 (Plan rev.2 → GPT 검토 → 구현 → 구현 리뷰 PASS) | `931a2cc` | typecheck · vitest 50파일/775(772→+3) · mutation check 8건 · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 · **live 6회**(fixture 3 × before/after 1) |
 | 17 | Expression AI `P16-F2` **표정 denotation**(시제 축) 좁은 조사 | ✅ 확정 — **Outcome C**(correction 폐기, production 변경 0) (Plan rev.3 → GPT 검토 → live gate → correction → 구현 리뷰 PASS) | *(구현 커밋 없음)* | **live 12회**(fixture 6 × before/after 1) · 임시 correction 한정 검증: typecheck · vitest 50파일/776(775→+1) · mutation check 6건 · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 |
 | 18 | Expression AI **production baseline 동결**(docs-only finalization) | ✅ 확정 — **Outcome A**(production/test 변경 0) (Plan → GPT 검토 → 정제 반영 → docs 확정) | 이 문서(docs-only) | — (분석·확정 Phase · production/tests/프롬프트 변경 0 · live 0 · 코드 트리 = `931a2cc` 와 동일이라 Phase 16 검증이 그대로 유효) |
+| 19 | Novel-Agent 전체 production stabilization / **v1 checkpoint** | ✅ 확정 — **Outcome A**(production/test 변경 0) (Plan rev.2 → GPT 2차 검토 → canonical verification → GPT verification 리뷰 → docs 확정) | 이 문서(docs-only) | typecheck · vitest 50파일/775 · 스크래치 outDir 빌드(vite 5.4.21) · `dump:rpy` 22구성 245파일 · 브라우저 e2e 전체 통과 · Ren'Py 8.5.3 lint error·warning 0 · live 0 |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -1294,6 +1295,111 @@ Phase 19  Novel-Agent 전체 production stabilization / v1 checkpoint
 Phase 19 는 **필수 기능 Phase 가 아니고** 새 AI 기능 개발도 아니다. 진행하더라도 범위는 전체 stabilization /
 checkpoint 이며 Expression prompt tuning · Outfit semantic 변경 · F-2/F-3 등 backlog 구현을 **자동 포함하지
 않는다**. **새 blocker 가 없는 한 Phase 20+ 는 만들지 않는다.**
+
+## Phase 19 확정 — Novel-Agent 전체 production stabilization / **v1 checkpoint** (docs-only finalization · **Outcome A**)
+
+**성격**: 새 기능 Phase 가 아니다. 제품 **전체**(Preview · save/load · `.npproj.zip` · Ren'Py export ·
+Outfit AI · Expression AI · build/test)를 v1 production baseline 으로 확정할 수 있는지 검증한 checkpoint
+Phase 다. **production 변경 0 · test 변경 0 · live OpenAI 0 · 새 benchmark/harness/e2e 0.** 결과물은 docs 뿐이다.
+
+### baseline SHA 는 두 축이다 (섞지 말 것)
+
+| 축 | 값 | 의미 |
+|---|---|---|
+| **Production implementation baseline** | **`931a2cc`** (`fix: Expression AI 연속성 소유 범위를 화자 단위로 한정 (Phase 16)`) | 현재 production/test 코드 트리의 구현 baseline. Phase 17(Outcome C · 구현 커밋 없음) · Phase 18(docs-only) · Phase 19(docs-only) 를 지나도록 `src`/`tests`/`scripts`/`package*` 가 한 줄도 바뀌지 않았다 |
+| **Final v1 repository checkpoint** | **이 문서를 반영한 Phase 19 확정 commit** | 문서·이력까지 포함한 저장소 기준점. verification 을 돌린 시점의 `b1adab3` 는 **최종 repository checkpoint 가 아니다**(그때는 이 절이 아직 없었다) |
+
+검증 시점 실측:
+```
+git diff --stat 931a2cc..b1adab3 -- src tests scripts package.json package-lock.json → (empty)
+```
+
+### canonical verification (전부 기존 repository 명령 · 새 harness 0)
+
+| 단계 | 명령 | 결과 |
+|---|---|---|
+| V0 | `git fetch` · `rev-parse` · `status` | HEAD = origin/main = `b1adab3` · working tree clean |
+| V1 | `npm run typecheck` | **PASS** (exit 0 · error 0) |
+| V2 | `npm run test` | **PASS** — Test Files **50 passed (50)** · Tests **775 passed (775)** · fail 0 · **skip 0** |
+| V3 | `npx vite build --outDir <스크래치>/dist --emptyOutDir` | **PASS** — vite 5.4.21 · 190 modules · `built in 3.69s` · `index.html`/`assets/`/`fonts/`/`_redirects` 실재 확인 |
+| V4 | `npm run dump:rpy -- <스크래치>/rpy-v1` | **PASS** — `덤프 완료: 22구성 / 245파일`(파일시스템 독립 실측도 22/245 일치) |
+| V5 | V3 산출물로 `vite preview --port 4173 --strictPort` → `npm run test:e2e` | **PASS** — `=== 결과: 전체 통과 ✅ ===` · assert 실패 0 |
+| V6-a | `npm run gen:lint` (옛 `.lint-tmp` 사전 삭제 후) | **PASS** — `생성 완료` · 신규 21파일 |
+| V6-b | `renpy.exe .lint-tmp lint` (SDK 8.5.3) | **PASS** — Ren'Py 8.5.3.26051504 · **error 0 · warning 0** |
+
+⚠️ **`npm run build` 를 쓰지 않았다** — OneDrive 에서 조용히 exit 127 로 죽고 옛 `dist` 가 남는 함정 때문이다(CLAUDE.md 환경 함정).
+⚠️ **V5 는 이번 V3 산출물을 대상으로 했다** — `--strictPort` 로 포트를 고정해 좀비 preview 가 옛 dist 를
+서빙한 채 e2e 가 통과하는 경우를 구조적으로 배제했고, 끝난 뒤 **그 preview 프로세스만** 종료했다
+(전역 `node` kill 을 쓰지 않는다 — 무관한 프로세스까지 죽는다).
+⚠️ **V6 의 `.lint-tmp` 는 lint 용 stub/fixture 이지 실행용 export project 가 아니다** — 그 fixture 를 GUI 로
+실행했을 때의 known runtime failure 는 production blocker 판정 근거가 **아니다**. 반대로 실제 production
+export 생성 실패 · ZIP 손상 · production `.rpy` 의 lint error 는 이 문장으로 면제되지 않는다.
+
+### live 계약
+
+**live OpenAI 호출 0.** V5 는 `page.route('**/v1/chat/completions')` 전량 mock + 더미 키(`sk-e2e-dummy`)를
+쓴다 — route 를 빠져나가도 과금이 아니라 401 이다. **새 semantic benchmark · same-input stability 측정 ·
+prompt experiment 를 하지 않았다.**
+
+### product checkpoint — 새 v1 blocker 0
+
+Preview · Preview↔export parity · save/load · `.npproj.zip` export/import · Ren'Py export ·
+Outfit AI 실행 · Outfit AI 재실행/수락/회수 · Expression AI 실행 · Expression AI commit validation ·
+Expression AI 재실행/회수 · estimate/planner parity · 재분석 병합 · 협업 경계 · production build ·
+typecheck · full automated tests — **전 경로에서 새 blocker 가 관측되지 않았다.**
+
+V5 가 실제 브라우저에서 통과시킨 workflow: Preview 실렌더 → 장면 승인 → 에셋 업로드 → Ren'Py 생성 →
+ZIP 내용 확인 → 새로고침 자동복원 → **Outfit AI 배치 실주행(route mock 3요청)** → 제안 적용/무시/
+모두적용/모두무시 → `.npproj.zip` 내보내기 → 초기화 → 가져오기(5장면 + 에셋 blob 복원).
+
+⚠️ **Expression AI 의 브라우저 e2e 는 현재 리포에 없다**(실측). Phase 19 는 그것을 **새로 만들지 않았다** —
+Expression 실행/커밋/회수 계약은 기존 canonical vitest(`emotion-ai` · `emotion-commit` · `emotion-recovery` ·
+`emotion-resolve` · `emotion-estimate` · `integration-workflow`)가 덮는다는 사실을 그대로 기록한다.
+
+### 동결 상태 (Phase 19 는 이 둘을 다시 열지 않았다)
+
+**Outfit AI — Phase 14 freeze**: curated synthetic fixture 기준 `TP/FP/FN = 17/1/1` ·
+`Precision = Recall = F1 = 0.944`. 파서 게이트 순서 · `kind` wire 계약 · `FIXED_RULE` 두 의미 모두 무변경.
+
+**Expression AI — Phase 18 freeze**(구현 baseline `931a2cc`):
+```
+manual emotion > emotionAuto > heuristic > default    (resolveEmotion 단일 소스)
+candidate pool = 실제 렌더 pool 과 일치                (Phase 15)
+semantic evidence     = 전체 context                  (Phase 16)
+continuity ownership  = same-speaker                  (Phase 16)
+tense denotation      = accepted limitation           (Phase 17 · Outcome C)
+```
+
+### v1 판정 기준 (오해하지 말 것)
+
+**AI semantic accuracy 100% 는 v1 조건이 아니다.** Outfit·Expression AI 의 production contract 는
+**"AI 초벌 → 사람 검수"** workflow 이고(작가 값 우선 · `clearEmotionAuto` · 제안 수락/무시 · 장면 카드 🤖 표시),
+개별 semantic 오답 가능성은 그 자체로 v1 blocker 가 아니다. Phase 19 의 판정 기준은 **동결 계약이 깨지지
+않았는가 + 실제 workflow/데이터 무결성이 정상인가** 였다.
+
+### accepted limitation (기존 확정분 승계 — 새로 발굴하지 않았다)
+
+`P16-F2` 시제 denotation(Phase 17 절이 정본 · **backlog 로 중복 분류하지 않는다**) · Outfit `P12-59`
+residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 · D3 export `optedIn` 비대칭 ·
+D5/D6 커스텀 표정·의상 속성 해시 충돌 · estimate 의 요청당 프롬프트 오버헤드 근사값 계약 ·
+live evidence 가 curated **synthetic** fixture 범위라는 제한 · 협업 Storage 노출 범위(2026-08-05 감수).
+
+### v1 비차단 backlog (기존 정본 승계 — Phase 19 가 새로 만든 항목은 없다)
+
+Expression **F-2** · **F-3** · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation ·
+Outfit 장기 개선(look-ahead 등) · stable Line ID · review/suggestion state · 장기 architecture 개선 ·
+(HANDOFF 기존 항목) 탭 컴포넌트 코드 스플리팅 · `screensRpy.ts`/`AssetsTab.tsx` 분리 · store 긴 로직의
+services 추출. ⚠️ **backlog 가 존재한다는 사실이 v1 상태를 약화시키지 않는다.**
+
+### 결론
+
+> **Novel-Agent v1 production baseline 을 확정한다.**
+> 현재의 accepted limitation 과 비차단 backlog 는 **여러 Ren'Py 노벨 게임을 반복 제작하는 실사용을 막지
+> 않는다.** Phase 19 를 끝으로 **계획된 v1 핵심 개발을 종료한다.**
+> **새 blocker 가 없는 한 Phase 20+ 를 자동 생성하지 않는다.**
+
+⚠️ 이것은 *"프로젝트가 영원히 완성돼 추가 개발이 불가능하다"* 는 뜻이 **아니다**. 정확히는 **현재 계획된
+v1 핵심 개발의 종료**이며, 실제 제작에 쓰는 중 새 blocker 나 필요가 확인되면 그때 별도 작업으로 판단한다.
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 

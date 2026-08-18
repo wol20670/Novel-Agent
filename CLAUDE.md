@@ -2,9 +2,10 @@
 
 > 🔵 **세션 시작 시 [`HANDOFF.md`](./HANDOFF.md) 먼저 확인** — 짧은 살아있는 상태 문서(🎯 다음 할 일 + ✅ 방금 반영됨). 관리 규칙은 아래 워크플로우.
 > 🟣 **여러 세션에 걸친 대형 작업(복장·표정 LLM 추론)은 [`PHASES.md`](./PHASES.md)** — 작업 루프(Claude 계획 → GPT 검토 → 구현 → 확정)와 Phase 로그, 계획 전에 알아야 할 기존 코드 사실이 거기 있다.
+> 🟢 **Novel-Agent v1 production baseline 은 Phase 19 에서 확정됐고 계획된 핵심 개발은 종료됐다**(Outcome A · docs-only · **production implementation baseline = `931a2cc`**) — 전 제품 checkpoint·verification·동결 상태의 정본은 [`PHASES.md`](./PHASES.md) "Phase 19 확정" 절이다. ⚠️ **정해진 다음 필수 Phase 는 없다** — 새 blocker 가 없는 한 동결된 Outfit/Expression semantic baseline 을 재튜닝하거나 Phase 20+ 를 자동 생성하지 말 것.
 
 Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite + React + TS + zustand + Tailwind). BYO 키, 한국어 코드베이스.
-이미지·BGM은 **앱이 생성하지 않음** — 외부 도구에서 만들어 에셋 탭에 업로드. 앱의 AI는 텍스트·보이스 전용(OpenAI `gpt-4o-mini`): 대본 번역(영/일), GUI 테마, Typecast TTS.
+이미지·BGM은 **앱이 생성하지 않음** — 외부 도구에서 만들어 에셋 탭에 업로드. 앱의 AI는 텍스트·보이스 전용 — OpenAI `gpt-4o-mini`(번역 고품질 모드만 `gpt-4o`): 대본 번역(영/일)·GUI 테마·표정 자동 배정·의상 전환 추천 / Typecast: TTS.
 `.claude/settings.json`(SessionStart 훅·권한)이 repo에 커밋돼 있어 새 기기는 clone만 하면 인수인계 자동.
 
 ## 명령

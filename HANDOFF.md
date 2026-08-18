@@ -4,13 +4,22 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **Expression AI 는 Phase 18 에서 production baseline 으로 동결됐다**(Outcome A · docs-only · baseline = `931a2cc`). 계약 matrix·evidence 등급·accepted limitation 의 **정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**이다.
-- **정해진 다음 필수 작업은 없다.** 필요할 때만 **Phase 19 — Novel-Agent 전체 production stabilization / v1 checkpoint**(새 AI 기능 개발이 **아니다**) → 이후 **핵심 개발 종료**. ⚠️ **새 blocker 가 없는 한 Phase 20+ 를 만들지 말 것** — backlog 가 존재한다는 사실만으로 Phase 를 추가하지 않는다.
+- **Phase 19 에서 Novel-Agent v1 production baseline 이 확정됐고, 계획된 핵심 개발은 종료됐다**(Outcome A · docs-only). 전 제품 checkpoint 결과·verification·동결 상태의 **정본은 [`PHASES.md`](./PHASES.md) "Phase 19 확정" 절**이다. **production implementation baseline = `931a2cc`**(Phase 16 구현 — Phase 17~19 내내 `src`/`tests`/`scripts` 무변경).
+- **정해진 다음 필수 작업은 없다.** ⚠️ **새 blocker 가 없는 한 Phase 20+ 를 만들지 말 것** — backlog 가 존재한다는 사실만으로 Phase 를 추가하지 않는다. ⚠️ 종료의 뜻은 *"영원히 완성"* 이 아니라 **현재 계획된 v1 핵심 개발의 종료**다 — 실제 제작 중 새 blocker 가 나오면 그때 별도로 판단한다.
+- **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
 - **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 Phase 19 가 확정한 것 (v1 checkpoint — 다시 열지 말 것)
+- **Outcome A — docs-only.** production/tests/프롬프트 변경 **0** · live **0** · 새 benchmark/harness/e2e **0**.
+- **canonical verification 전부 PASS**: typecheck · vitest **50파일/775**(fail 0 · skip 0) · 스크래치 outDir 빌드(vite 5.4.21) · `dump:rpy` **22구성 245파일** · 브라우저 e2e 전체 통과(Outfit AI route-mock 배치 실주행 + `.npproj.zip` 실왕복 포함) · **Ren'Py 8.5.3 lint error 0 · warning 0**.
+- **새 v1 blocker 0** — Preview · parity · save/load · `.npproj.zip` · Ren'Py export · Outfit/Expression AI 실행·재실행 · estimate · 병합 · 협업 · build/typecheck/tests 전 경로.
+- ⚠️ **AI semantic accuracy 100% 는 v1 조건이 아니다** — production contract 는 **"AI 초벌 → 사람 검수"** 이고, 개별 semantic 오답은 그 자체로 blocker 가 아니다.
+- ⚠️ **Expression AI 브라우저 e2e 는 리포에 없다**(실측). Phase 19 는 **만들지 않았고**, 실행/커밋/회수는 기존 vitest(`emotion-ai`·`emotion-commit`·`emotion-recovery`·`emotion-resolve`·`emotion-estimate`·`integration-workflow`)가 덮는다.
+- ⚠️ **baseline 두 축을 섞지 말 것**: production implementation = `931a2cc` / final v1 repository checkpoint = **Phase 19 확정 commit**(verification 을 돌린 `b1adab3` 가 아니다).
 
 ## 📌 Phase 18 이 확정한 것 (Expression AI 동결 — 자동으로 다시 열지 말 것)
 - **Outcome A — docs-only finalization.** production/tests/프롬프트 변경 **0** · live **0** · 새 benchmark **0**. 동결 baseline = **`931a2cc`**(Phase 16 구현) 코드 상태.
@@ -156,4 +165,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 18 확정 — Expression AI production baseline 동결(Outcome A · docs-only)**: 최신 source 대조 결과 Phase 15~17 계약과 불일치 0·새 blocker 0 → production/test 변경 0, live 0, 재검증 ceremony 0. 계약 matrix·evidence 등급·accepted limitation 을 `PHASES.md` 에 정본화. docs 3파일(`PHASES.md` Phase 18 절 + 로그 18행 · 이 파일 · `CLAUDE.md` 한 줄).
+- **Phase 19 확정 — Novel-Agent v1 production baseline(Outcome A · docs-only)**: canonical verification 6단계 전부 PASS · 새 blocker 0 → production/test 변경 0. v1 checkpoint·verification evidence·동결 상태를 `PHASES.md` 에 정본화. docs 4파일(`PHASES.md` Phase 19 절 + 로그 19행 · 이 파일 · `CLAUDE.md` 한 줄 · `README.md` stale fact 5건 최소 정정).
