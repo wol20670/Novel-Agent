@@ -113,16 +113,35 @@ function carryLineMeta(next: Line, prev: Line): Line {
 }
 
 /**
+ * 본문에서 공백·문장부호만 걷어낸 "발음 비교용" 문자열. 정규식은 보수적으로(한글·영문·숫자는 항상
+ * 보존) 흔한 문장부호·공백류만 걸러낸다.
+ * 원래 loosePronKey 안의 지역 클로저였는데, 번역(i18n) 유효성 판정이 재분석 병합과 **같은 동치 관계**를
+ * 써야 해서 모듈 스코프로 올렸다 — 정규식·동작은 그대로다(병합 회귀 0).
+ */
+function stripLooseText(s: string): string {
+  return s.replace(/[\s.,!?…‥~·:;"'“”‘’「」『』()[\]{}<>《》〈〉ㆍ―—\-–．，！？：；（）]/g, '');
+}
+
+/**
+ * 두 원문이 "표기만 다른 같은 말"인지 — 공백·문장부호를 뺀 나머지가 같으면 true.
+ * **번역(i18n) 유효성의 동치 관계 정본**이다: 재분석 병합이 표기만 고쳐진 줄의 번역을 승계하는 규칙과,
+ * 앱에서 원문을 직접 고쳤을 때·자동 번역 결과를 커밋할 때의 판정이 **같은 답**을 내야 한다
+ * (판정이 두 벌이 되면 "편집으로는 안 지워지는데 AI 는 건너뛰는" 비대칭이 생긴다).
+ * ⚠️ 좁은 순수 술어로 둔다 — Line 을 받는 범용 identity 추상으로 키우지 말 것.
+ * kind·화자 비교가 필요한 호출측(자동 번역 커밋)은 그것만 따로 확인한다.
+ */
+export function sameLooseText(a: string, b: string): boolean {
+  return stripLooseText(a) === stripLooseText(b);
+}
+
+/**
  * 발음이 같은 줄로 볼 수 있는 느슨한 키 — kind·화자는 그대로 두고 본문에서 공백·문장부호만 제거한다.
  * item/cg/bgm 은 이름·설명이 곧 판정 기준이라 느슨화할 게 없어 lineKey 를 그대로 재사용한다.
- * 정규식은 보수적으로(한글·영문·숫자는 항상 보존) 흔한 문장부호·공백류만 걸러낸다.
  */
 function loosePronKey(line: Line): string {
   if (line.kind === 'item' || line.kind === 'cg' || line.kind === 'bgm') return lineKey(line);
-  const strip = (s: string) =>
-    s.replace(/[\s.,!?…‥~·:;"'“”‘’「」『』()[\]{}<>《》〈〉ㆍ―—\-–．，！？：；（）]/g, '');
-  if (line.kind === 'dialogue') return `dialogue|${line.speaker}|${strip(line.text)}`;
-  return `narration||${strip(line.text)}`;
+  if (line.kind === 'dialogue') return `dialogue|${line.speaker}|${stripLooseText(line.text)}`;
+  return `narration||${stripLooseText(line.text)}`;
 }
 
 interface LinePair {

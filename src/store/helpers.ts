@@ -104,6 +104,33 @@ export function applyEmotionUpdates(scenes: Scene[], updates: Map<string, Map<nu
 }
 
 /**
+ * autoTranslateAll 이 **커밋 직전 재검증을 통과시킨** 결과(sceneId → lineIndex → 로케일별 번역)만
+ * scenes 에 한 번에 반영하는 순수 함수 — applyVoiceUpdates/applyEmotionUpdates 와 같은 절충이다
+ * (배치 중 매 줄마다 scenes 를 재빌드하지 않고 끝에 1회).
+ * ⚠️ 여기서 유효성을 다시 판정하지 않는다 — anchor(장면·줄·kind·화자·원문)와 "빈 칸에만 쓴다"는
+ * 호출측이 이미 끝냈다. 이 함수가 검사를 또 하면 판정이 두 벌이 된다(resolveEmotion 과 같은 규칙).
+ */
+export function applyTranslationUpdates(
+  scenes: Scene[],
+  updates: Map<string, Map<number, Partial<Record<Locale, string>>>>,
+): Scene[] {
+  if (!updates.size) return scenes;
+  return scenes.map((sc) => {
+    const lineMap = updates.get(sc.id);
+    if (!lineMap) return sc;
+    return {
+      ...sc,
+      lines: sc.lines.map((l, i) => {
+        const tr = lineMap.get(i);
+        // 아이템·CG·BGM 라인은 번역이 없다(호출측 검증과 같은 기준을 한 번 더 두는 최소 방어).
+        if (!tr || l.kind === 'item' || l.kind === 'cg' || l.kind === 'bgm') return l;
+        return { ...l, i18n: { ...(l.i18n ?? {}), ...tr } };
+      }),
+    };
+  });
+}
+
+/**
  * 대본 메타(#설정_글언어/#설정_목소리언어)로 지정된 다국어 설정을 프로젝트에 병합할 부분 패치.
  * 지정된 값만 덮어쓴다(대본에 없으면 기존 프로젝트 설정 유지).
  */

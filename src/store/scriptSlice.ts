@@ -1,4 +1,4 @@
-import { mergeScenes } from '../project/mergeScenes';
+import { mergeScenes, sameLooseText } from '../project/mergeScenes';
 import { SAMPLE_STORY } from '../sample';
 import {
   foldSceneSuggestions,
@@ -197,13 +197,32 @@ export const createScriptSlice: SliceCreator<
 
     setLineText: (sceneId, lineIndex, text) => {
       get().invalidateOutfitSuggestions(); // 대사 텍스트는 제안의 근거이자 lineKey 지문이다
+      // 번역(i18n)은 그 줄의 **현재** 원문에 대한 번역일 때만 유효하다 — 원문이 표기 이상으로 바뀌면
+      // **원문을 쓰는 바로 그 state update 안에서** 함께 버린다.
+      // ⚠️ 편집 종료(완료 버튼) 같은 나중 시점으로 미루면 안 된다: 이 액션은 키 입력마다 project 를
+      // 갱신하고 autoSave(→ localStorage · 협업 push)까지 태워서, 그 사이 "새 원문 + 옛 번역" 상태가
+      // 저장·전송·내보내기를 그대로 통과한다(바뀐 KO 원문이 옛 번역과 짝지어져 tl/<lang>/script.rpy 로 나간다).
+      // 판정은 재분석 병합과 **같은 동치 관계**(sameLooseText) — 문장부호·공백만 고친 편집은 안 지운다.
+      let dropped = false;
       setScenes(
         get().project.scenes.map((sc) => {
           if (sc.id !== sceneId) return sc;
-          const lines = sc.lines.map((l, i) => (i === lineIndex ? { ...l, text } : l));
+          const lines = sc.lines.map((l, i) => {
+            if (i !== lineIndex) return l;
+            const hasI18n =
+              (l.kind === 'dialogue' || l.kind === 'narration') && !!l.i18n && Object.keys(l.i18n).length > 0;
+            if (!hasI18n || sameLooseText(l.text, text)) return { ...l, text };
+            dropped = true;
+            // 표정(emotionAuto)·보이스(voiceAssetIds)·의상은 별개 축이라 건드리지 않는다.
+            return { ...l, text, i18n: undefined };
+          });
           return { ...sc, lines };
         }),
       );
+      // 실제로 지웠을 때만 알린다 — 지운 뒤엔 i18n 이 없어 이어지는 키 입력에서 재발화하지 않는다.
+      if (dropped) {
+        flash('원문이 바뀌어 이 줄의 번역을 지웠습니다 — 🌐 누락 번역 채우기로 다시 채울 수 있습니다.');
+      }
     },
 
     setLineTranslation: (sceneId, lineIndex, locale, text) => {

@@ -159,6 +159,33 @@ describe('mergeScenes: 재분석(엑셀/텍스트) 시 기존 에셋·번역·�
     expect(line.emotionAuto).toBe('기쁨');
   });
 
+  // 앱에서 원문을 직접 고칠 때(setLineText)와 자동 번역 커밋이 **이 규칙과 같은 동치 관계**를 쓴다
+  // (sameLooseText). 세 경로가 갈라지면 "편집으로는 안 지워지는데 재분석은 지우는" 비대칭이 생기므로,
+  // 여기 기대값이 바뀌면 저쪽 두 경로도 함께 바뀌어야 한다는 뜻이다.
+  it('merge: 표기만 고쳐진(느슨 매칭) 줄은 i18n 도 승계된다 — 의미가 바뀐 줄은 승계하지 않는다', () => {
+    const prev: Scene[] = [
+      scene('s1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '안녕, 반가워!', i18n: { en: 'Hi there!', ja: 'やあ、はじめまして！' } },
+          { kind: 'dialogue', speaker: '민주', text: '잘 지냈어?', i18n: { en: 'How have you been?' } },
+        ],
+      }),
+    ];
+    const next: Scene[] = [
+      scene('n1', '장면1', {
+        lines: [
+          { kind: 'dialogue', speaker: '민주', text: '안녕 반가워.' }, // 공백·문장부호만 다름 → 승계
+          { kind: 'dialogue', speaker: '민주', text: '요즘 어떻게 지내?' }, // 의미가 다름 → 승계 없음
+        ],
+      }),
+    ];
+
+    const [l1, l2] = mergeScenes(prev, next, 'merge')[0].lines as Extract<Line, { kind: 'dialogue' }>[];
+    expect(l1.text).toBe('안녕 반가워.'); // 철자는 새것이 이긴다
+    expect(l1.i18n).toEqual({ en: 'Hi there!', ja: 'やあ、はじめまして！' });
+    expect(l2.i18n).toBeUndefined();
+  });
+
   it('merge: BGM 위치 마커(kind:bgm) 라인이 재분석 병합에서도 그대로 보존된다(CG로 오인되지 않음)', () => {
     const lines: Line[] = [
       { kind: 'dialogue', speaker: '민주', text: '안녕' },

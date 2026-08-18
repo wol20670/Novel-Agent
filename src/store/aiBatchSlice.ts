@@ -20,15 +20,35 @@ import {
   suggestOutfitsBatch,
   type OutfitSuggestion,
 } from '../generators/outfit';
+import { sameLooseText } from '../project/mergeScenes';
 import { buildSynopsis } from '../generators/theme';
 import type { State } from './types';
 import type { SliceCreator } from './context';
-import { sceneById, applyEmotionUpdates } from './helpers';
+import { sceneById, applyEmotionUpdates, applyTranslationUpdates } from './helpers';
 
 // setTranslateMode/autoTranslateAll/autoAssignEmotionAll/autoSuggestOutfitsAll — 번역·표정·의상 AI
 // 일괄 처리 액션은 busy 키·진행률·PACE_MS·outer 루프 abort·단일 커밋이라는 같은 구조를 공유해서
 // 한 파일로 묶는다. 의상만 다른 점: 결과를 canonical 이 아니라 **휘발성 제안 목록**에 커밋하고,
 // 커밋 직전에 revision guard 로 "실행 중 입력이 바뀌었는지"를 확인한다.
+
+/**
+ * 번역 배치가 실행 중에만 들고 다니는 결과 하나 — **저장되지 않는다**(아래 표정 쪽과 같은 성격).
+ *
+ * anchor 세 값(`ko`·`speaker`·`narration`)은 그 요청의 `UntranslatedItem` 값 **그대로**다 — 커밋 때 다시
+ * 계산하지 않는다. 커밋 직전에 현재 줄과 비교하면 "그때 모델이 번역한 그 줄이 아직 그 자리에 있는가"를
+ * 추측 없이 판정할 수 있다(Line 에 stable id 가 없고, 만들지도 않는다).
+ * ⚠️ 표정 쪽 `requestKey`(요청 원문 전체 비교) 축은 **일부러 쓰지 않는다**: 표정 요청엔 target 이 아닌
+ * 문맥 줄이 함께 실리지만 번역 요청 payload 는 **그 청크의 target 줄들뿐**이라, 원문 전체를 비교하면
+ * 무관한 한 글자 편집이 40줄 청크를 통째로 폐기한다(토큰 재과금).
+ */
+interface PendingTranslation {
+  /** 이 요청에서 받은 로케일별 번역. */
+  values: Partial<Record<Locale, string>>;
+  /** anchor — 요청 시점의 원문·화자·지문 여부(UntranslatedItem 값 그대로). */
+  ko: string;
+  speaker?: string;
+  narration?: boolean;
+}
 
 /**
  * 표정 배치가 실행 중에만 들고 다니는 결과 하나 — **저장되지 않는다.**
@@ -171,14 +191,13 @@ export const createAiBatchSlice: SliceCreator<
         busy: { ...s.busy, 'batch:translate': true },
         translateProgress: { done: 0, total: batches.length },
       }));
-      let done = 0;
       let failScenes = 0;
       let doneScenes = 0;
       let aborted = false; // 키/쿼터 오류처럼 재시도해도 의미 없는 치명적 오류 — 배치 전체 중단
-      // 채워진 칸을 sceneId → lineIndex → locale → text 로 모아뒀다가 루프가 끝난 뒤 scenes 를
-      // 딱 1회만 재구축한다 — 예전엔 채워진 칸마다 setLineTranslation(=set 전체 재맵핑+autoSave
+      // 받은 번역을 sceneId → lineIndex → (번역 + anchor) 로 모아뒀다가 루프가 끝난 뒤 재검증을 거쳐
+      // scenes 를 딱 1회만 재구축한다 — 예전엔 채워진 칸마다 setLineTranslation(=set 전체 재맵핑+autoSave
       // 디바운스 리셋)을 호출해 장면·로케일 수에 비례해 최대 수백 번 리렌더/저장이 발생했다.
-      const updates = new Map<string, Map<number, Partial<Record<Locale, string>>>>();
+      const updates = new Map<string, Map<number, PendingTranslation>>();
       // 연속 호출을 곧바로 이어 붙이면 레이트리밋에 걸리기 쉬워(보이스 일괄생성에서 확인된 패턴)
       // 청크 호출 사이에 일정 간격을 둔다. callIndex 는 장면 경계를 넘어 전체 호출 기준으로 센다.
       const PACE_MS = 1200;
@@ -208,18 +227,24 @@ export const createAiBatchSlice: SliceCreator<
                 for (const it of chunk) {
                   const tr = result[it.i];
                   if (!tr) continue;
+                  const values: Partial<Record<Locale, string>> = {};
                   for (const loc of groupTargets) {
                     const v = tr[loc];
-                    if (v && v.trim()) {
-                      let sceneUpdates = updates.get(sceneId);
-                      if (!sceneUpdates) {
-                        sceneUpdates = new Map();
-                        updates.set(sceneId, sceneUpdates);
-                      }
-                      sceneUpdates.set(it.i, { ...sceneUpdates.get(it.i), [loc]: v });
-                      done++;
-                    }
+                    if (v && v.trim()) values[loc] = v;
                   }
+                  if (!Object.keys(values).length) continue;
+                  let sceneUpdates = updates.get(sceneId);
+                  if (!sceneUpdates) {
+                    sceneUpdates = new Map();
+                    updates.set(sceneId, sceneUpdates);
+                  }
+                  // ⚠️ 여기서 "몇 건 채웠다"를 세지 않는다 — 실제로 채워지는지는 커밋 재검증이 정한다.
+                  sceneUpdates.set(it.i, {
+                    values: { ...sceneUpdates.get(it.i)?.values, ...values },
+                    ko: it.ko,
+                    speaker: it.speaker,
+                    narration: it.narration,
+                  });
                 }
               } catch (e) {
                 sceneFailed = true;
@@ -238,28 +263,85 @@ export const createAiBatchSlice: SliceCreator<
       } finally {
         set((s) => ({ busy: { ...s.busy, 'batch:translate': false }, translateProgress: null }));
       }
+      // ⚠️ 여기부터 setScenes 까지는 **동기 구간**이다 — await/sleep/네트워크를 넣지 말 것(표정 배치와
+      // 같은 이유: 검증과 쓰기가 서로 다른 시점의 project 를 보면 방금 통과시킨 판정이 무의미해진다).
+      //
+      // 집계 단위는 **로케일 칸**이다(줄이 아니다). 한 줄에서 EN·JA 둘 다 받았는데 anchor 가 어긋나면
+      // 2칸을 건너뛴 것이고, EN 만 그 사이 사람이 채웠으면 1칸 커밋 + 1칸 건너뜀이다 — 누락 표시가
+      // 처음부터 로케일 칸 단위(EN n · JA m)라 완료 보고도 같은 단위이어야 한다.
+      let committed = 0;
+      let skipped = 0;
       if (updates.size) {
-        const scenes = get().project.scenes.map((sc) => {
-          const sceneUpdates = updates.get(sc.id);
-          if (!sceneUpdates) return sc;
-          const lines = sc.lines.map((l, i) => {
-            const lineUpdate = sceneUpdates.get(i);
-            if (!lineUpdate || l.kind === 'item' || l.kind === 'cg' || l.kind === 'bgm') return l; // 아이템·CG·BGM 라인은 번역 없음
-            return { ...l, i18n: { ...(l.i18n ?? {}), ...lineUpdate } };
-          });
-          return { ...sc, lines };
-        });
-        setScenes(scenes); // 단일 set + 단일 autoSave
+        const currentScenes = get().project.scenes;
+        const valid = new Map<string, Map<number, Partial<Record<Locale, string>>>>();
+        // ⚠️ **pending 을 바깥 루프**로 돈다. 현재 scenes 를 map 하며 updates.get(i) 를 보는 방식이면
+        // 줄이 삭제돼 index 가 사라진 결과는 **방문조차 못 해** 조용히 사라진다(집계에도 안 잡힌다).
+        for (const [sceneId, lineMap] of updates) {
+          const scene = sceneById(currentScenes, sceneId);
+          for (const [i, u] of lineMap) {
+            const cells = Object.keys(u.values).length;
+            const line = scene?.lines[i];
+            // 1·2·3 장면·줄이 사라졌거나(재분석·삭제) 번역을 가질 수 없는 kind 로 교체됨
+            if (!line || (line.kind !== 'dialogue' && line.kind !== 'narration')) {
+              skipped += cells;
+              continue;
+            }
+            // 4·5 KO 문자열이 같아도 화자·지문 여부가 바뀌면 모델이 본 입력이 달라진 것이다
+            //     ("네." 를 민주가 말했나 서연이 말했나 / 대사였나 지문이었나).
+            // ⚠️ 4 는 **오늘 기준 5 에 대해 중복**이다(mutation 으로 확인): narration 의 화자 파생값은
+            //    항상 undefined 이고 dialogue 는 항상 문자열이라, kind 가 바뀌면 5 가 먼저 잡는다.
+            //    그래도 남겨둔다 — 지키려는 불변식("지문↔대사는 다른 입력이다")을 화자 필드의 우연한
+            //    성질에 맡기지 않기 위해서다. 지우려면 5 가 그 역할까지 한다는 걸 알고 지울 것.
+            if ((line.kind === 'narration') !== !!u.narration) {
+              skipped += cells;
+              continue;
+            }
+            if ((line.kind === 'dialogue' ? line.speaker : undefined) !== u.speaker) {
+              skipped += cells;
+              continue;
+            }
+            // 6 원문 anchor — 판정은 재분석 병합과 **같은 동치 관계**(문장부호·공백만 다르면 유효)
+            if (!sameLooseText(line.text, u.ko)) {
+              skipped += cells;
+              continue;
+            }
+            // 7 그 사이 사람이 직접 채운 칸은 덮지 않는다(수집 시점 계약을 커밋 시점까지 연장).
+            //   ⚠️ **칸 단위**여야 한다 — EN 이 찼다고 그 줄 전체를 버리면 아직 빈 JA 까지 잃는다.
+            const take: Partial<Record<Locale, string>> = {};
+            for (const [loc, v] of Object.entries(u.values) as [Locale, string][]) {
+              if (line.i18n?.[loc]?.trim()) {
+                skipped += 1;
+                continue;
+              }
+              take[loc] = v;
+              committed += 1;
+            }
+            if (!Object.keys(take).length) continue;
+            let m = valid.get(sceneId);
+            if (!m) {
+              m = new Map();
+              valid.set(sceneId, m);
+            }
+            m.set(i, take);
+          }
+        }
+        // 쓰기 base 는 **반드시 현재 scenes** 다 — 실행 시작 시점 스냅샷에 쓰면 그 사이 사용자가 한
+        // 무관한 편집(원문·표정·상태 등)을 통째로 되감는다.
+        if (valid.size) setScenes(applyTranslationUpdates(currentScenes, valid)); // 단일 set + 단일 autoSave
       }
+      // 세 원인(원문·화자·kind 불일치 / 장면·줄 소실 / 그 사이 사람이 그 칸을 채움)을 하나로 묶어
+      // 알린다 — 전부 "실행 중 프로젝트가 바뀐" 경우라 거짓 원인이 아니고, 조용한 성공보다 낫다.
+      const staleSuffix = skipped ? ` · ${skipped}건 건너뜀(번역 중 프로젝트가 변경됨)` : '';
       if (aborted) {
         flash(
-          `자동 번역 중단 — ${done}건 채움 · API 키/쿼터 오류로 중단됨(키·잔액을 확인하세요).`,
+          `자동 번역 중단 — ${committed}건 채움${staleSuffix} · API 키/쿼터 오류로 중단됨(키·잔액을 확인하세요).`,
           'error',
         );
       } else {
         const msg =
-          `자동 번역 완료 — ${done}건 채움` + (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
-        flash(msg, failScenes ? 'error' : 'success');
+          `자동 번역 완료 — ${committed}건 채움${staleSuffix}` +
+          (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
+        flash(msg, failScenes || skipped ? 'error' : 'success');
       }
     },
 
