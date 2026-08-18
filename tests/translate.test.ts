@@ -6,8 +6,8 @@ import {
   isFatalTranslateError,
   type TranslateItem,
 } from '../src/generators/translate';
-import { collectUntranslated } from '../src/generators/translate/collect';
-import { emptyProject, type Project } from '../src/types';
+import { collectUntranslated, summarizeUntranslated } from '../src/generators/translate/collect';
+import { emptyProject, translateTargetsOf, type Project } from '../src/types';
 
 describe('parseTranslateResponse', () => {
   it('코드펜스를 걷어내고 인덱스로 매핑하며 값을 trim 한다', () => {
@@ -71,6 +71,53 @@ describe('collectUntranslated', () => {
     };
     const items = collectUntranslated(p, ['en', 'ja'])[0].items;
     expect(items.map((it) => it.missing)).toEqual([['ja'], ['en'], ['en', 'ja']]);
+  });
+});
+
+// 화면(CenterPanel)이 "EN 2 · JA 2 · 대상 3줄"을 실행 전에 보여주는 근거. 대상 판정은 여전히
+// collectUntranslated 하나가 정본이고, 여기서 검증하는 건 "그 결과를 세는 방식"뿐이다.
+describe('summarizeUntranslated', () => {
+  function mixed(): Project {
+    return {
+      ...emptyProject(),
+      scenes: [
+        {
+          id: 's1',
+          title: 's',
+          direction: [],
+          cg: [],
+          choices: [],
+          status: 'review',
+          lines: [
+            { kind: 'dialogue', speaker: '민주', text: 'A', i18n: { ja: 'あ' } }, // EN 없음
+            { kind: 'dialogue', speaker: '민주', text: 'B', i18n: { en: 'B' } }, // JA 없음
+            { kind: 'narration', text: 'C' }, // 둘 다 없음
+            { kind: 'dialogue', speaker: '민주', text: 'D', i18n: { en: 'D', ja: 'デ' } }, // 완역
+          ],
+        },
+      ],
+    };
+  }
+
+  it('로케일별 빈 칸과 대상 줄 수를 따로 센다 — 둘 다 없는 줄을 2줄로 세지 않는다', () => {
+    expect(summarizeUntranslated(mixed(), ['en', 'ja'])).toEqual({
+      byLocale: { en: 2, ja: 2 },
+      lines: 3,
+    });
+  });
+
+  it('전부 채워졌으면 0 — 실행 전에 "번역할 게 없다"를 표시할 수 있어야 한다', () => {
+    const p = mixed();
+    p.scenes[0].lines = [{ kind: 'dialogue', speaker: '민주', text: 'D', i18n: { en: 'D', ja: 'デ' } }];
+    expect(summarizeUntranslated(p, ['en', 'ja'])).toEqual({ byLocale: {}, lines: 0 });
+  });
+
+  it('원문이 영어인 프로젝트는 JA 만 센다(자동 번역 target 정책과 동일)', () => {
+    const p: Project = { ...mixed(), baseLocale: 'en' };
+    const targets = translateTargetsOf(p);
+    expect(targets).toEqual(['ja']);
+    // A(ja 있음)는 대상이 아니고 B·C 만 남는다 — en 은 세지 않는다.
+    expect(summarizeUntranslated(p, targets)).toEqual({ byLocale: { ja: 2 }, lines: 2 });
   });
 });
 

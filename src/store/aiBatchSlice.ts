@@ -1,5 +1,5 @@
 import type { Locale, Expression, Project } from '../types';
-import { translateModeOf, translateModelFor, baseLocaleOf } from '../types';
+import { translateModeOf, translateModelFor, translateTargetsOf } from '../types';
 import { collectUntranslated } from '../generators/translate/collect';
 import { translateBatch, chunkItems, isFatalTranslateError } from '../generators/translate';
 import { sleep } from '../generators/shared/retry';
@@ -154,16 +154,17 @@ export const createAiBatchSlice: SliceCreator<
       const mode = translateModeOf(project);
       const model = translateModelFor(mode);
       if (!model) return; // off — 버튼이 숨겨져 있어 도달 불가(방어)
-      const key = get().openaiKey.trim();
-      if (!key) {
-        flash('OpenAI 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
-        return;
-      }
-      const base = baseLocaleOf(project);
-      const targets = (['en', 'ja'] as Locale[]).filter((l) => l !== base);
+      const targets = translateTargetsOf(project);
       const batches = collectUntranslated(project, targets);
       if (!batches.length) {
         flash('번역할 빈 칸이 없습니다(이미 모두 채워짐).');
+        return;
+      }
+      // ⚠️ 키 검사는 "채울 게 있다"가 확정된 **뒤**에 한다 — 앞에 두면 번역이 이미 다 찬 프로젝트에서
+      // 키만 없는 사용자에게 "OpenAI 키가 필요합니다"가 뜬다(실제로는 할 일이 없는 상태라 키도 필요 없다).
+      const key = get().openaiKey.trim();
+      if (!key) {
+        flash('OpenAI 키가 필요합니다(왼쪽 패널에서 입력).', 'error');
         return;
       }
       set((s) => ({
@@ -190,7 +191,9 @@ export const createAiBatchSlice: SliceCreator<
           // 새 번역으로 덮어썼고 토큰도 두 배로 썼다.
           const groups = new Map<string, { targets: Locale[]; items: typeof items }>();
           for (const it of items) {
-            const need = it.missing?.length ? it.missing : targets;
+            // collectUntranslated 를 거친 항목이라 missing 은 항상 채워져 있다(UntranslatedItem) —
+            // targets 로 폴백하면 대상 판정이 두 벌이 된다.
+            const need = it.missing;
             const sig = need.join(',');
             const g = groups.get(sig);
             if (g) g.items.push(it);

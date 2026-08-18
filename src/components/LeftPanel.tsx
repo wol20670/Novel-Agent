@@ -256,7 +256,7 @@ export default function LeftPanel() {
           {openaiKey ? '키 저장됨 · AI 텍스트 기능 켜짐' : '키 없음 · 텍스트 기능 꺼짐'}
         </div>
 
-        {/* 자동 번역 모드 — off(기본)/fast/quality. off 가 아니면 장면 탭에 "전체 자동 번역" 버튼이 뜬다. */}
+        {/* 자동 번역 모드 — off(기본)/fast/quality. off 가 아니면 장면 탭에 "누락 번역 채우기" 버튼이 뜬다. */}
         <div className="flex flex-col gap-1 pt-1 border-t border-edge/50">
           <span className="label">자동 번역 (대사·지문 → 영어·일본어)</span>
           <div className="flex gap-1">
@@ -287,7 +287,8 @@ export default function LeftPanel() {
           )}
           {translateMode !== 'off' && (
             <p className="text-[11px] text-gray-500">
-              장면 탭 상단의 <b>🌐 전체 자동 번역</b> 버튼으로 실행됩니다(빈 칸만 채움, OpenAI 키 필요).
+              장면 탭 상단의 <b>🌐 누락 번역 채우기</b> 버튼으로 실행됩니다 — 기존 번역은 덮어쓰지 않고 빈 번역만
+              채웁니다(OpenAI 키 필요). 버튼 옆에 남은 누락 개수가 표시됩니다.
             </p>
           )}
         </div>

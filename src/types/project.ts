@@ -616,6 +616,18 @@ export function translateModelFor(mode: TranslateMode): string | null {
 }
 
 /**
+ * 자동 번역이 실제로 요청하는 타깃 로케일(원문 base 를 뺀 en·ja) — 실행부(autoTranslateAll)와
+ * 화면의 누락 카운트가 **같은 정책**을 쓰게 하는 단일 소스. 둘이 갈라지면 "17줄 남았다"고 표시해놓고
+ * 다른 언어를 요청하는 상태가 된다.
+ * ⚠️ effectiveTextLocales 와 혼동하지 말 것 — 그쪽은 "실제로 켜진 자막 언어"(태그·기존 번역 기반)라
+ * 의미가 다르다. 자동 번역은 아직 아무 번역이 없는 프로젝트에서도 en·ja 를 채우는 게 목적이다.
+ * Pick 인 이유는 baseLocaleOf 와 동일.
+ */
+export function translateTargetsOf(p: Pick<Project, 'baseLocale'>): Locale[] {
+  return (['en', 'ja'] as Locale[]).filter((l) => l !== baseLocaleOf(p));
+}
+
+/**
  * 유효 자막 로케일(base 를 항상 맨 앞에 포함, 중복 제거). 2개 이상일 때만 번역 파일·선택 UI 가 의미 있다.
  * 목록 = 두 소스의 합집합:
  *   1) 명시적 지정(#설정_글언어 태그) — p.textLocales
