@@ -4,16 +4,42 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **Outfit AI 는 Phase 14 에서 동결됐다(Outcome B). 다음 작업은 `Expression AI 실사용 audit + production 개선`.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
-  - **표정 선택 품질은 여전히 실키 미검증**이다(의상만 Phase 10/11/13 에서 쟀다). 코드는 이미 있으니 `src/generators/emotion/` 부터 — `aiSelect.ts`(문맥/target 두 축) · `resolve.ts`(판정 단일 소스) · Phase 5 문맥 품질 확인 목록(PHASES.md). **분석/Plan 부터 시작하고 착수 전 사용자 지시가 필요하다.**
+- **Outfit 은 Phase 14, Expression F-1 은 Phase 15 에서 확정됐다. 다음 Phase 는 정해져 있지 않다 — 착수 전 사용자 지시가 필요하다.** 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다(Claude 계획 → GPT 검토 → 구현 → 검토 → 확정 루프).
+  - **표정 선택 품질은 여전히 실키 미검증**이다(의상만 Phase 10/11/13 에서 쟀다). Phase 15 는 결정론적 계약 불일치를 고쳤을 뿐 **모델의 선택 품질을 잰 게 아니다**. 재개하면 `src/generators/emotion/` 부터 — `aiSelect.ts`(문맥/target 두 축) · `resolve.ts`(판정 단일 소스) · Phase 5 문맥 품질 확인 목록(PHASES.md).
+  - **Expression backlog(사용자 별도 지시가 있을 때만 — 자동으로 다음 Phase 가 아니다)**: **F-2** 청크 경계를 넘는 연속성 정보 0(고치려면 러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경** — 순진하게 문맥에 넣으면 requestKey 축 9 가 전부 불일치해 2번째 이후 청크가 전량 skip 된다) · **F-3** target 수집에 export `optedIn` 게이트 없음(D3 와 결합) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고.
   - **Outfit 은 열린 TODO 가 아니다** — 아래 셋은 **accepted limitation**(문서화하고 안고 간다, 상세는 PHASES.md "Phase 14 확정" 절):
     - `P12-59` residual FP(no-look-ahead window **종단**의 미래 의도). 원인은 raw semantic misclassification 이고 **window boundary 는 가장 강하게 의심되는 contributing factor 지만 유일한 causal root cause 로 확정하지 않는다.** ⚠️ **"window 끝 행은 non_transition/reject" 류 blanket boundary suppression 을 넣지 말 것**(진짜 종단 transition 이 silent FN 이 된다).
     - **same-input raw emission variability** — byte-identical 요청 24쌍 중 decision 일치 23/24, 유일한 divergence 가 `P3#0`. `temperature 0` 을 deterministic 이라고 쓰지 말 것. ⚠️ 보존 관측 "4 emitted / 1 omitted"는 **같은 입력 반복 실험이 아니므로 rate 로 인용 금지.**
     - `N1`/`N4` raw 미출력 — FP 는 없지만 **`S` 의 직접 효과가 아니다**(S 관측 case 는 `N3`). 재emit 유도 금지.
   - **Outfit backlog(사용자 별도 지시가 있을 때만 — 자동으로 다음 Phase 가 아니다)**: read-only look-ahead(P12 boundary 를 직접 줄이는 가장 명확한 structural candidate 중 하나지만 no-look-ahead 계약을 바꾸는 **별도 architecture 변경**) · 실제 제작 대본 기반 품질 측정(Phase 10/13 은 합성 fixture 한정) · 무시한 제안이 재실행 때 다시 나오는 문제.
   - ⚠️ **Phase 11 A 식 suppression 프롬프트 튜닝을 반복하지 말 것**(P10/P4 raw omission 회귀). candidate **개수**에 대한 sparsity prior 도 같은 억제 압력이라 넣지 않는다.
-  - known limitations(**명시적 우선순위 지시 전까지 착수하지 않음**, 상세는 PHASES.md Phase 9 절): D3 Export `optedIn` 비대칭 · D4 `availableExpressions` 후보 누수 · D5/D6 커스텀 표정·의상 속성 해시 충돌.
+  - known limitations(**명시적 우선순위 지시 전까지 착수하지 않음**, 상세는 PHASES.md Phase 9 절): D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌. (**D4 `availableExpressions` 후보 누수는 Phase 15 `e9311f3` 에서 해결됨** — 아래 📌 참고.)
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore, 커밋 안 함)에 pre-correction·corrected 둘 다 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 Phase 15 가 확정한 것 (Expression AI 후보 pool — 깨지 말 것)
+- **latest implementation = `e9311f3`** `fix: Expression AI 후보를 실제 의상 렌더 pool과 일치시킴 (Phase 15)`.
+- **AI 표정 후보는 화면의 pool 규칙과 같아야 한다**(`availableExpressions`, `src/generators/emotion/resolve.ts`):
+  ```
+  추가 의상이 **직접 소유한 truthy asset** 이 1개 이상 → 그 의상 소유분만 available
+  추가 의상 pool 이 완전히 비었음                      → 기본 의상 pool 재진입
+  최종 후보 = effectiveExpressions **선언 순서**로 availability membership filter
+  ```
+  ⚠️ **`spriteAssetId` 같은 "표정 단위 base 폴백" semantics 를 후보 생성에 다시 쓰지 말 것** — 그게 고친
+  버그다(부분 업로드 의상에서 base 전용 표정이 후보로 살아나 실제로는 neutral/pool[0] 로 강등됐다).
+  ⚠️ `resolve.ts` 에서 `generate.ts` 를 import 하지 말 것(순환). 후보를 직접 소유분으로 좁히면 import
+  없이도 `selectSprite` 결과와 일치한다.
+- **후보 0이면 target 제외가 정상이다.** gate 는 `availableExpressions` 출력이 아니라 **`effectiveExpressions`
+  교집합 이후**를 본다 — 그 의상이 표현할 수 있으면서 선언된 표정이 하나도 없으면 AI 가 기여할 정보가 0 이다.
+  ⇒ **estimate 의 계약은 "before/after 숫자 불변"이 아니라 `execution planner parity`**(같은
+  `collectEmotionTargets`/`planEmotionChunks` 를 쓴다). "target 은 항상 불변"이라고 쓰지 말 것.
+- **후보 순서의 정본은 `effectiveExpressions(project.expressions)` 선언 순서**이고 반환 Set 은 멤버십
+  전용이다 — asset 객체 삽입 순서를 ordering 으로 취급하면 프롬프트 바이트가 새 semantics 를 얻는다.
+- **기존 `emotionAuto` 는 소급 변경하지 않는다**(Phase 8 automatic invalidation 금지 유지). 새 규칙으로는
+  안 나올 값이어도 자동 삭제·migration 하지 않는다 — 복구는 `clearEmotionAuto`·수동 override 뿐.
+- **렌더러는 canonical, 후보가 거기 맞춘다**(단방향). `selectSprite`/`spriteSlots`/`attrFor`·Ren'Py 출력·
+  save/load·`.npproj.zip`·schema **전부 무변경**이고 `dump:rpy` 22구성 245파일 diff 0 이다. ⚠️ 그 diff 0 은
+  **"기존 project state 에 대해 생성기를 안 건드렸다"**는 뜻이지 **"앞으로의 AI 실행 결과도 같다"가 아니다**
+  (새 실행은 후보가 달라져 얼굴이 의도적으로 달라진다).
 
 ## 📌 Phase 14 가 확정한 것 (Outfit 동결 — 자동으로 다시 열지 말 것)
 - **Outcome B — Outfit AI 를 현재 상태 그대로 실사용 baseline 으로 동결.** production/tests/audit/fixture/프롬프트 변경 **0**, live **0**. 남은 항목은 해결 과제가 아니라 위 🎯 의 **accepted limitation / backlog** 다.
@@ -88,4 +114,5 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 14 확정 — Outfit AI 동결(Outcome B)**: docs-only. 보존 evidence 재분석으로 `P12-59` 원인 표현 상한·채택하지 않은 fix 4종·`P3` same-input evidence 와 역사적 관측 분리·`FIXED_RULE` attribution 정정을 `PHASES.md` "Phase 14 확정" 절에 기록. 다음은 **Expression AI 실사용 audit**.
+- **Phase 15 확정 — Expression AI F-1 후보 pool correction(`e9311f3`)**: `availableExpressions` 의 표정 단위 base 폴백을 렌더러(`selectSprite`)의 의상 pool 폴백에 맞춤. production 1파일 + 테스트 3파일. typecheck · vitest 50파일/772 · `dump:rpy` 245파일 diff 0 · 스크래치 빌드 · live 0 · mutation check 8건.
+- **Phase 15 docs finalization**: `PHASES.md` Phase 15 확정 절 + 로그 표(14행 상태 정정 포함) · Phase 9 D4 해결 표기 · 이 파일 · `CLAUDE.md` 후보 pool 계약 한 줄.

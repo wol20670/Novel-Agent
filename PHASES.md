@@ -36,7 +36,8 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 11 | Outfit AI 같은 응답 안의 연쇄 전환 검증 보정(A 는 rollback) | ✅ 확정 | `6da5d77` | typecheck · vitest 50파일/741 · 스크래치 outDir 빌드 · e2e 전체 · `dump:rpy` 22구성 245파일 diff 0 · audit dry D0~D16 · B-only live PRIMARY 26요청 |
 | 12 | Outfit AI semantic contract audit + Phase 13 계약 고정(**코드 변경 없음** — 분석/설계 Phase) | ✅ 확정 (Plan v1→최종, GPT 4차 검토 반영) | 이 문서(docs-only) | — (분석 Phase · live 호출 0 · production/tests/audit diff 0) |
 | 13 | Outfit AI binary semantic `kind` 계약 구현 + `FIXED_RULE` 보정 | ✅ 확정 (구현 → live PRIMARY → P4 회귀 분석 → 최소 보정 → corrected PRIMARY, GPT 4차 검토 반영) | `81b7f7f` | typecheck · vitest 50파일/762(741→+21) · audit dry D0~D19 21/21 · `dump:rpy` 22구성 245파일 diff 0 · pre-correction live PRIMARY 26요청 · corrected live PRIMARY 26요청(TP/FP/FN 17/1/1 · F1 0.944) |
-| 14 | Outfit AI residual/stability audit(**분석부터** — 착수 전 지시 필요) | ⏳ planned / not started | — | — |
+| 14 | Outfit AI residual/stability audit → **동결 결정**(분석 Phase) | ✅ 확정 (Outcome B) | `4f1f115`(docs-only) | — (분석 Phase · production/tests/프롬프트 변경 0 · live 0) |
+| 15 | Expression AI 실사용 audit → **F-1 후보 pool correction** | ✅ 확정 (Plan v1 → GPT 3차 검토 → 구현 → 구현 리뷰) | `e9311f3` | typecheck · vitest 50파일/772(762→+10) · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 · live 0 · mutation check 8건 |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -410,8 +411,10 @@ pool 내: wantAttr → 'neutral' → pool[0]
 **known limitations**
 - **D3** — Export `optedIn` 비대칭 자체는 미해결(base 스프라이트가 없고 추가 의상만 올린 캐릭터는
   올린 아트가 게임에서 무시된다). 고치면 `show` 가 새로 생겨 회귀 0 이 깨진다.
-- **D4** — `availableExpressions` 의 기본 의상 폴백 때문에 AI 표정 후보에 그 의상이 표시하지 못하는
-  표정이 실린다(미해결). Phase 9 이후엔 그 강등이 **미리보기에 보이게** 됐을 뿐이다.
+- ~~**D4** — `availableExpressions` 의 기본 의상 폴백 때문에 AI 표정 후보에 그 의상이 표시하지 못하는
+  표정이 실린다(미해결). Phase 9 이후엔 그 강등이 **미리보기에 보이게** 됐을 뿐이다.~~
+  → **Phase 9 시점의 known limitation 이었고 Phase 15(`e9311f3`)에서 해결됐다**(후보 쪽을 `selectSprite`
+  의 pool 규칙에 맞춤 — 렌더러는 무변경).
 - **D5** — 커스텀 **표정** 속성의 32비트 FNV-1a 충돌 가능.
 - **D6** — 커스텀 **의상** 속성의 32비트 FNV-1a 충돌 가능(미리보기 칸 조회는 논리 의상 이름으로 해
   엉뚱한 의상을 집지는 않는다).
@@ -997,6 +1000,74 @@ read-only look-ahead(D5) · 실제 제작 대본 기반 품질 측정 · 무시�
 > **결론**: Outfit AI 를 **현재 상태 그대로 실사용 baseline 으로 동결**한다. 남은 항목은 **현재 활성 해결
 > 과제가 아니라** 문서화된 **accepted limitation / backlog** 다. **다음 Phase = Expression AI 실사용 audit +
 > production 개선.**
+
+## Phase 15 확정 — Expression AI 후보를 렌더 pool 에 일치 (구현 `e9311f3`)
+
+**성격**: Expression AI 전면 재설계가 아니라 *"현재 production 경로에서 실사용 품질을 가장 크게 떨어뜨리는
+defect 하나를 찾아 작은 correction 으로 연결한다"* — Outcome A. audit 에서 후보 3건(F-1 후보 누수 · F-2 청크
+간 연속성 · F-3 `optedIn` 비대칭) 중 **F-1 만** 고쳤다.
+
+**F-1 root cause — 폴백 모델이 둘이었다.** 후보는 `spriteAssetId` 로 **표정 단위** 기본 의상 폴백,
+화면(`selectSprite`)은 **pool 단위** 폴백(요청 의상 칸이 **완전히 빌 때만** base pool 재진입)이었다.
+추가 의상 slot 은 실제 asset 이 있는 표정만 생기므로, **부분 업로드된 추가 의상에서는 base pool 이 절대
+참조되지 않는데 후보 함수는 base 표정을 available 이라고 거짓 보고**했다. frozen evidence 는
+`tests/preview-export-fallback.test.ts` T2/T3/T4 — 특히 T3(base `{슬픔}` · 사복 `{기쁨}`)은 **AI 가
+`슬픔` 을 고르면 화면에 웃는 얼굴이 뜨는** 정반대 강등이다. 피해: 유료 호출이 조용히 무효화되고,
+그 줄은 `emotionAuto` 가 채워져 **증분 재실행에서 영구 스킵**되며, 대본 카드의 🤖 라벨과 게임이 어긋난다.
+
+**방향은 단방향이다** — Phase 9 가 canonical 로 확정한 렌더러/Export 를 건드리지 않고 **AI 후보 생성기를
+거기에 맞췄다**. 반대로 렌더러를 표정 단위 폴백으로 바꾸면 "옷은 사복인데 그림은 기본 의상"이 되고
+기존 `.rpy` 도 달라진다(Phase 9 가 이미 기각한 방향).
+
+**확정 계약(`src/generators/emotion/resolve.ts · availableExpressions`)**
+```
+outfit 이 '기본' 이 아니고 그 의상이 **직접 소유한 truthy asset** 이 1개 이상 → 그 의상 소유분만
+그 외(기본 의상 / 직접 소유 0개인 추가 의상)                                  → 기본 의상 소유분
+```
+· ⚠️ **여기서 `spriteAssetId` 를 다시 부르면 안 된다** — 그 표정 단위 폴백이 결함의 원천이다.
+· ⚠️ `generate.ts` 를 import 하지 않는다(그쪽이 이 모듈을 import 하므로 순환). 후보를 "그 의상이 직접
+  소유한 표정"으로 좁히면 `selectSprite` 의 `pool.some((o) => o.attr === wantAttr)` 이 항상 참이라
+  import 없이 결과가 일치한다. **D5(속성 해시 충돌)는 pool 내부 승자 문제라 기존대로 범위 밖.**
+· 빈 문자열·`undefined` 슬롯은 "그림 없음"으로 센다(직접 소유로 치지 않는다).
+
+**역할 분리는 그대로(Phase 3-A)**: `availableExpressions` = asset 측 선택 가능성 / `effectiveExpressions`
+= project 선언 집합. **합치지 않는다.** 최종 후보는 기존대로 둘의 교집합이고, **순서의 정본은 계속
+`effectiveExpressions(project.expressions)` 선언 순서**다(`declaredOrder.filter((e) => avail.has(e))`).
+반환은 **Set = 멤버십 전용** — asset 삽입 순서를 의미 있는 ordering 으로 취급하지 말 것.
+
+**폐기한 가정(중요)**: *"이 correction 후에도 target/요청 수/견적은 항상 불변"* 은 **틀렸다.** target gate 는
+`availableExpressions` 출력이 아니라 **교집합 이후**를 본다. 그래서 `base {기본} · 추가 의상 {화남} ·
+선언 ['기본']` 같은 구성에서 후보가 0 이 되어 **그 줄이 target 에서 빠질 수 있고, 그게 올바른 semantics 다**
+— 그 의상 렌더러가 표현할 수 있으면서 project 가 허용하는 표정이 하나도 없으면 AI 호출이 기여할 정보가
+0 이기 때문이다. ⇒ **계약은 "before/after 수치 불변"이 아니라 `estimate ↔ execution planner parity`**
+(둘이 같은 `collectEmotionTargets`/`planEmotionChunks` 를 쓴다).
+
+**소급 변경 없음**: 이미 저장된 `Line.emotionAuto` 는 새 규칙으로는 생성되지 않을 값이어도 **자동 삭제·
+migration·batch cleanup 하지 않는다**(Phase 8 automatic invalidation 금지 유지). 복구 경로는 기존
+`clearEmotionAuto` 와 수동 override 뿐.
+
+**무변경**: `selectSprite`·`spriteSlots`·`pickSpriteAttrs`·`attrFor`·`resolveEmotionDetailed`·`aiSelect`
+구조·`aiBatchSlice` stale 재검증·`ScenePlayer`·Ren'Py generator semantics·store schema·save/load·
+`.npproj.zip`·협업·프롬프트 문장. Outfit AI 는 **Phase 14 동결 상태 그대로**.
+
+**고정한 regression 축**(`emotion-resolve`·`emotion-ai`·`integration-workflow`): 부분 업로드 의상의 base
+전용 후보 누수 금지 · 정반대 강등(T2) 재현 방지 · 추가 의상 asset 0개의 base 재진입 유지 · 기본 의상
+semantics 유지 · truthy asset 만 직접 소유로 취급 · 후보 ordering = 선언 순서(asset 삽입 순서와 **어긋나게**
+만든 fixture 로 판별력 확보) · 교집합 후 0 이면 target 제외 · estimate↔execution parity · **모든 최종 후보의
+attr 를 그 의상 pool 이 실제로 표현 가능**(렌더러에 직접 결속). mutation check: 옛 구현으로 되돌리면 **8건 실패**.
+
+**검증**: typecheck · vitest 50파일/772(762→+10) · `dump:rpy` 22구성 245파일 **diff 0** · 스크래치 outDir
+빌드 · **live 0회**.
+⚠️ `dump:rpy diff 0` 의 뜻은 **"고정된 기존 project state 에 대해 렌더러·생성기 semantics 를 안 건드렸다"**
+까지다. **"앞으로의 AI 실행에서도 `.rpy` 가 같다"는 뜻이 아니다** — 새 실행은 후보가 달라져
+`emotionAuto` 가 달라질 수 있고 Preview·게임 얼굴도 의도적으로 달라진다(그게 이 correction 의 목적).
+
+**이번에 구현하지 않은 것**(해결 과제가 아니라 기록): **F-2** 청크 경계를 넘는 표정 연속성 정보 0
+(run-local 값을 문맥에 넣으면 `validateEmotionUpdates` 축 9 의 requestKey 가 전부 불일치해 2번째 이후
+청크 결과가 전량 skip 된다 — 러너·검증자 양쪽에 run-local 상태를 흘리는 **설계 변경**이다) · **F-3**
+target 수집에 export `optedIn` 게이트 없음(D3 와 결합, 비용·UI 노이즈만) · 후보 1개뿐인 줄의 호출 생략
+(답이 강제됨) · 파서가 "후보 밖"으로 버린 건수 미보고 · `contextWindow` 단일 초장문 줄 edge.
+**표정 선택 품질 자체는 여전히 실키 미검증**이다(이번 Phase 는 결정론적 계약 불일치를 고쳤을 뿐).
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
