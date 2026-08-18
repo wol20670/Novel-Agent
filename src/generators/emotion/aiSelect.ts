@@ -237,15 +237,27 @@ function normalizeLabel(s: string): string {
   return s.normalize('NFKC').trim().replace(/\s+/g, ' ');
 }
 
-// 기본 지시문 — **이 문자열은 바꾸지 않는다.** 줄 단위 의상 전환도 표정 설명도 없는 프로젝트는
-// 프롬프트가 예전과 한 바이트도 달라지지 않아야 한다: 입력이 같아야 temperature 0 의 재현성이
-// 그대로 유지된다(모델 쪽 비결정성까지 없앨 수는 없으니 "배정 결과 동일"을 보장하진 못한다).
+// 기본 지시문. 조건부 문장(OUTFIT/NOTES/CONTEXT)은 **그 청크에 실제로 필요할 때만** 붙어야 하고,
+// 그 게이트가 실수로 무조건 켜지면 tests/emotion-ai.test.ts 의 사본 대조에서 바로 드러난다.
+//
+// ⚠️ **Phase 16**: 연속성 문장(3번째)의 소유 범위가 화자 단위가 아니라 **줄 단위**였다 —
+// "if it is unchanged from the previous line, repeat the same expression". 그런데 Phase 5 이후
+// payload(items·context)는 **여러 화자와 지문이 뒤섞인 하나의 시간축**이라, 다른 화자의 표정을
+// 현재 화자의 previous state 로 승계하라는 지시가 성립했다(cross-speaker carry pressure).
+// 그래서 **두 축을 분리**한다: *감정 판단 근거*는 예전처럼 **전체 scene/context**(타 화자 대사·지문
+// 포함)이고, *연속성 carry* 만 **그 화자 자신의 이전 표정**에 귀속한다.
+// ⚠️ 범위를 좁힌다고 "같은 화자의 이전 줄만 보라"로 쓰면 안 된다 — 그 순간 타 화자·지문이 판단
+// 근거에서 빠지는 정반대 회귀가 된다(그래서 첫 문장이 evidence 범위를 명시적으로 못박는다).
+// ⚠️ 변경 **횟수**에 대한 sparsity prior·기본 표정 선호 같은 억제 문구를 추가하지 말 것(Phase 11 A).
 const BASE_SYSTEM_PROMPT =
   'You are a visual-novel director choosing character facial expressions from scene context. ' +
   "For each dialogue line, pick exactly ONE expression from that speaker's candidate list — " +
   'copy a candidate string exactly as given, never invent a new label or translate it. ' +
-  'Only change the expression when the emotion actually shifts; if it is unchanged from the ' +
-  'previous line, repeat the same expression (avoid flickering between lines). ' +
+  "Judge a speaker's emotion from all the scene information given, including other characters' " +
+  "lines and narration. Continuity, though, is per speaker: treat only that same speaker's own " +
+  "earlier expression as their previous state, never another character's. Change a speaker's " +
+  'expression only when their own emotion actually shifts; if it is unchanged and they have a ' +
+  'previous expression, repeat it (avoid flickering). ' +
   'Output STRICT JSON only, no markdown, no commentary: {"results":[{"i":0,"expr":"..."}]}. ' +
   "The \"i\" MUST equal the input item's \"i\". Do not add or drop items.";
 
@@ -259,12 +271,20 @@ const NOTES_RULE =
   ' "expressionNotes" maps some candidate labels to a short description of what they mean; it is a ' +
   'gloss to help you choose, never an answer — always reply with the label exactly as it appears in "candidates".';
 
-/** 이 요청에 실제로 문맥이 실릴 때만 덧붙인다(읽기 전용이라는 못 + 결과 인덱스 오염 방지). */
+/**
+ * 이 요청에 실제로 문맥이 실릴 때만 덧붙인다(읽기 전용이라는 못 + 결과 인덱스 오염 방지).
+ *
+ * ⚠️ **Phase 16**: 저장된 `expr` 도 BASE 와 같은 소유 문제였다 — "use it for continuity only" 는 그
+ * 값이 **누구 것인지**를 말하지 않아 타 화자의 표정이 현재 화자의 previous state 로 승계될 수 있었다.
+ * 소유자를 명시하되 **문맥 줄 자체를 무시하라는 뜻이 되면 안 된다**(그래서 "every context line still
+ * informs what is happening" 이 같이 있다 — 타 화자 대사·지문은 계속 유효한 판단 근거다).
+ */
 const CONTEXT_RULE =
   ' "context" holds nearby script lines for reference only: they share the same "i" numbering as "items", ' +
   'so read both in "i" order to follow the flow. NEVER output a result for a "context" index. ' +
-  'Some context lines carry an "expr" already chosen for that line — use it for continuity only; ' +
-  'it may not appear in "candidates", and your answers must still come from "candidates".';
+  "Some context lines carry an \"expr\" already chosen for that line — it belongs to that line's own " +
+  'speaker, so use it as previous state only for that same speaker; every context line still informs ' +
+  'what is happening. It may not appear in "candidates", and your answers must still come from "candidates".';
 
 function buildSystemPrompt(disambiguate: boolean, hasNotes: boolean, hasContext: boolean): string {
   let prompt = BASE_SYSTEM_PROMPT;

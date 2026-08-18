@@ -27,17 +27,20 @@ function heroine(name = '민주'): Character {
 }
 
 /**
- * aiSelect.ts 의 기본 지시문 사본. 줄 단위 의상 전환도 표정 설명도 없는 프로젝트는 프롬프트가
- * 예전과 한 바이트도 달라지면 안 되므로(입력이 같아야 temperature 0 의 재현성이 유지된다 — 모델
- * 쪽 비결정성까지 없애진 못하니 "결과 동일"까지는 아니다) 여기에 못을 박는다.
- * 조건부 문장(의상 구분 안내·설명 안내)이 실수로 무조건 붙게 되면 이 사본과 어긋나 즉시 드러난다.
+ * aiSelect.ts 의 기본 지시문 **사본**(import 가 아니라 의도적 복제). 조건부 문장(의상 구분 안내·설명
+ * 안내·문맥 안내)이 실수로 무조건 붙게 되면 이 사본과 어긋나 즉시 드러난다. 프롬프트를 고칠 땐
+ * 여기도 같이 고쳐야 하므로 "모르는 사이에 지시문이 바뀌는 것"도 함께 막는다.
+ * ⚠️ Phase 16 에서 연속성 문장이 화자 단위로 재범위화됐다(아래 P16 describe 가 의미를 지킨다).
  */
 const BASE_SYSTEM_PROMPT =
   'You are a visual-novel director choosing character facial expressions from scene context. ' +
   "For each dialogue line, pick exactly ONE expression from that speaker's candidate list — " +
   'copy a candidate string exactly as given, never invent a new label or translate it. ' +
-  'Only change the expression when the emotion actually shifts; if it is unchanged from the ' +
-  'previous line, repeat the same expression (avoid flickering between lines). ' +
+  "Judge a speaker's emotion from all the scene information given, including other characters' " +
+  "lines and narration. Continuity, though, is per speaker: treat only that same speaker's own " +
+  "earlier expression as their previous state, never another character's. Change a speaker's " +
+  'expression only when their own emotion actually shifts; if it is unchanged and they have a ' +
+  'previous expression, repeat it (avoid flickering). ' +
   'Output STRICT JSON only, no markdown, no commentary: {"results":[{"i":0,"expr":"..."}]}. ' +
   "The \"i\" MUST equal the input item's \"i\". Do not add or drop items.";
 
@@ -534,6 +537,13 @@ describe('selectEmotionsBatch: 청크 경계·후보 그룹·문맥이 그대로
       { speaker: '민주', candidates: ['기본', '기쁨'] },
       { speaker: '지수', candidates: ['기본', '화남'] },
     ]);
+    // ⚠️ Phase 16 전제: 한 요청의 items 는 **원본 줄 순서 그대로** 실려 화자가 뒤섞인다(후보 그룹처럼
+    // 화자별로 묶이지 않는다). 프롬프트의 연속성 문장이 "직전 줄"이 아니라 **화자 단위**여야 하는
+    // 이유가 이것이다 — 훗날 누가 items 를 화자별로 그룹핑하면 그 가정이 바뀌므로 여기서 못박는다.
+    expect(captured.user!.items.map((it) => [it.i, it.speaker])).toEqual([
+      [5, '지수'],
+      [6, '민주'],
+    ]);
   });
 
   it('같은 화자가 이 청크에서 A→B→C 로 갈아입으면 후보 그룹 3개와 줄별 의상이 실린다', async () => {
@@ -578,6 +588,83 @@ describe('selectEmotionsBatch: 청크 경계·후보 그룹·문맥이 그대로
     ]);
     expect(JSON.stringify(captured.user)).not.toContain('outfit');
     expect(captured.system).toBe(BASE_SYSTEM_PROMPT);
+  });
+});
+
+/**
+ * Phase 16 — **연속성(continuity)의 소유 범위**. 계약은 두 축의 분리다:
+ *   · *감정 판단 근거(semantic evidence)* = 예전 그대로 **전체 scene/context**(타 화자 대사·지문 포함)
+ *   · *연속성 carry(previous state)*      = **그 화자 자신의 이전 표정만**
+ *
+ * 옛 문장은 "if it is unchanged from the previous line, repeat the same expression" 이었다 — 소유
+ * 범위가 **줄 단위**라, 화자가 뒤섞인 payload(위 interleave assertion·T7 문맥 참고)에서는 다른 화자의
+ * 표정을 현재 화자의 previous state 로 승계하라는 지시가 됐다.
+ * ⚠️ 두 번째 테스트가 **반대 방향 회귀**를 막는다: 범위를 좁히다가 "같은 화자의 이전 줄만 보라"가
+ * 되면 타 화자·지문이 판단 근거에서 빠진다. 그건 이 correction 의 목적이 아니다.
+ */
+describe('P16 — 연속성은 화자 소유, 감정 판단 근거는 전체 문맥', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const ctxOf = (contextLines?: { i: number; speaker?: string; text: string; expr?: string }[]) => ({
+    sceneTitle: '장면1',
+    direction: [] as string[],
+    cg: [] as string[],
+    synopsis: '요약',
+    candidatesByKey: new Map<string, Expression[]>([
+      [candidateKey('민주', '기본'), ['기본', '기쁨', '슬픔', '화남']],
+      [candidateKey('지수', '기본'), ['기본', '기쁨', '슬픔', '화남']],
+    ]),
+    contextLines,
+  });
+  const twoSpeakers: EmotionItem[] = [
+    { i: 0, speaker: '민주', outfit: '기본', text: '네가 다 망쳤어!' },
+    { i: 1, speaker: '지수', outfit: '기본', text: '…미안해.' },
+  ];
+
+  it('T-A — 기본 지시문의 연속성이 화자 단위로 귀속되고, 옛 줄 단위 문구는 사라졌다', async () => {
+    const captured = captureRequest();
+    await selectEmotionsBatch(twoSpeakers, ctxOf(), 'sk-test');
+
+    // 옛 계약(줄 단위) — 되살아나면 cross-speaker carry pressure 가 그대로 돌아온다.
+    expect(captured.system).not.toContain('if it is unchanged from the previous line');
+    expect(captured.system).not.toContain('avoid flickering between lines');
+    // 새 계약 — previous state 는 "같은 화자 자신의" 것뿐이고, 타 화자 승계를 명시적으로 금지한다.
+    expect(captured.system).toContain('Continuity, though, is per speaker');
+    expect(captured.system).toContain("treat only that same speaker's own earlier expression as their previous state");
+    expect(captured.system).toContain("never another character's");
+    // anti-flicker 자체는 같은 화자 범위에서 살아 있어야 한다(억제를 없앤 게 아니라 범위만 좁혔다).
+    expect(captured.system).toContain('only when their own emotion actually shifts');
+    expect(captured.system).toContain('(avoid flickering)');
+  });
+
+  it('T-B — 감정 판단 근거는 여전히 타 화자 대사·지문을 포함한 전체 문맥이다(반대 방향 회귀 방지)', async () => {
+    const captured = captureRequest();
+    await selectEmotionsBatch(twoSpeakers, ctxOf(), 'sk-test');
+
+    expect(captured.system).toContain("Judge a speaker's emotion from all the scene information given");
+    expect(captured.system).toContain("including other characters' lines and narration");
+    // "같은 화자만 보라"로 좁히는 문구가 들어가면 안 된다 — evidence 축소는 이 correction 의 반대다.
+    expect(captured.system).not.toMatch(/only .{0,40}same speaker'?s? (own )?(earlier|previous) line/i);
+  });
+
+  it('T-C — 문맥의 expr 은 그 줄 화자 소유이고, 문맥 줄 자체는 계속 정보원이다', async () => {
+    const captured = captureRequest();
+    await selectEmotionsBatch(
+      [{ i: 1, speaker: '지수', outfit: '기본', text: '걱정 마, 내가 어떻게든 해볼게.' }],
+      ctxOf([{ i: 0, speaker: '민주', text: '이제 다 끝났어…', expr: '슬픔' }]),
+      'sk-test',
+    );
+
+    expect(captured.system).not.toContain('use it for continuity only');
+    expect(captured.system).toContain("it belongs to that line's own speaker");
+    expect(captured.system).toContain('use it as previous state only for that same speaker');
+    // 소유자를 못박되 "타 화자 문맥을 무시하라"가 되면 안 된다.
+    expect(captured.system).toContain('every context line still informs what is happening');
+    // 기존 계약(문맥 인덱스로 답하지 말 것 · 답은 후보에서만)은 그대로 남아 있어야 한다.
+    expect(captured.system).toContain('NEVER output a result for a "context" index');
+    expect(captured.system).toContain('your answers must still come from "candidates"');
   });
 });
 
