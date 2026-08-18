@@ -39,6 +39,7 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 14 | Outfit AI residual/stability audit → **동결 결정**(분석 Phase) | ✅ 확정 (Outcome B) | `4f1f115`(docs-only) | — (분석 Phase · production/tests/프롬프트 변경 0 · live 0) |
 | 15 | Expression AI 실사용 audit → **F-1 후보 pool correction** | ✅ 확정 (Plan v1 → GPT 3차 검토 → 구현 → 구현 리뷰) | `e9311f3` | typecheck · vitest 50파일/772(762→+10) · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 · live 0 · mutation check 8건 |
 | 16 | Expression AI **연속성 소유 범위**(continuity ownership) prompt-contract correction | ✅ 확정 (Plan rev.2 → GPT 검토 → 구현 → 구현 리뷰 PASS) | `931a2cc` | typecheck · vitest 50파일/775(772→+3) · mutation check 8건 · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 · **live 6회**(fixture 3 × before/after 1) |
+| 17 | Expression AI `P16-F2` **표정 denotation**(시제 축) 좁은 조사 | ✅ 확정 — **Outcome C**(correction 폐기, production 변경 0) (Plan rev.3 → GPT 검토 → live gate → correction → 구현 리뷰 PASS) | *(구현 커밋 없음)* | **live 12회**(fixture 6 × before/after 1) · 임시 correction 한정 검증: typecheck · vitest 50파일/776(775→+1) · mutation check 6건 · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -1137,6 +1138,72 @@ same-speaker anti-flicker 생존 · **T-B** evidence 축소 방지 · **T-C** �
 후보 1개뿐인 줄의 호출 생략 · 파서가 "후보 밖"으로 버린 건수 미보고 · **`P16-F2`** 표정의 denotation
 정의 부재(부정·시제·타인 감정 언급) — evidence 가 *부재* 라 등급이 낮고 `"나 진짜 화났어"` 류를 함께
 억누를 suppression 회귀 위험이 있어 **별도 evidence 확보 시 독립 Phase**.
+
+## Phase 17 확정 — Expression AI 시제 denotation limitation (**구현 커밋 없음 · Outcome C**)
+
+**성격**: Phase 16 이 남긴 후보 `P16-F2`(표정 denotation 정의 부재) **하나만** 좁게 조사했다. 결과는
+**Outcome C** — 실제 semantic misselection 을 관측했으나 한 번의 minimal correction 이 그 선택을 바꾸지
+못해 **폐기**했다. **production/test tracked 변경 0**, baseline 은 Phase 16 상태 그대로다.
+
+**조사 축과 계약** — Phase 16 이 고친 두 축과 **직교**한다(합치지 말 것):
+```
+evidence scope        (#3, Phase 16) = 어디를 보는가            — 전체 scene/context
+continuity ownership  (#4, Phase 16) = 이전 상태가 누구 것인가  — same-speaker
+denotation            (P16-F2)       = 그 줄이 언급하는 감정이 지금 보여야 할 얼굴인가
+```
+
+**before-live evidence**(`gpt-4o-mini` · `temperature 0` · production request path · curated fixture
+6개 × **각 1회** · **parser-valid 6/6**):
+
+| id | 축 | expected | before | after | pass |
+|---|---|---|---|---|---|
+| `F2-N1` | 타인 감정 귀속 | ≠화남 | 기본 | 기본 | ✅ |
+| `F2-N2` | **과거 vs 현재** | ≠화남 | **화남** | **화남** | ❌ |
+| `F2-N3` | 부정 | ≠화남 | 기본 | 기본 | ✅ |
+| `F2-P1` | 현재 분노 guard | =화남 | 화남 | 화남 | ✅ |
+| `F2-P2` | 과거+현재 guard | =화남 | 화남 | 화남 | ✅ |
+| `F2-P3` | 현재 슬픔 guard | =슬픔 | 슬픔 | 슬픔 | ✅ |
+
+관측된 defect 는 `F2-N2` 하나다:
+```
+"그때는 정말 화가 났었지. 지금은 다 웃어넘길 수 있어."   기대: 화남 아님 → 실제: 화남
+```
+정확한 표현: **과거의 분노와 현재의 해소된 상태가 명시적으로 대비됐는데도 과거 분노가 현재 expression
+으로 선택됐다.** ⚠️ *"현재 분노가 문법적으로 명시 부정됐다"* 로 과장하지 말 것.
+
+**폐기한 temporary correction** — 실제 실패한 **시제 축만** 겨냥해 evidence-scope 문장 뒤에 denotation
+clause **1개**를 넣었다(의미 계약: target line 순간의 current visible emotional state 가 선택 대상 ·
+과거 감정도 scene evidence 로 **유지** · 과거 감정을 현재 expression 으로 **자동 승계하지 않음** · line 이
+현재까지 지속됨을 나타내면 현재 expression 으로 **선택 가능**). Phase 16 의 evidence scope·continuity
+ownership 문장은 **변경하지 않았다**. 타인 감정·부정·인용·가정은 clause 에 **나열하지 않았다**.
+
+deterministic 검증(전부 통과): typecheck · vitest **50파일/776**(775→+1) · 기존 **T-A/T-B/T-C 무수정 통과**
+· mutation(clause 제거 시 **6건 실패**) · `dump:rpy` 22구성 245파일 **diff 0** · 스크래치 outDir 빌드.
+⚠️ 이 검증이 확인한 것은 **폐기된 correction 의 deterministic contract 와 회귀 안전성**이지 **모델 선택
+품질 개선의 증거가 아니다.**
+
+**after-live** — 동일 6 fixture 각 1회 추가(누적 **12회 = before 6 + after 6**, 계획 상한 정확히 준수,
+반복·seed·model 비교·prompt variant **없음**). user payload **6/6 byte-identical**(의도된 차이는 system
+prompt 의 denotation clause 하나뿐). 결과는 위 표대로 **before/after 선택 6/6 동일**.
+⇒ **positive guard regression 은 관측되지 않았으나 실제 defect `F2-N2` 도 개선되지 않았다.**
+확정 Plan 규칙(*N2 unchanged → Outcome C*)을 적용하고 **두 번째 prompt wording/variant 는 시도하지 않았다**
+(correction attempt 1회 고정).
+
+**폐기 처리** — temporary production/test 변경은 전부 되돌렸다. tracked production 변경 0 · tracked test
+변경 0 · production baseline = Phase 16 상태 · **correction implementation commit 없음** · live correction
+효과 입증 없음. (로컬 harness·산출물·폐기 patch 는 gitignore 대상이라 커밋하지 않았고, **정본은 이 문서의
+evidence 요약**이다 — local artifact 존재에 의존하지 않는다.)
+
+**accepted limitation (Phase 18 로 가져간다)**
+> 작은 curated fixture 에서 Expression AI 가 **과거에 언급된 감정을 현재 visible expression 으로 귀속하는
+> 실제 semantic misselection** 이 관측됐다. 시제 축만 겨냥한 **한 번의** minimal prompt correction 은
+> deterministic contract 검증과 positive guards 를 통과했지만 해당 live 선택을 바꾸지 못해 폐기했다.
+
+⚠️ **다음처럼 쓰지 말 것**: *"Phase 17 에서 문제를 해결했다"* · *"prompt 품질이 개선됐다"* ·
+*"`gpt-4o-mini` 는 일반적으로 과거 감정을 구분하지 못한다"* · *"동일 입력에서 안정적으로 반복되는 defect
+가 입증됐다"*(같은 입력 반복 측정을 하지 않았다) · *"모든 tense/negation/quotation/hypothetical 문제가
+존재한다"*. **타인 감정 귀속·부정 fixture 는 이번 최소 live 에서 통과했고, 인용·가정·미래는 조사를
+확장하지 않았다.**
 
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
