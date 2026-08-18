@@ -40,6 +40,7 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 | 15 | Expression AI 실사용 audit → **F-1 후보 pool correction** | ✅ 확정 (Plan v1 → GPT 3차 검토 → 구현 → 구현 리뷰) | `e9311f3` | typecheck · vitest 50파일/772(762→+10) · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 · live 0 · mutation check 8건 |
 | 16 | Expression AI **연속성 소유 범위**(continuity ownership) prompt-contract correction | ✅ 확정 (Plan rev.2 → GPT 검토 → 구현 → 구현 리뷰 PASS) | `931a2cc` | typecheck · vitest 50파일/775(772→+3) · mutation check 8건 · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 · **live 6회**(fixture 3 × before/after 1) |
 | 17 | Expression AI `P16-F2` **표정 denotation**(시제 축) 좁은 조사 | ✅ 확정 — **Outcome C**(correction 폐기, production 변경 0) (Plan rev.3 → GPT 검토 → live gate → correction → 구현 리뷰 PASS) | *(구현 커밋 없음)* | **live 12회**(fixture 6 × before/after 1) · 임시 correction 한정 검증: typecheck · vitest 50파일/776(775→+1) · mutation check 6건 · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 outDir 빌드 |
+| 18 | Expression AI **production baseline 동결**(docs-only finalization) | ✅ 확정 — **Outcome A**(production/test 변경 0) (Plan → GPT 검토 → 정제 반영 → docs 확정) | 이 문서(docs-only) | — (분석·확정 Phase · production/tests/프롬프트 변경 0 · live 0 · 코드 트리 = `931a2cc` 와 동일이라 Phase 16 검증이 그대로 유효) |
 
 ## Phase 1 확정 설계 — 장면 내 의상 전환 (구현은 Phase 2)
 
@@ -1205,12 +1206,101 @@ evidence 요약**이다 — local artifact 존재에 의존하지 않는다.)
 존재한다"*. **타인 감정 귀속·부정 fixture 는 이번 최소 live 에서 통과했고, 인용·가정·미래는 조사를
 확장하지 않았다.**
 
+## Phase 18 확정 — Expression AI production baseline 동결 (docs-only finalization · **Outcome A**)
+
+**성격**: 새 기능 Phase 가 아니다. Phase 15~17 에서 확정된 production 계약·evidence·accepted limitation 을
+최신 production source 와 대조해 **현재 상태를 실사용 baseline 으로 동결**했다. **production/test/프롬프트
+변경 0 · live 호출 0 · 새 benchmark 0.** 결과물은 docs 3파일뿐이다.
+
+**동결 baseline** — Expression AI production baseline = **`931a2cc`**(Phase 16 구현) 코드 상태.
+```
+git diff --name-only 931a2cc..HEAD                     → CLAUDE.md · HANDOFF.md · PHASES.md
+git diff --stat 931a2cc..HEAD -- src tests scripts package.json package-lock.json → (empty)
+```
+⇒ Phase 17 이후의 tracked code tree 는 Phase 16 구현과 **동일**하다(Outcome C 라 구현 커밋이 없고, 폐기한
+임시 correction 은 트리에 남지 않았다). **그래서 Phase 18 은 재검증 ceremony 를 돌리지 않았다** — 같은
+트리에 대한 Phase 16 시점 검증(typecheck · vitest 50파일/775 · mutation 8건 · `dump:rpy` 22구성 245파일
+diff 0 · 스크래치 outDir 빌드)이 그대로 유효하다.
+
+### 동결한 baseline contract (source 는 파일 + symbol 로 기록 — 줄 번호를 심지 않는다)
+
+| Area | Production contract | Source (file · symbol) |
+|---|---|---|
+| resolution priority | `emotion`(작가/수동, **검증 없음**) > `emotionAuto`(선언 목록 검증) > 휴리스틱(검증) > `기본` | `emotion/resolve.ts` · `resolveEmotionDetailed`/`resolveEmotion` |
+| candidate pool | 추가 의상이 **직접 소유한** truthy asset ≥1 → 그 소유분만 · 0 → 기본 의상 pool 재진입 | `emotion/resolve.ts` · `availableExpressions` |
+| candidate ordering / identity | 최종 후보 = 선언 순서(`effectiveExpressions`)로 거른 교집합 · 반환 Set 은 멤버십 전용 · 키는 `candidateKey` · 설명은 라벨과 결합하지 않음 | `emotion/aiSelect.ts` · `collectEmotionTargets`/`candidateKey`/`buildEmotionRequest` |
+| target selection | dialogue ∧ ¬`members` ∧ ¬`isProtagonist` ∧ (`emotion`·`emotionAuto` 없음) ∧ 후보 ≥1. 후보 0이면 그 줄 제외가 **정상** | `emotion/aiSelect.ts` · `collectEmotionTargets` |
+| context source | 장면의 **모든** 대사·지문(target 포함) · 빈 텍스트만 제외 · `expr` 은 저장값(`emotion \|\| emotionAuto`)만 | `emotion/aiSelect.ts` · `collectEmotionTargets` |
+| planner / estimate | target 청크(`chunkItems`) + 요청별 읽기 전용 문맥(no look-ahead, 상한 초과 시 **오래된 쪽** 폐기). 견적이 **같은 planner** 를 재사용 | `emotion/aiSelect.ts` · `contextWindow`/`planEmotionChunks` · `emotion/estimate.ts` · `estimateEmotionCost` |
+| prompt semantic evidence | 감정 판단 근거 = 타 화자 대사·지문·scene 메타 포함 전체 문맥 | `emotion/aiSelect.ts` · `BASE_SYSTEM_PROMPT`/`CONTEXT_RULE` |
+| continuity ownership | previous state 는 **그 화자 자신**의 이전 표정만 · anti-flicker 는 범위만 축소(제거 아님) | 同上 |
+| denotation | production 문안 **없음**(Phase 17 correction 폐기) | — |
+| parser write boundary | 쓰기 대상은 **그 요청의 target** 뿐 · (화자,의상)별 후보 exact 검증 · 불일치·유령 인덱스는 추측 없이 폐기 | `emotion/aiSelect.ts` · `parseEmotionResponse` |
+| emotionAuto write / validation | 커밋 직전 현재 snapshot 으로 planner·builder 재실행 → 축 1~9 재검증, 어긋난 것만 skip · 검증~쓰기는 **동기 구간** · 쓰기 base 는 현재 scenes | `store/aiBatchSlice.ts` · `autoAssignEmotionAll`/`validateEmotionUpdates`/`emotionRequestKey` · `store/helpers.ts` · `applyEmotionUpdates` |
+| re-run | 기존 `emotionAuto` 가 있는 줄은 target selection 에서 제외되며 **자동 소급 invalidation 은 하지 않는다** · 회수는 `clearEmotionAuto` 와 수동 override | `emotion/aiSelect.ts` · `collectEmotionTargets` · `store/scriptSlice.ts` · `clearEmotionAuto`/`setLineEmotion` |
+| 표정 rename/delete | `emotion`·`emotionAuto` 를 **대칭**으로 이전/삭제(사용자 명시 액션) | `store/characterSlice.ts` · `renameExpression`/`removeExpression` |
+| Preview | 생성기와 `resolveEmotion`·`spriteSlots`·`selectSprite` 공유 · 표시 attr carry · `optedIn` 게이트가 slot 계산보다 앞 · D3 는 레거시 경로 유지 | `components/ScenePlayer.tsx` · `computeSpriteDisplay` |
+| Ren'Py export | 유효 표정 판정을 `resolveEmotion` 에 위임(단일 소스) | `renpy/generate.ts` · `effectiveEmotion`/`expressionPlan`/`selectSprite` |
+| save/load · `.npproj.zip` · 협업 | `Line.emotionAuto` 는 Project schema 필드이고 직렬화는 project **통째** JSON — 필드 allowlist 가 없어 세 경로 모두 자동 포함 | `types/project.ts` · `Line` · `project/transfer.ts` · `exportProjectFile`/`importProjectFile` · `store/persistenceSlice.ts` · `collab/sync.ts` · `pushProject` |
+| 재분석 병합 | 텍스트가 같은 줄만 `emotionAuto` 승계 · 사라진 줄의 배정은 손실로 집계 | `project/mergeScenes.ts` · `mergeScenes` |
+
+### evidence 등급 (섞지 말 것)
+
+- **deterministic contract evidence** — `931a2cc` 트리 기준: typecheck · vitest **50파일/775** ·
+  mutation check 8건(Phase 15) + 8건(Phase 16) · `dump:rpy` 22구성 245파일 **diff 0** · 스크래치 outDir 빌드.
+- **existing regression evidence** — `emotion-resolve` · `emotion-ai` · `emotion-commit` · `emotion-estimate` ·
+  `emotion-recovery` · `preview-export-fallback` · `merge-scenes` · `transfer-roundtrip` · `integration-workflow`.
+- **live model-behavior evidence** — 누적 **18회**(Phase 16 6 + Phase 17 12), 전부 `gpt-4o-mini` ·
+  curated **synthetic** fixture · 반복 측정 없음. Phase 16 은 before/after 전부 동일, Phase 17 은 `F2-N2` 하나만 실패.
+- **accepted limitation** — 아래 목록.
+
+⚠️ **deterministic 통과를 모델 품질 개선으로 인용하지 말 것.** Phase 17 이 그 반례다 — 폐기된 correction 은
+typecheck·776 tests·mutation·`dump:rpy` diff 0 을 전부 통과하고도 live 선택을 하나도 바꾸지 못했다.
+
+### accepted limitation (기존 확정분을 그대로 승계 — Phase 18 은 새 limitation 발굴 Phase가 아니다)
+
+1. **`P16-F2` 시제 denotation**(Phase 17 절이 정본) — 과거에 언급된 감정이 현재 visible expression 으로
+   귀속되는 실제 misselection 관측. minimal correction 1회 후 폐기. **재튜닝·2차 문안·variant 금지.**
+   타인 감정 귀속·부정은 통과했고 인용·가정·미래는 조사하지 않았다.
+2. **F-2** 청크 경계를 넘는 run-local 연속성 정보 0(Phase 15/16 절).
+3. **F-3** AI target selection 과 Ren'Py export 의 `optedIn` 게이트가 **비대칭** — export 대상이 아닌
+   캐릭터의 줄에도 AI 호출이 발생할 수 있다. Ren'Py export 는 자체 `optedIn` 게이트를 갖고 있으므로 이
+   항목은 **불필요한 AI 비용·targeting·UI 노이즈** 측면의 backlog 로 유지한다(Phase 9 D3 와 결합).
+4. 후보 1개뿐인 줄의 호출 생략 미구현 · 파서가 "후보 밖"으로 버린 건수 미보고 · heuristic negation(Phase 15/16 절).
+5. **D5/D6** 커스텀 표정·의상 속성 해시 충돌 — pool 내부 승자 미보장(Phase 9 절).
+6. estimate 의 요청당 프롬프트 오버헤드는 **근사값 계약**이다(Phase 16 절 기록 — 근사 유지가 사용자 결정).
+7. **live evidence 의 범위** — 기존 live evidence 는 소규모 curated synthetic fixture 에 한정되며, 실제 제작
+   대본 전반에 대한 Expression AI semantic quality 의 **일반화된 품질 평가는 수행하지 않았다**. 이는
+   *"production baseline 으로 쓸 수 없다"* 는 뜻이 **아니다** — 이번 freeze 판정은 deterministic contract ·
+   integration path(Preview/export/save/전송/병합) · known limitation · 사람 검수 workflow(`emotion` 우선 ·
+   `clearEmotionAuto` · 장면 카드 🤖 표시)를 함께 보고 내린 것이다.
+
+### Phase 18 에서 다시 열지 않는 것
+
+`P16-F2` prompt 재튜닝 · live prompt experiment · same-input 반복 측정 · 새 semantic benchmark ·
+F-2/F-3 구현 · 후보 1개 optimization · parser observability · heuristic negation · Outfit 수정 ·
+renderer/candidate 재설계 · 새 ontology/classifier/state machine · stable Line ID · review/suggestion state ·
+save/load schema 변경 · Ren'Py export redesign · UI 리팩터 · TTS.
+
+### 종료 전략
+
+```
+Phase 18  Expression AI production baseline 동결
+   ↓ (필요 시)
+Phase 19  Novel-Agent 전체 production stabilization / v1 checkpoint
+   ↓
+핵심 개발 종료
+```
+Phase 19 는 **필수 기능 Phase 가 아니고** 새 AI 기능 개발도 아니다. 진행하더라도 범위는 전체 stabilization /
+checkpoint 이며 Expression prompt tuning · Outfit semantic 변경 · F-2/F-3 등 backlog 구현을 **자동 포함하지
+않는다**. **새 blocker 가 없는 한 Phase 20+ 는 만들지 않는다.**
+
 ## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
 
 **표정 파이프라인은 이미 존재한다.** LLM 배정도 들어와 있다.
 - 판정 단일 소스 `resolveEmotion`(`src/generators/emotion/resolve.ts`) — **동기·순수**여야 한다(ScenePlayer·SceneCard가 렌더 중 호출). 우선순위 = 작가 태그 `Line.emotion` > AI `Line.emotionAuto` > 휴리스틱(`infer.ts`) > `기본`.
 - 그래서 AI 값은 **렌더 시점 조회가 아니라 미리 계산해 Line에 저장**하는 구조다. 새 추론도 이 계약을 따라야 한다.
-- 배치 실행 `autoAssignEmotionAll`(`src/store/aiBatchSlice.ts`) + `aiSelect.ts`(249줄) + 비용 견적 `estimate.ts`. 증분(이미 채운 줄은 재호출 안 함)·busy 키·진행률·PACE·단일 커밋 구조를 공유한다.
+- 배치 실행 `autoAssignEmotionAll`(`src/store/aiBatchSlice.ts`) + `aiSelect.ts` + 비용 견적 `estimate.ts`. 증분(이미 채운 줄은 재호출 안 함)·busy 키·진행률·PACE·단일 커밋 구조를 공유한다.
 - 후보 집합이 **두 종류**다: AI가 고를 수 있는 건 `availableExpressions`(실제 업로드된 것만), 최종 검증은 `effectiveExpressions`(선언 목록). 같게 만들면 "업로드 전 임시 실루엣" 워크플로가 죽는다.
 
 **복장은 규칙 기반뿐 — LLM 추론이 없다(여기가 빈자리).**

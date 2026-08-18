@@ -4,19 +4,20 @@
 > 상세 이력·완료 내역은 git log가 보존하니 여기엔 남기지 않는다(짧게 유지).
 
 ## 🎯 다음 할 일
-- **다음 Phase = Phase 18 — Expression AI production baseline 동결.** Phase 15(후보 pool)·16(연속성 소유 범위)·17(시제 denotation, **Outcome C**) 결과를 종합해 renderer/candidate parity · semantic prompt contract · same-speaker continuity ownership · 사람값 우선순위(`emotion`>`emotionAuto`) · Preview/export parity · save/load·`.npproj.zip` · deterministic/live evidence · accepted limitations 를 정리하고 **동결**하는 것이 목표다(새 기능 Phase 아님). 규칙·Phase 로그·확정 설계는 전부 [`PHASES.md`](./PHASES.md) 에 있다.
-  - ⚠️ **Phase 18 에서 `P16-F2` 를 다시 prompt-tuning 하지 말 것** — Phase 17 Outcome C 를 **accepted limitation 으로 가져간다**.
-  - **종료 전략**: Phase 18 동결 → 필요 시 Phase 19 전체 production stabilization / v1 checkpoint → **핵심 개발 종료**. 아래 backlog 는 **존재한다는 이유만으로 새 구현 Phase 가 되지 않는다**(새 blocker 가 없는 한 **Phase 20+ 자동 확장 금지**).
-  - **표정 선택 품질은 여전히 미입증**이다. Phase 15·16 은 둘 다 **결정론적 계약 불일치**를 고친 것이고 모델의 선택 품질을 잰 게 아니다. Phase 16 이 live 를 6회 돌렸지만 **synthetic fixture 3개 한정**이고 baseline 부터 이미 옳게 골라 **before/after 선택이 전부 동일**했다 — 개선도 회귀도 입증되지 않았다. 재개하면 `src/generators/emotion/` 부터 — `aiSelect.ts`(문맥/target 두 축) · `resolve.ts`(판정 단일 소스) · Phase 5 문맥 품질 확인 목록(PHASES.md).
-  - **Expression backlog(사용자 별도 지시가 있을 때만 — 자동으로 다음 Phase 가 아니다)**: **F-2** 청크 경계를 넘는 연속성 정보 0(고치려면 러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경** — 순진하게 문맥에 넣으면 requestKey 축 9 가 전부 불일치해 2번째 이후 청크가 전량 skip 된다) · **F-3** target 수집에 export `optedIn` 게이트 없음(D3 와 결합) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · **`P16-F2`** 표정 denotation — **Phase 17 에서 조사 완료(Outcome C)**: 시제 축의 실제 misselection 을 관측했으나 minimal correction 이 그 선택을 못 바꿔 폐기했다. **재조사·재튜닝 대상이 아니라 accepted limitation 이다**(아래 📌 참고).
-  - **Outfit 은 열린 TODO 가 아니다** — 아래 셋은 **accepted limitation**(문서화하고 안고 간다, 상세는 PHASES.md "Phase 14 확정" 절):
-    - `P12-59` residual FP(no-look-ahead window **종단**의 미래 의도). 원인은 raw semantic misclassification 이고 **window boundary 는 가장 강하게 의심되는 contributing factor 지만 유일한 causal root cause 로 확정하지 않는다.** ⚠️ **"window 끝 행은 non_transition/reject" 류 blanket boundary suppression 을 넣지 말 것**(진짜 종단 transition 이 silent FN 이 된다).
-    - **same-input raw emission variability** — byte-identical 요청 24쌍 중 decision 일치 23/24, 유일한 divergence 가 `P3#0`. `temperature 0` 을 deterministic 이라고 쓰지 말 것. ⚠️ 보존 관측 "4 emitted / 1 omitted"는 **같은 입력 반복 실험이 아니므로 rate 로 인용 금지.**
-    - `N1`/`N4` raw 미출력 — FP 는 없지만 **`S` 의 직접 효과가 아니다**(S 관측 case 는 `N3`). 재emit 유도 금지.
-  - **Outfit backlog(사용자 별도 지시가 있을 때만 — 자동으로 다음 Phase 가 아니다)**: read-only look-ahead(P12 boundary 를 직접 줄이는 가장 명확한 structural candidate 중 하나지만 no-look-ahead 계약을 바꾸는 **별도 architecture 변경**) · 실제 제작 대본 기반 품질 측정(Phase 10/13 은 합성 fixture 한정) · 무시한 제안이 재실행 때 다시 나오는 문제.
-  - ⚠️ **Phase 11 A 식 suppression 프롬프트 튜닝을 반복하지 말 것**(P10/P4 raw omission 회귀). candidate **개수**에 대한 sparsity prior 도 같은 억제 압력이라 넣지 않는다.
-  - known limitations(**명시적 우선순위 지시 전까지 착수하지 않음**, 상세는 PHASES.md Phase 9 절): D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌. (**D4 `availableExpressions` 후보 누수는 Phase 15 `e9311f3` 에서 해결됨** — 아래 📌 참고.)
-- **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore, 커밋 안 함)에 pre-correction·corrected 둘 다 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+- **Expression AI 는 Phase 18 에서 production baseline 으로 동결됐다**(Outcome A · docs-only · baseline = `931a2cc`). 계약 matrix·evidence 등급·accepted limitation 의 **정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**이다.
+- **정해진 다음 필수 작업은 없다.** 필요할 때만 **Phase 19 — Novel-Agent 전체 production stabilization / v1 checkpoint**(새 AI 기능 개발이 **아니다**) → 이후 **핵심 개발 종료**. ⚠️ **새 blocker 가 없는 한 Phase 20+ 를 만들지 말 것** — backlog 가 존재한다는 사실만으로 Phase 를 추가하지 않는다.
+- **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
+  - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
+  - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
+  - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
+- **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 Phase 18 이 확정한 것 (Expression AI 동결 — 자동으로 다시 열지 말 것)
+- **Outcome A — docs-only finalization.** production/tests/프롬프트 변경 **0** · live **0** · 새 benchmark **0**. 동결 baseline = **`931a2cc`**(Phase 16 구현) 코드 상태.
+- **재검증 ceremony 를 돌리지 않은 근거**: `git diff --stat 931a2cc..HEAD -- src tests scripts package.json` 이 **비어 있다**(Phase 17 은 Outcome C 라 구현 커밋이 없고 폐기한 correction 도 트리에 안 남았다). ⇒ Phase 16 시점 검증(typecheck · vitest 50파일/775 · mutation 8건 · `dump:rpy` 22구성 245파일 diff 0 · 스크래치 빌드)이 **그대로 유효**하다.
+- **동결 계약은 파일+symbol 로 기록했다**(줄 번호를 정본에 심지 않는다 — 금방 낡는다). Phase 18 은 **새 limitation 발굴 Phase 가 아니라서** 기존 확정분만 승계했다.
+- ⚠️ **live evidence 범위**: 소규모 curated **synthetic** fixture 한정이고 실제 제작 대본 전반의 **일반화된 품질 평가는 수행하지 않았다**. 이것을 *"production baseline 으로 쓸 수 없다"* 로 연결하지 말 것 — freeze 판정은 deterministic contract · integration path(Preview/export/save/전송/병합) · known limitation · 사람 검수 workflow(`emotion` 우선 · `clearEmotionAuto` · 🤖 표시)를 함께 본 것이다.
+- ⚠️ **deterministic 통과를 품질 개선으로 인용하지 말 것**(Phase 17 이 그 반례).
 
 ## 📌 Phase 17 이 확정한 것 (표정 denotation — accepted limitation, 다시 열지 말 것)
 - **Outcome C — 구현 커밋 없음.** production/test tracked 변경 **0**, baseline 은 Phase 16(`931a2cc`) 그대로.
@@ -155,4 +156,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **Phase 17 확정 — Expression AI 시제 denotation limitation(Outcome C, 구현 커밋 없음)**: live 12회(fixture 6 × before/after 1)로 `F2-N2` 실제 misselection 을 관측했으나 minimal denotation clause 가 선택을 못 바꿔 폐기. tracked production/test 변경 0. docs 3파일(`PHASES.md` Phase 17 절 + 로그 표 17행 · 이 파일 · `CLAUDE.md` 한 줄).
+- **Phase 18 확정 — Expression AI production baseline 동결(Outcome A · docs-only)**: 최신 source 대조 결과 Phase 15~17 계약과 불일치 0·새 blocker 0 → production/test 변경 0, live 0, 재검증 ceremony 0. 계약 matrix·evidence 등급·accepted limitation 을 `PHASES.md` 에 정본화. docs 3파일(`PHASES.md` Phase 18 절 + 로그 18행 · 이 파일 · `CLAUDE.md` 한 줄).
