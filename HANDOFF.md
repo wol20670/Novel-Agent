@@ -9,14 +9,79 @@
 - **post-v1 번역 개선 로드맵** — ⚠️ **v1 Phase 번호 체계와 섞지 말 것**(별도 축이고, 기존식 Phase 20+ 를 만들지 않는다). 남은 것은 **후보일 뿐**이고 ⚠️ **사용자 지시가 있을 때만 연다**.
   - **Phase 1 ✅ 완료(구현 `78644d5`)** — 번역 누락 탐지 + 누락분만 번역 UX.
   - **Phase 2 ✅ 완료(구현 `567dc67`)** — 원문 ↔ 번역 유효성. 계약·검증·accepted limitation 은 아래 📌 절이 정본.
-  - **Phase 3 ← 다음 후보** 번역 품질 QA·의심 번역 탐지 · **Phase 4** Phase 3 결과가 실제로 필요할 때만 선택적 고품질 재검수·재번역.
-  - adjacent/backlog(위 계약과 섞지 말 것): LeftPanel 키 안내문의 모델 표기 불일치(`gpt-4o-mini` vs 고품질 `gpt-4o`) · "누락만 보기"류 누락 위치 탐색 UX.
+  - **Phase 3 ✅ 완료** — 번역 품질 QA·의심 번역 탐지. 계약·검증·accepted limitation 은 아래 📌 절이 정본.
+  - **Phase 4 = 여전히 조건부 후보다** — 선택적 고품질 재검수·재번역. ⚠️ **Phase 3 이 끝났다는 이유만으로 착수 대상이 되지 않는다**: 실제 제작에서 Phase 3 결과가 "재번역이 필요하다"를 입증했을 때만 연다.
+  - adjacent/backlog(위 계약과 섞지 말 것): LeftPanel 키 안내문의 모델 표기 불일치(`gpt-4o-mini` vs 고품질 `gpt-4o`) · "누락만 보기"류 누락 위치 탐색 UX(QA 쪽 의심 위치 탐색은 Phase 3 에서 해결됐고 **이건 별개**다).
+  - **deferred / adjacent(Phase 3 조사 중 확인, 이번엔 손대지 않음)**: `baseLocale='en'` 프로젝트가 실제로 지원되는데(`#설정_글언어` 첫 항목 = base, `sceneBuilder.setTextLocales`) 기존 `translate/index.ts` 의 `systemPrompt()` 은 source 를 **"Korean" 으로 하드코딩**한다. Phase 3 QA 는 `sourceLocale` 을 명시적으로 보내 이 문제를 **상속하지 않는다**. generation prompt 수정은 Phase 3 범위 밖이라 보류했고, 실사용에서 문제가 확인되면 **별도 post-v1 correction** 으로 처리한다.
 - **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
 - **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 post-v1 번역 Phase 3 이 확정한 것 (번역 품질 QA — 깨지 말 것)
+> ⚠️ 이 절도 **post-v1 번역 로드맵의 Phase 3** 이다(v1 Phase 번호와 같은 축이 아니다).
+
+- **구현 = `89d2953`** `feat: 번역 품질 QA 및 의심 번역 검수 추가`(production 9 + tests 3).
+- **다루는 문제가 Phase 1·2 와 다르다**: Phase 1 은 *번역 없음*, Phase 2 는 *새로 생기는 stale* 이다.
+  Phase 3 은 **값이 있고 현재 원문과도 연결돼 있는데 의미가 의심되는** 칸을 검수 대상으로 표시한다.
+  ⚠️ 결과는 **"오류 확정"이 아니라 "검토 필요"** 다 — 자동 overwrite·자동 재번역은 없다.
+- **deterministic 은 copy-through rule 하나뿐**(`detectCopyThrough`):
+  `sourceLocale==='ko'` ∧ `targetLocale∈{en,ja}` ∧ `target.trim()===source.trim()` ∧ 원문에 한글 음절.
+  known FP = 고유명사만으로 된 줄 · 효과음 · 의도적 원어 유지(사용자가 "문제 없음"으로 종료).
+  ⚠️ **두 번째 heuristic 을 추가하지 말 것** — 길이·문장부호·"한글 포함"·중복 번역은 FP 가 커서 전부 기각했고,
+  이 rule 을 generic language-heuristic framework 로 키우는 건 이 rule 의 확장이 아니라 새 Phase 의 판단이다.
+- **AI reviewer 는 로케일 칸 단위**다. 입력은 `source`·`sourceLocale`·`target`·`targetLocale`·`speaker`·
+  `narration` 뿐이고 **주변 문맥을 싣지 않는다**(문맥을 넣으면 "문맥이 바뀌었는가"까지 anchor 로 검증해야 해서
+  표정 `requestKey` 급 복잡도가 따라온다). 분류는 `meaning|omission|addition|language` 4개이고
+  **style·naturalness 는 review 대상이 아니다**. 확신이 낮으면 `ok`, **대체 번역은 출력도 적용도 하지 않는다**.
+  모델은 `translateModelFor(translateModeOf(project))` — QA 전용 모델 설정을 만들지 않는다.
+- **파서 경계**: 요청-local `i` 는 그 요청의 target 만 인정하고(유령 응답 폐기), **중복 `i` 는 last-wins 가
+  아니라 그 항목만 unreviewed** 다(⚠️ `parseEmotionResponse` 의 semantic 을 복사하지 말 것 — `review` 뒤에
+  `ok` 가 오면 review 신호가 조용히 사라진다). `v` 누락·unknown 도 `ok` 로 넘겨짚지 않고 unreviewed,
+  반대로 `c` 가 unknown 이면 **판정은 살리고 분류만 비운다**.
+- **QA 결과는 session-only** 다 — Project·localStorage·`.npproj.zip`·협업 어디에도 안 실린다(Outfit 제안과 같은 등급).
+  anchor 는 **source+target exact** 비교다. ⚠️ Phase 2 의 `sameLooseText` 를 쓰지 않는다 — 그쪽은 만들어진
+  *산출물*을 표기 편집에서 지키는 게 목적이고, 이쪽은 그 두 문자열에 대한 *transient 판단*이라 엄격한 게 안전하다.
+- **캐시 재사용 규칙**: `rule`·`manual` 은 reviewer 모델과 무관하게 유지, **`ai` 는 같은 모델일 때만** 재사용한다
+  (fast→quality 로 바꾸면 mini 판정은 다시 검수된다). `model` 은 session-only QA metadata 이지
+  persistent translation version/hash 가 아니다.
+- **사람의 판단이 pending 자동 판정보다 우선한다** — 실행 중 사용자가 "문제 없음"(`origin:'manual'`)으로
+  확정한 칸은 뒤늦게 도착한 rule·AI 결과가 **덮지 않는다**(Phase 2 가 pending 중 사람이 채운 번역 칸을
+  덮지 않는 것과 같은 user-intent precedence). 보호 대상은 **manual 뿐**이고, 그 사이 번역이 바뀐
+  stale manual 은 보호하지 않는다(exact anchor 일치일 때만).
+- **stale 은 무효화 배선이 아니라 판정으로 처리한다** — 표시는 `activeQaIssues`(render-time), 커밋은
+  `isQaResultValid` + 실행 시작·커밋 양쪽의 `compactQaResults`. ⚠️ global revision epoch·Line UUID·
+  translation hash/version·persistent QA metadata·`Scene.status` 자동 변경 **전부 없다**.
+  ⚠️ UI 에서 `setLineTranslation` 뒤에 `clearTranslationQa` 같은 걸 부르지 말 것(다른 칸의 유효 결과까지 날아간다).
+- **규칙 결과는 AI 가용성과 독립이다** — AI 대상이 0이면 **키를 확인하지도 않고**, 키가 없거나 요청이 실패해도
+  이미 확정된 규칙 결과와 이미 성공한 AI 결과는 커밋된다(run 전체 폐기 금지). ⚠️ UI 에서 키 유무로 QA 실행을
+  막지 말 것.
+- **UX**: `🔍 번역 QA`(증분) · `↺ 전체 재검수` · 전체 의심 카운트 · SceneCard 헤더 `⚠ N` · 로케일 칸별 경고+이유 ·
+  `문제 없음`. ⚠️ **전체 재검수는 confirm 전에 캐시를 지우지 않는다**(취소했는데 기록이 사라지면 안 된다)
+  — confirm 후 `clearTranslationQa()` → 기존 실행 flow. 견적도 **빈 캐시 기준**이라야 실제 실행과 맞는다.
+  ⚠️ **busy 중 실행·전체 재검수 버튼 disable 은 UX 가 아니라 store concurrency 경계**다(스토어에 동시 실행
+  방어가 없다 — 의도적). 진행률 단위는 **장면이 아니라 AI 요청**이다.
+- **카운트 클릭 = 다음 의심 장면으로 이동**(끝이면 wrap). 기준점은 기존 `selectedSceneId` 이고 **새 QA cursor
+  state 를 만들지 않는다**. 스크롤은 RightPanel 에 있던 검증된 루틴을 `components/sceneJump.ts` 로 **그대로**
+  옮긴 것이다(⚠️ 알고리즘·재시도 프레임 수·타이밍을 손대지 말 것 — content-visibility 환경 실측값).
+  이동은 **장면 카드까지만**이다(로케일 입력 focus·issue navigator 를 만들지 않는다).
+- **검증**: typecheck · vitest **55파일/880**(기존 회귀 0) · 스크래치 outDir 빌드 ·
+  **`dump:rpy` 22구성 245파일 clean HEAD `39a39c8` 대비 diff 0**(집계 해시도 일치) ·
+  실브라우저 시나리오(실행·confirm·진행률·문제 없음·번역 수정 후 자동 소멸·전체 재검수 취소/확정·
+  mode off·규칙 전용 no-key·RightPanel 리모컨 회귀·의심 카운트 next/wrap 이동).
+- ⚠️ **accepted limitations(과장하지 말 것)**
+  - 주변 문맥을 안 보내므로 **대명사 선행사·장면 전체 문체 일관성·화자 간 반응 정합성은 검출 대상이 아니다**.
+  - copy-through 는 고유명사·효과음·의도적 원어 유지에서 **FP 가 가능하다**(precision 을 우선했을 뿐 0 이 아니다).
+  - stable Line UUID 가 없어, 구조 편집 뒤 **완전히 동일한 semantic input** 의 줄이 같은 좌표를 차지하면
+    구별할 수 없는 rare ambiguity 가 남는다. 특히 **manual dismissal 은 같은 사용자 판단이라고 엄밀히
+    보장할 수 없다**(rule·ai 는 읽은 입력이 문자 단위로 같아 위험이 낮다).
+  - 줄을 삽입하면 **그 장면의 이후 캐시가 miss** 되어 재검수 비용이 생긴다(다른 장면은 영향 없음).
+  - reviewer 가 generator 와 **같은 모델 계열**이라 같은 종류의 semantic 오해를 공유할 수 있다.
+  - QA 결과는 **오류 판정이 아니라 사용자 검수 후보**다.
+- ⚠️ **실 API 품질 측정은 하지 않았다** — 응답은 전부 stub 이고 고정한 것은 wire/workflow 계약이다.
+  *"QA 가 오역을 N% 잡는다"* 류로 인용하지 말 것.
 
 ## 📌 post-v1 번역 Phase 2 가 확정한 것 (원문 ↔ 번역 유효성 — 깨지 말 것)
 > ⚠️ 아래 📌 Phase 8~19 는 **v1 Phase 번호**다. 이 절은 **post-v1 번역 로드맵의 Phase 2** 이고 같은 축이 아니다.
@@ -211,4 +276,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **post-v1 번역 개선 Phase 2 — 원문 ↔ 번역 유효성**(`567dc67`, 기존식 Phase 아님): 원문을 고치거나 번역 배치 실행 중 대본이 바뀌면 옛 번역이 새 원문에 남던 stale 을 막았다. 동치 관계·계약·검증·accepted limitation 은 위 📌 절이 정본. parser·Preview·save/load·`.npproj.zip`·Ren'Py export 생성 로직·Outfit/Expression AI 의미 변경 0(`dump:rpy` diff 0).
+- **post-v1 번역 개선 Phase 3 — 번역 품질 QA·의심 번역 탐지**(기존식 Phase 아님): 번역이 있고 stale 도 아닌데 의미가 의심되는 칸을 규칙 1개 + AI 검수로 찾아 장면 카드에 표시한다(자동 수정 없음). 계약·검증·accepted limitation 은 위 📌 절이 정본. parser·Preview·save/load·`.npproj.zip`·Ren'Py export·Outfit/Expression AI 변경 0(`dump:rpy` clean HEAD 대비 diff 0).
