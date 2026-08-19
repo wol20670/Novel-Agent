@@ -1,7 +1,18 @@
 import type { Locale, Expression, Project } from '../types';
-import { translateModeOf, translateModelFor, translateTargetsOf } from '../types';
+import { baseLocaleOf, translateModeOf, translateModelFor, translateTargetsOf } from '../types';
 import { collectUntranslated } from '../generators/translate/collect';
 import { translateBatch, chunkItems, isFatalTranslateError } from '../generators/translate';
+import {
+  collectQaTargets,
+  compactQaResults,
+  isQaResultValid,
+  planQaRequests,
+  qaCellKey,
+  reviewTranslationsBatch,
+  sameQaAnchor,
+  upsertQaResults,
+  type TranslationQaResult,
+} from '../generators/translate/qa';
 import { sleep } from '../generators/shared/retry';
 import {
   buildEmotionRequest,
@@ -159,8 +170,26 @@ function validateEmotionUpdates(
   }
   return { valid, skipped };
 }
+/** QA 세션 캐시의 총 결과 수 — compaction 이 실제로 뭔가 버렸는지 판정하는 데만 쓴다. */
+function countQaResults(cache: Record<string, TranslationQaResult[]>): number {
+  let n = 0;
+  for (const list of Object.values(cache)) n += list.length;
+  return n;
+}
+
 export const createAiBatchSlice: SliceCreator<
-  Pick<State, 'setTranslateMode' | 'autoTranslateAll' | 'autoAssignEmotionAll' | 'autoSuggestOutfitsAll'>
+  Pick<
+    State,
+    | 'setTranslateMode'
+    | 'autoTranslateAll'
+    | 'autoAssignEmotionAll'
+    | 'autoSuggestOutfitsAll'
+    // 번역 QA 세 액션은 전부 translationQa 하나만 쓴다 — 소유자를 한 파일에 모아두면 슬라이스 간
+    // import(순환 금지) 없이 같은 helper 를 공유할 수 있다. 이것 하나 때문에 새 슬라이스를 만들지 않는다.
+    | 'reviewTranslationsAll'
+    | 'dismissQaIssue'
+    | 'clearTranslationQa'
+  >
 > = (set, get, ctx) => {
   const { flash, autoSave, setScenes } = ctx;
   return {
@@ -343,6 +372,154 @@ export const createAiBatchSlice: SliceCreator<
           (failScenes ? ` · ${failScenes}개 장면 실패(재시도 가능)` : '');
         flash(msg, failScenes || skipped ? 'error' : 'success');
       }
+    },
+
+    // ── 번역 품질 QA ───────────────────────────────────────────────────────────
+    // 다른 배치들과 결정적으로 다른 점 둘:
+    //  ① **canonical 을 쓰지 않는다** — 결과는 translationQa(런타임 state)에만 들어간다.
+    //  ② **규칙 결과가 AI 와 독립이다** — copy-through 는 API 없이 판정되므로 키가 없거나 요청이
+    //     실패해도 커밋된다. 그래서 키 검사가 "AI 대상이 실제로 있을 때"까지 밀려 있다.
+    reviewTranslationsAll: async () => {
+      const project = get().project;
+      const model = translateModelFor(translateModeOf(project));
+      if (!model) return; // off — 버튼이 숨겨져 있어 도달 불가(방어)
+
+      const targets = translateTargetsOf(project);
+      // ⚠️ **실행 시작 시점에도 정리한다.** 커밋 경로에만 두면 "검수할 칸 0" 으로 일찍 끝나는 실행에서
+      //    compaction 이 아예 안 돌아, 삭제된 장면·줄의 결과가 세션 내내 남는다(실측 회귀).
+      const prevCache = get().translationQa;
+      const cache = compactQaResults(prevCache, project);
+      // 대상 수집·규칙 판정·요청 계획은 전부 Phase 3-A 의 순수 계약이다(견적도 같은 함수를 쓴다).
+      const { cells, ruleResults, aiCells } = collectQaTargets(project, targets, cache, model);
+      if (!cells.length) {
+        // compactQaResults 는 **거르기만** 하므로 개수가 줄었다는 것과 실제로 뭔가 버려졌다는 것이
+        // 정확히 같다 — 변화가 없으면 새 객체로 갈아끼우지 않는다(불필요한 리렌더 방지).
+        if (countQaResults(cache) < countQaResults(prevCache)) set({ translationQa: cache });
+        flash('새로 검수할 번역이 없습니다(이미 검수했거나 번역이 비어 있습니다).');
+        return;
+      }
+      const plans = planQaRequests(aiCells);
+
+      // ⚠️ 키 검사는 **AI 가 실제로 필요할 때만** 한다(Phase 1 의 "0건이면 키를 묻지 않는다"를
+      //    규칙 전용 실행까지 확장한 것) — copy-through 만 있는 프로젝트에서 키를 요구하면
+      //    무료로 얻을 수 있는 결과를 키가 없다는 이유로 막는 꼴이 된다.
+      const key = plans.length ? get().openaiKey.trim() : '';
+      const missingKey = plans.length > 0 && !key;
+
+      const aiResults: TranslationQaResult[] = [];
+      let failedRequests = 0;
+      let aborted = false;
+      if (plans.length && key) {
+        set((s) => ({
+          busy: { ...s.busy, 'batch:translate-qa': true },
+          translationQaProgress: { done: 0, total: plans.length },
+        }));
+        const PACE_MS = 1200;
+        try {
+          for (let i = 0; i < plans.length; i++) {
+            if (i > 0) await sleep(PACE_MS);
+            try {
+              aiResults.push(...(await reviewTranslationsBatch(plans[i], model, key)));
+            } catch (e) {
+              failedRequests += 1;
+              console.warn('[번역 QA] 요청 실패:', plans[i].sceneId, plans[i].targetLocale, e);
+              if (isFatalTranslateError(e)) {
+                aborted = true;
+                break; // 이후 요청은 포기 — 단 여기까지 얻은 결과는 아래에서 그대로 커밋한다.
+              }
+            }
+            set(() => ({ translationQaProgress: { done: i + 1, total: plans.length } }));
+          }
+        } finally {
+          set((s) => ({ busy: { ...s.busy, 'batch:translate-qa': false }, translationQaProgress: null }));
+        }
+      }
+
+      // ⚠️ 여기부터 set 까지는 **동기 구간**이다 — await/sleep 을 넣지 말 것(Phase 2·Phase 8 과 같은
+      // 이유: 검증과 쓰기가 서로 다른 시점의 project 를 보면 방금 통과시킨 판정이 무의미해진다).
+      const currentProject = get().project;
+      // ⚠️ 캐시도 **여기서 한 번만** 읽는다 — 아래 manual guard 와 실제 커밋 base 가 같은 스냅샷이어야
+      //    한다(set 콜백 안에서 다시 읽으면 판정과 쓰기의 근거가 갈릴 여지가 생긴다).
+      const currentCache = get().translationQa;
+      const sourceLocale = baseLocaleOf(currentProject);
+      const sceneMap = new Map(currentProject.scenes.map((sc) => [sc.id, sc]));
+      // 규칙 결과도 실행 **시작 시점**에 만들어진 것이라 같은 재검증을 거친다 — pending 중 사용자가
+      // 그 칸을 고쳤으면 옛 경고를 커밋하면 안 된다(AI 결과와 완전히 같은 규칙).
+      const keep = (r: TranslationQaResult) => isQaResultValid(r.anchor, sceneMap.get(r.anchor.sceneId), sourceLocale);
+      const validRule = ruleResults.filter(keep);
+      const validAi = aiResults.filter(keep);
+      const staleSkipped = ruleResults.length - validRule.length + (aiResults.length - validAi.length);
+
+      // ⚠️ **사람의 판단이 pending 자동 판정보다 우선한다.** 실행 중에 사용자가 그 칸을 "문제 없음"으로
+      // 확정했으면(dismissQaIssue → origin:'manual') 뒤늦게 도착한 규칙·AI 결과가 덮으면 안 된다
+      // (Phase 2 가 pending 중 사람이 채운 번역 칸을 AI 결과로 덮지 않는 것과 같은 user-intent precedence).
+      //   · 보호 대상은 **manual 뿐**이다 — 기존 'ai'·'rule' 결과는 이번 run 결과가 정상적으로 대체한다.
+      //   · 판정은 **exact anchor** 까지 같을 때만이다: 그 사이 번역이 바뀌었다면 옛 manual 판단은 더 이상
+      //     그 칸의 답이 아니므로 새 QA 를 막으면 안 된다(compact·validity 와 같은 exact 규칙).
+      //   · 새 revision/epoch/run token 을 만들지 않는다 — 현재 캐시 + exact anchor 확인이면 충분하다.
+      const manualByCell = new Map<string, TranslationQaResult>();
+      for (const list of Object.values(currentCache)) {
+        for (const r of list) if (r.origin === 'manual') manualByCell.set(qaCellKey(r.anchor), r);
+      }
+      const heldByManual = (r: TranslationQaResult) => {
+        const m = manualByCell.get(qaCellKey(r.anchor));
+        return !!m && sameQaAnchor(m.anchor, r.anchor);
+      };
+      const commitRule = validRule.filter((r) => !heldByManual(r));
+      const commitAi = validAi.filter((r) => !heldByManual(r));
+      const manualHeld = validRule.length - commitRule.length + (validAi.length - commitAi.length);
+
+      // 기존 캐시를 현재 project 로 정리한 뒤 이번 결과를 칸 identity 로 upsert — 단일 커밋.
+      // (compact 가 먼저다: 정리 전 캐시에 upsert 하면 이번에 유효해진 칸이 곧바로 다시 걸러진다.)
+      set({
+        translationQa: upsertQaResults(compactQaResults(currentCache, currentProject), [...commitRule, ...commitAi]),
+      });
+
+      const aiReview = commitAi.filter((r) => r.verdict === 'review').length;
+      const okCount = commitAi.filter((r) => r.verdict === 'ok').length;
+      const suspects = commitRule.length + aiReview;
+      const staleSuffix =
+        (staleSkipped ? ` · ${staleSkipped}건 건너뜀(검수 중 번역이 변경됨)` : '') +
+        // 조용히 빼면 사용자는 "왜 아까 누른 게 다시 경고로 돌아왔지/숫자가 왜 다르지"를 알 수 없다.
+        (manualHeld ? ` · ${manualHeld}건은 "문제 없음" 처리라 덮지 않았습니다` : '');
+      const failSuffix = failedRequests ? ` · ${failedRequests}개 요청 실패(재시도 가능)` : '';
+      if (missingKey) {
+        // 규칙 결과는 이미 커밋했다 — "전체 실패"로 알리면 사용자가 결과가 없다고 오해한다.
+        flash(
+          `번역 QA — 규칙 검사로 의심 ${commitRule.length}건 반영${staleSuffix} · ` +
+            `AI 의미 검수에는 OpenAI 키가 필요합니다(왼쪽 패널에서 입력).`,
+          'error',
+        );
+      } else if (aborted) {
+        flash(
+          `번역 QA 중단 — 의심 ${suspects}건 반영${staleSuffix}${failSuffix} · ` +
+            `API 키/쿼터 오류로 중단됨(키·잔액을 확인하세요).`,
+          'error',
+        );
+      } else {
+        flash(
+          `번역 QA 완료 — 의심 ${suspects}건(규칙 ${commitRule.length} · AI ${aiReview})` +
+            ` · 정상 ${okCount}건${staleSuffix}${failSuffix}`,
+          failedRequests || staleSkipped ? 'error' : 'success',
+        );
+      }
+    },
+
+    dismissQaIssue: (anchor) => {
+      const s0 = get();
+      // 그 사이 번역·원문이 바뀌었으면 사람의 "정상" 판단을 붙일 대상이 아니다 — 조용히 no-op
+      // (화면에서도 이미 anchor 불일치로 경고가 사라져 있다).
+      if (!isQaResultValid(anchor, sceneById(s0.project.scenes, anchor.sceneId), baseLocaleOf(s0.project))) return;
+      set((s) => ({
+        // category·reason·model 은 담지 않는다 — 사람이 확정한 ok 에는 분류도 근거도 모델도 없다.
+        translationQa: upsertQaResults(s.translationQa, [{ anchor, verdict: 'ok', origin: 'manual' }]),
+      }));
+    },
+
+    clearTranslationQa: () => {
+      // 캐시만 비운다. 진행률·busy 는 실행 중인 배치의 finally 가 소유하므로 건드리지 않는다
+      // (여기서 지우면 돌고 있는 run 의 진행 표시가 사라진다).
+      set({ translationQa: {} });
     },
 
     // autoTranslateAll 과 완전히 같은 골격(busy 키·진행률·PACE_MS·outer 루프 abort·finally 정리·

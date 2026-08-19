@@ -18,6 +18,7 @@ import {
 } from '../types';
 import { resolveEmotionDetailed } from '../generators/emotion/resolve';
 import type { OutfitSuggestion } from '../generators/outfit';
+import { activeQaIssues, type QaCategory, type TranslationQaResult } from '../generators/translate/qa';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
 import VoiceLab from './VoiceLab';
@@ -29,6 +30,15 @@ const STATUS_BTN: Record<SceneStatus, { on: string; dot: string }> = {
   needs_fix: { on: 'bg-amber-500/15 text-amber-700 border-amber-500', dot: 'bg-amber-500' },
 };
 const STATUSES = Object.keys(SCENE_STATUS_LABEL) as SceneStatus[];
+
+// QA 사유 분류의 한국어 표시. 작은 로컬 매핑일 뿐이고 localization framework 를 새로 만들지 않는다.
+// ⚠️ category 는 없을 수 있다(모델이 모르는 값을 보내면 판정만 살리고 분류는 비운다) — 그 땐 '검토 필요'.
+const QA_CATEGORY_LABEL: Record<QaCategory, string> = {
+  meaning: '의미',
+  omission: '누락',
+  addition: '추가',
+  language: '언어',
+};
 
 // collabPeers 배열 identity 별로 sceneId → PeerPresence[] 인덱스를 캐싱(sceneById 와 같은 이유).
 // 예전엔 카드마다 .filter() 로 새 배열을 만들고 useShallow 로 얕은 비교했는데, 그 filter 자체가
@@ -102,6 +112,22 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
   }, [outfitSuggestions]);
   const applySceneSuggestions = useStore((s) => s.applySceneOutfitSuggestions);
   const ignoreSceneSuggestions = useStore((s) => s.ignoreSceneOutfitSuggestions);
+  // 번역 QA 의심 — 이 장면 몫만 구독한다(전체 캐시를 구독하면 무관한 장면 결과에도 재렌더된다).
+  // 유효성은 activeQaIssues 가 현재 scene 기준으로 판정하므로, 번역을 고치면 별도 무효화 호출 없이
+  // 경고가 사라진다(⚠️ setLineTranslation 뒤에 clearTranslationQa 같은 걸 부르면 안 된다).
+  const sceneQa = useStore((s) => s.translationQa[sceneId]);
+  const baseLocale = useStore((s) => baseLocaleOf(s.project));
+  const qaIssues = useMemo(() => activeQaIssues(sceneQa, scene, baseLocale), [sceneQa, scene, baseLocale]);
+  const qaByLine = useMemo(() => {
+    if (!qaIssues.length) return null;
+    const m = new Map<number, TranslationQaResult[]>();
+    for (const r of qaIssues) {
+      const arr = m.get(r.anchor.lineIndex);
+      if (arr) arr.push(r);
+      else m.set(r.anchor.lineIndex, [r]);
+    }
+    return m;
+  }, [qaIssues]);
   // 협업 — 지금 이 장면을 보고 있는 상대방(있으면 편집 충돌을 피하라는 신호). peersForScene 은
   // collabPeers identity 기준 캐싱된 조회라 카드마다 .filter() 를 새로 돌리지 않는다(위 설명).
   const peersHere = useStore((s) => peersForScene(s.collabPeers, sceneId));
@@ -125,6 +151,15 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => update(sceneId, { title: e.target.value })}
         />
+        {/* 이 장면의 유효한 의심 번역 수 — 3000줄 대본에서 "어느 장면을 봐야 하는지"의 최소 단서다. */}
+        {qaIssues.length > 0 && (
+          <span
+            className="chip border-amber-500/40 text-amber-600 bg-amber-500/5 text-[10px] shrink-0"
+            title="이 장면에 다시 볼 만한 번역이 있습니다 — 아래 줄의 EN·JA 칸을 확인하세요."
+          >
+            ⚠ {qaIssues.length}
+          </span>
+        )}
         {peersHere.length > 0 && (
           <span
             className="chip border-emerald-500/40 text-emerald-600 text-[10px] shrink-0"
@@ -290,6 +325,7 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
             charMap={charMap}
             effHidden={hiddenFlags[i]}
             suggestions={suggestionsByLine?.get(i)}
+            qaIssues={qaByLine?.get(i)}
           />
         ))}
         {scene.cg.map((c, i) => (
@@ -331,6 +367,40 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
 
 export default memo(SceneCard);
 
+/**
+ * 번역 QA 경고 한 줄 — 규칙(copy-through)과 AI 판정이 **같은 UI** 를 쓴다(origin 은 내부 lifecycle
+ * 용이라 사용자에게 노출하지 않는다). category·reason 은 없을 수 있으므로 둘 다 없어도 깨지지 않는다.
+ * "문제 없음"은 세션 QA 캐시만 바꾼다 — 대본·번역·장면 상태(needs_fix 등)를 건드리지 않는다.
+ * stale 재확인은 store 의 dismissQaIssue 가 하므로 여기서 복제하지 않는다.
+ */
+function QaWarning({
+  issue,
+  onDismiss,
+  className,
+}: {
+  issue?: TranslationQaResult;
+  onDismiss: (anchor: TranslationQaResult['anchor']) => void;
+  className?: string;
+}) {
+  if (!issue) return null;
+  return (
+    <p className={`text-[11px] flex flex-wrap items-center gap-1 text-amber-600 ${className ?? ''}`}>
+      <span className="shrink-0">⚠ {issue.category ? QA_CATEGORY_LABEL[issue.category] : '검토 필요'}</span>
+      {issue.reason && <span className="text-gray-500">{issue.reason}</span>}
+      <button
+        className="chip border-edge text-gray-500 hover:text-gray-300"
+        title="검토했고 정상이라고 표시합니다(이 칸은 다시 검수하지 않습니다 — 번역을 고치면 초기화)."
+        onClick={(e) => {
+          e.stopPropagation();
+          onDismiss(issue.anchor);
+        }}
+      >
+        문제 없음
+      </button>
+    </p>
+  );
+}
+
 type DialogueLine = Extract<Line, { kind: 'dialogue' }>;
 /** 대사·지문 공통(hideSprites 를 갖는 두 kind) — LineHideToggle 이 받는 타입. */
 type HideableLine = Extract<Line, { kind: 'dialogue' }> | Extract<Line, { kind: 'narration' }>;
@@ -348,6 +418,7 @@ function LineRow({
   charMap,
   effHidden,
   suggestions,
+  qaIssues,
 }: {
   sceneId: string;
   index: number;
@@ -358,11 +429,14 @@ function LineRow({
   effHidden: boolean;
   /** 이 줄에 붙은 AI 의상 제안(휘발성) — 카드가 한 번에 그룹핑해 내려준다. */
   suggestions?: OutfitSuggestion[];
+  /** 이 줄의 유효한 번역 QA 의심(휘발성) — 로케일 칸 단위라 한 줄에 EN·JA 둘 다 올 수 있다. */
+  qaIssues?: TranslationQaResult[];
 }) {
   const [editing, setEditing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const setText = useStore((s) => s.setLineText);
   const setTr = useStore((s) => s.setLineTranslation);
+  const dismissQa = useStore((s) => s.dismissQaIssue);
   const setLineOutfit = useStore((s) => s.setLineOutfit);
   const applySuggestion = useStore((s) => s.applyOutfitSuggestion);
   const ignoreSuggestion = useStore((s) => s.ignoreOutfitSuggestion);
@@ -370,6 +444,8 @@ function LineRow({
   // 번역 대상 = base 를 제외한 지원 로케일(en·ja) — 엑셀 C/D열과 동일.
   const targets = (Object.keys(LOCALE_LABEL) as Locale[]).filter((l) => l !== base);
   // 성우 테스트는 단일 화자 대사 + 그 화자가 주인공(내레이션 전용)이 아닐 때만(히로인 등).
+  // 로케일 칸 → 그 칸의 의심(같은 줄에서 EN·JA 가 각각 걸릴 수 있다).
+  const qaByLocale = new Map((qaIssues ?? []).map((r) => [r.anchor.targetLocale, r]));
   const isSingleSpeaker = line.kind === 'dialogue' && !line.members?.length;
   const speakerChar = isSingleSpeaker ? charMap.get((line as DialogueLine).speaker) : undefined;
   const canVoice = !!speakerChar && !speakerChar.isProtagonist;
@@ -421,14 +497,18 @@ function LineRow({
               autoFocus
             />
             {targets.map((loc) => (
-              <div key={loc} className="flex items-center gap-1.5">
-                <span className="text-[10px] text-gray-500 w-7 shrink-0 uppercase">{loc}</span>
-                <input
-                  className="field flex-1 text-xs"
-                  value={line.i18n?.[loc] ?? ''}
-                  onChange={(e) => setTr(sceneId, index, loc, e.target.value)}
-                  placeholder={`${LOCALE_LABEL[loc]} 번역`}
-                />
+              <div key={loc}>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-gray-500 w-7 shrink-0 uppercase">{loc}</span>
+                  <input
+                    className="field flex-1 text-xs"
+                    value={line.i18n?.[loc] ?? ''}
+                    onChange={(e) => setTr(sceneId, index, loc, e.target.value)}
+                    placeholder={`${LOCALE_LABEL[loc]} 번역`}
+                  />
+                </div>
+                {/* 고치는 화면에서도 이유가 보여야 한다. 수정하면 anchor 가 어긋나 저절로 사라진다. */}
+                <QaWarning issue={qaByLocale.get(loc)} onDismiss={dismissQa} className="pl-[2.1rem]" />
               </div>
             ))}
           </div>
@@ -444,10 +524,13 @@ function LineRow({
             )}
             {targets.map((loc) =>
               line.i18n?.[loc] ? (
-                <p key={loc} className="text-[11px] text-gray-500 pl-1">
-                  <span className="uppercase text-gray-600 mr-1">{loc}</span>
-                  {line.i18n[loc]}
-                </p>
+                <div key={loc}>
+                  <p className="text-[11px] text-gray-500 pl-1">
+                    <span className="uppercase text-gray-600 mr-1">{loc}</span>
+                    {line.i18n[loc]}
+                  </p>
+                  <QaWarning issue={qaByLocale.get(loc)} onDismiss={dismissQa} className="pl-1" />
+                </div>
               ) : null,
             )}
             {/* 이 줄부터 갈아입는 의상(장면 도중의 #복장 또는 AI 제안 수락분). ✕ 로 개별 해제할 수

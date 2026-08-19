@@ -31,6 +31,9 @@ export const useStore = create<State>((set, get) => {
     selectedSceneId: null,
     busy: {},
     translateProgress: null,
+    // 번역 QA 결과도 project 밖 런타임 state — Outfit 제안과 같은 등급이다(새로고침하면 사라진다).
+    translationQa: {},
+    translationQaProgress: null,
     emotionProgress: null,
     // Outfit AI 제안은 project 밖 런타임 state — 새로고침하면 사라진다(저장·zip·협업 미포함이 설계).
     outfitSuggestions: {},

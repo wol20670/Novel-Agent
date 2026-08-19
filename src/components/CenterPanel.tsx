@@ -1,7 +1,10 @@
 import { useMemo } from 'react';
 import { useStore, type Tab } from '../store';
-import { translateModeOf, translateTargetsOf } from '../types';
+import { baseLocaleOf, translateModeOf, translateModelFor, translateTargetsOf } from '../types';
 import { summarizeUntranslated } from '../generators/translate/collect';
+import { activeQaIssues } from '../generators/translate/qa';
+import { estimateQaCost } from '../generators/translate/qaEstimate';
+import { jumpToScene, nextFlaggedSceneId } from './sceneJump';
 import SceneCard from './SceneCard';
 import AssetsTab from './AssetsTab';
 import RenpyTab from './RenpyTab';
@@ -23,6 +26,18 @@ const TRANSLATE_HINT =
   '기존 번역은 그대로 두고 빈 번역만 채웁니다.\n' +
   'EN·JA = 각 언어의 누락 번역 수 · 대상 = 하나 이상의 번역이 비어 있는 대사·지문 수.';
 
+/**
+ * QA 는 "빈 칸 채우기"(🌐)와 반대로 **이미 채워진 번역**을 본다. 두 버튼의 차이를 여기서 못박는다 —
+ * 이름만 보면 둘 다 "번역 뭔가 하는 버튼"이라 헷갈린다.
+ * ⚠️ "틀린 번역"이 아니라 "의심 번역"이다(자동 수정은 하지 않는다).
+ */
+const QA_HINT =
+  '이미 채워진 번역 중 다시 볼 만한 칸을 찾습니다(자동으로 고치지 않습니다).\n' +
+  '이미 검수한 칸은 건너뜁니다 — 번역이나 원문이 바뀐 칸만 다시 봅니다.';
+const QA_RECHECK_HINT =
+  '검수 기록("문제 없음" 포함)을 모두 지우고 처음부터 다시 검수합니다.\n' +
+  '텍스트가 그대로인 칸도 전부 다시 보므로 비용이 더 듭니다.';
+
 export default function CenterPanel() {
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
@@ -43,12 +58,81 @@ export default function CenterPanel() {
     [translateMode, scenes, translateTargets],
   );
 
+  // ── 번역 QA ────────────────────────────────────────────────────────────────
+  const translationQa = useStore((s) => s.translationQa);
+  const reviewQa = useStore((s) => s.reviewTranslationsAll);
+  const clearQa = useStore((s) => s.clearTranslationQa);
+  const qaBusy = useStore((s) => !!s.busy['batch:translate-qa']);
+  const qaProgress = useStore((s) => s.translationQaProgress);
+  // 이동 기준점 — 기존 selection state 를 그대로 쓴다(새 QA cursor state 를 만들지 않는다).
+  const selectedSceneId = useStore((s) => s.selectedSceneId);
+
+  // 유효한 의심 건수 + 그 의심이 있는 장면 — 저장하지 않고 매번 현재 project 기준으로 파생한다
+  // (번역을 고치면 자동으로 빠진다). 판정은 activeQaIssues 하나만 쓴다(필터를 복제하지 않는다).
+  // ⚠️ 셀렉터 안에서 계산하면 안 된다: zustand 셀렉터는 렌더 여부와 무관하게 **모든 set() 마다**
+  // 재실행돼 키 입력마다 전 대본을 훑는다(missing 카운트와 같은 이유).
+  const qa = useMemo(() => {
+    const flagged = new Set<string>();
+    if (translateMode === 'off') return { count: 0, flagged };
+    const base = baseLocaleOf({ baseLocale });
+    const byId = new Map(scenes.map((s) => [s.id, s]));
+    let count = 0;
+    for (const [sceneId, results] of Object.entries(translationQa)) {
+      const n = activeQaIssues(results, byId.get(sceneId), base).length;
+      if (!n) continue;
+      count += n;
+      flagged.add(sceneId);
+    }
+    return { count, flagged };
+  }, [translateMode, translationQa, scenes, baseLocale]);
+  // 지울 기록이 있을 때만 "전체 재검수"를 보여준다 — 캐시가 비어 있으면 일반 QA 가 곧 전체 검수다.
+  const hasQaCache = useMemo(() => Object.values(translationQa).some((l) => l.length > 0), [translationQa]);
+
+  /**
+   * full=false 는 증분(캐시 재사용), full=true 는 전체 재검수다.
+   * ⚠️ **파괴적인 clear 는 confirm 이후에만** 한다 — 먼저 지우면 사용자가 취소했는데도 기존 검수
+   * 기록("문제 없음" 포함)이 사라진다. 전체 재검수의 견적도 **빈 캐시를 가정**해야 실제 실행과 맞는다.
+   * ⚠️ 여기서 대상 수집·규칙 판정·요청 grouping 을 다시 계산하지 않는다(estimateQaCost 가 실행과
+   * 같은 collectQaTargets/planQaRequests 를 쓴다 — planner parity).
+   * ⚠️ OpenAI 키 유무로 실행을 막지 않는다 — 규칙 검사는 키 없이도 결과를 내고, AI 만 생략하는
+   * 판단은 store 가 소유한다.
+   */
+  const runQa = (full: boolean) => {
+    const model = translateModelFor(translateMode);
+    if (!model) return;
+    const est = estimateQaCost({ scenes, baseLocale }, translateTargets, full ? {} : translationQa, model);
+    // 검수할 칸이 없으면 확인창도 clear 도 하지 않는다 — 안내는 store 의 기존 flash 가 담당한다.
+    if (!est.cells) {
+      void reviewQa();
+      return;
+    }
+    const cost =
+      est.usd !== undefined
+        ? `예상 비용: 약 $${est.usd.toFixed(4)}`
+        : `예상 토큰: 입력 약 ${est.inputTokens} · 출력 약 ${est.outputTokens}\n` +
+          `(이 모델의 단가가 앱에 없어 비용 표시는 생략합니다)`;
+    const ok = window.confirm(
+      (full ? '기존 검수 기록("문제 없음" 포함)을 모두 지우고 처음부터 다시 검수합니다.\n\n' : '') +
+        `번역 QA를 실행합니다.\n` +
+        `검수 대상: ${est.cells}칸\n` +
+        `로컬 규칙 검사: ${est.ruleFlagged}칸(API 호출 없음)\n` +
+        `AI 의미 검수: ${est.aiCells}칸 · 예상 요청 ${est.requests}회\n` +
+        `모델: ${est.model}\n` +
+        `${cost}(실제 과금은 OpenAI 대시보드가 정본)\n` +
+        `번역을 자동으로 고치지 않고, 다시 볼 만한 칸만 표시합니다.\n` +
+        `계속할까요?`,
+    );
+    if (!ok) return;
+    if (full) clearQa();
+    void reviewQa();
+  };
+
   const approved = scenes.filter((s) => s.status === 'approved').length;
   const allApproved = scenes.length > 0 && approved === scenes.length;
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-1.5 px-3 h-12 border-b border-edge bg-panel/40 backdrop-blur-sm sticky top-0 z-10">
+      <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 min-h-12 border-b border-edge bg-panel/40 backdrop-blur-sm sticky top-0 z-10">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -66,7 +150,7 @@ export default function CenterPanel() {
           </button>
         ))}
         {activeTab === 'scenes' && scenes.length > 0 && (
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {translateMode !== 'off' && (
               <>
                 {/* 실행 중에는 숨긴다 — 커밋이 배치 끝 1회라 이 숫자는 시작 시점 값에서 멈춰 있고,
@@ -80,7 +164,12 @@ export default function CenterPanel() {
                       : '번역 빈 칸 없음'}
                   </span>
                 )}
-                <button className="btn-soft" onClick={autoTranslate} disabled={translating} title={TRANSLATE_HINT}>
+                <button
+                  className="btn-soft shrink-0 whitespace-nowrap"
+                  onClick={autoTranslate}
+                  disabled={translating}
+                  title={TRANSLATE_HINT}
+                >
                   {translating ? (
                     translateProgress ? (
                       <span className="flex items-center gap-1.5">
@@ -94,10 +183,58 @@ export default function CenterPanel() {
                     '🌐 누락 번역 채우기'
                   )}
                 </button>
+                {/* 유효한 의심만 센다 — 실행 중에는 커밋이 배치 끝 1회라 숫자가 멈춰 있어 숨긴다.
+                    카드가 content-visibility 로 화면 밖에서는 렌더조차 안 되므로(실측), 숫자만으로는
+                    "어느 장면인지"를 못 찾는다 — 눌러서 다음 대상 장면으로 이동한다. */}
+                {!qaBusy && qa.count > 0 && (
+                  <button
+                    className="text-[10px] whitespace-nowrap shrink-0 rounded px-1.5 py-0.5 border border-amber-500/40 text-amber-600 bg-amber-500/5 hover:bg-amber-500/15"
+                    onClick={() =>
+                      jumpToScene(
+                        nextFlaggedSceneId(scenes.map((s) => s.id), qa.flagged, selectedSceneId) ?? '',
+                      )
+                    }
+                    title="누를 때마다 의심 번역이 있는 다음 장면으로 이동합니다(해당 EN·JA 칸에 이유가 표시됩니다)."
+                  >
+                    ⚠ 의심 {qa.count}건
+                  </button>
+                )}
+                {/* ⚠️ disabled 는 단순 UX 가 아니라 store concurrency 경계다 — 스토어엔 동시 실행·
+                    실행 중 clear 를 막는 revision/run-token 방어가 없다(의도적). */}
+                <button
+                  className="btn-soft shrink-0 whitespace-nowrap"
+                  onClick={() => runQa(false)}
+                  disabled={qaBusy}
+                  title={QA_HINT}
+                >
+                  {qaBusy ? (
+                    qaProgress ? (
+                      <span className="flex items-center gap-1.5">
+                        <Spinner />
+                        {/* 단위는 장면이 아니라 **AI 요청**이다(요청 = 장면 × 대상 로케일). */}
+                        {`번역 QA ${qaProgress.done}/${qaProgress.total} 진행 중…`}
+                      </span>
+                    ) : (
+                      <Spinner />
+                    )
+                  ) : (
+                    '🔍 번역 QA'
+                  )}
+                </button>
+                {hasQaCache && (
+                  <button
+                    className="btn-ghost shrink-0 whitespace-nowrap"
+                    onClick={() => runQa(true)}
+                    disabled={qaBusy}
+                    title={QA_RECHECK_HINT}
+                  >
+                    ↺ 전체 재검수
+                  </button>
+                )}
               </>
             )}
             <button
-              className={allApproved ? 'btn-ghost' : 'btn-soft'}
+              className={`shrink-0 whitespace-nowrap ${allApproved ? 'btn-ghost' : 'btn-soft'}`}
               onClick={approveAll}
               disabled={allApproved}
             >

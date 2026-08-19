@@ -20,6 +20,7 @@ import type {
 } from '../types';
 import type { BuildResult } from '../parser';
 import type { OutfitSuggestion } from '../generators/outfit';
+import type { TranslationQaAnchor, TranslationQaCache } from '../generators/translate/qa';
 import type { AnalyzeMode } from '../project/mergeScenes';
 import type { VoiceEstimate } from '../generators/voice/estimate';
 import type { CollabStatus, PeerPresence } from '../collab';
@@ -73,6 +74,32 @@ export interface State {
   autoTranslateAll: () => Promise<void>;
   /** 자동 번역 진행 상황(장면 기준) — null = 실행 중 아님. CenterPanel 이 "N/M 장면" 으로 표시. */
   translateProgress: { done: number; total: number } | null;
+
+  // ── 번역 품질 QA(의심 번역 탐지) ─────────────────────────────────────────────
+  // ⚠️ 결과는 **project 밖 런타임 state** 다(Outfit 제안과 같은 등급) — localStorage 저장·
+  // .npproj.zip·협업 push 어디에도 안 실린다. QA 는 canonical(Line.i18n)을 **읽기만** 하고
+  // 절대 쓰지 않는다(수정은 사용자가 장면 카드에서 직접 한다).
+  /** sceneId → 검수 결과들. 항목 identity 는 (sceneId, lineIndex, targetLocale). */
+  translationQa: TranslationQaCache;
+  /**
+   * 번역 QA 진행 상황(AI 요청 기준) — null = 실행 중 아님. translateProgress 와 같은 표시 계약이되
+   * 단위가 **장면이 아니라 요청**이다(QA 요청은 장면 × 대상 로케일로 쪼개진다).
+   */
+  translationQaProgress: { done: number; total: number } | null;
+  /**
+   * 기존 번역 중 "다시 볼 만한 것"을 찾는다 — 규칙(copy-through)은 API 없이 즉시, 나머지는 AI 검수.
+   * ⚠️ **규칙 결과는 AI/키/실패와 독립**이다: 키가 없거나 AI 요청이 실패해도 이미 확정된 규칙 결과와
+   * 이미 성공한 AI 결과는 커밋된다(run 전체 폐기 금지). off 면 no-op.
+   */
+  reviewTranslationsAll: () => Promise<void>;
+  /**
+   * "문제 없음" — 그 칸을 사람이 검수해 정상으로 확정한다(origin:'manual'). 이후 재실행에서도 건너뛴다.
+   * ⚠️ Outfit 의 ignoreOutfitSuggestion("목록에서만 제거")과 semantic 이 다르다. anchor 가 이미
+   * stale 이면 아무것도 하지 않는다(그 사이 바뀐 번역에 사람의 판단을 붙이면 안 된다).
+   */
+  dismissQaIssue: (anchor: TranslationQaAnchor) => void;
+  /** QA 세션 캐시를 통째로 비우는 primitive(진행률·busy 는 건드리지 않는다 — 실행 중 배치가 소유). */
+  clearTranslationQa: () => void;
   /**
    * AI 문맥 표정 배정(GPT) — emotion(작가 수동)·emotionAuto(AI) 가 둘 다 없고 실제 업로드된
    * 스프라이트가 있는 대사만 채운다(증분: 이미 채운 줄은 재실행해도 다시 API 를 안 태움).

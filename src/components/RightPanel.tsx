@@ -1,4 +1,5 @@
 import { useStore, sceneById } from '../store';
+import { jumpToScene } from './sceneJump';
 import { useAssetUrl } from './useAssetUrl';
 import { getAsset } from '../storage/assetStore';
 import { downloadBlob } from '../zip/buildZip';
@@ -11,8 +12,6 @@ export default function RightPanel() {
   // sceneById: scenes.find() 셀렉터는 zustand의 매 set() 마다(렌더 여부 무관) 재실행돼 O(N) 스캔이
   // 반복된다 — identity 캐싱된 인덱스로 O(1) 조회(src/store.ts, SceneCard.tsx와 동일 이유).
   const scene = useStore((s) => sceneById(s.project.scenes, sceneId) ?? null);
-  const select = useStore((s) => s.selectScene);
-  const setActiveTab = useStore((s) => s.setActiveTab);
   const importBg = useStore((s) => s.importBackground);
   const importBgm = useStore((s) => s.importBgm);
   const clearBgm = useStore((s) => s.clearBgm);
@@ -22,35 +21,7 @@ export default function RightPanel() {
   // 리모컨 — 장면 목록을 스크롤로 훑는 대신 원하는 장면으로 바로 이동(내 화면에만 적용,
   // 협업자의 스크롤 위치는 건드리지 않는다 — presence(누가 이 장면을 보는지)는 선택 시 기존과
   // 동일하게 반영되지만 스크롤 자체는 로컬 DOM 동작이라 동기화 대상이 아니다).
-  const jumpToScene = (id: string) => {
-    if (!id) return;
-    select(id);
-    setActiveTab('scenes');
-    requestAnimationFrame(() => {
-      const el = document.getElementById(`scene-${id}`);
-      if (!el) return;
-      // content-visibility 플레이스홀더(320px 추정치)가 실제 카드(700~900px)로 렌더되며 매 프레임
-      // 레이아웃이 밀리므로, 한 번만 스크롤하면 목표보다 한참 못 미친 위치에 멈춘다. 위치가
-      // 연속 2프레임 안정될 때까지(또는 최대 40프레임) instant 스크롤을 반복해 "정착"시킨다.
-      let lastTop: number | null = null;
-      let stableCount = 0;
-      let frame = 0;
-      const tick = () => {
-        el.scrollIntoView({ block: 'center' });
-        const top = el.getBoundingClientRect().top;
-        if (lastTop !== null && Math.abs(top - lastTop) < 1) {
-          stableCount += 1;
-        } else {
-          stableCount = 0;
-        }
-        lastTop = top;
-        frame += 1;
-        if (stableCount >= 2 || frame >= 40) return;
-        requestAnimationFrame(tick);
-      };
-      tick();
-    });
-  };
+  // 구현은 ./sceneJump 로 옮겼다(CenterPanel 의 QA 의심 카운트가 같은 이동을 쓴다) — 동작 무변경.
   const curIdx = scenes.findIndex((s) => s.id === sceneId);
   const jumpBy = (delta: number) => {
     if (scenes.length === 0) return;
