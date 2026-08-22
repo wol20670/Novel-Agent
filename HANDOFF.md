@@ -10,7 +10,8 @@
   - **Phase 1 ✅ 완료(구현 `78644d5`)** — 번역 누락 탐지 + 누락분만 번역 UX.
   - **Phase 2 ✅ 완료(구현 `567dc67`)** — 원문 ↔ 번역 유효성. 계약·검증·accepted limitation 은 아래 📌 절이 정본.
   - **Phase 3 ✅ 완료** — 번역 품질 QA·의심 번역 탐지. 계약·검증·accepted limitation 은 아래 📌 절이 정본.
-  - **Phase 4 = 여전히 조건부 후보다** — 선택적 고품질 재검수·재번역. ⚠️ **Phase 3 이 끝났다는 이유만으로 착수 대상이 되지 않는다**: 실제 제작에서 Phase 3 결과가 "재번역이 필요하다"를 입증했을 때만 연다.
+  - **Phase 4 ✅ 완료** — QA Review Excel round-trip(의심 번역만 엑셀로 내보내 외부에서 문맥 보고 고친 뒤 되돌려 넣기). 계약·검증은 아래 📌 절이 정본.
+    ⚠️ **앱 내부 고품질 재번역은 채택하지 않았다** — 조건부 후보였던 "선택적 고품질 재검수·재번역"은 이 왕복 workflow 로 **대체**됐다. 고품질 모델 tier·AI 대체 번역 제안·auto-fix·대본 전체 context packing 을 앱 안에 다시 만들지 말 것(문맥 교정은 외부 전체 대본 + QA Review Excel 이 담당한다).
   - adjacent/backlog(위 계약과 섞지 말 것): LeftPanel 키 안내문의 모델 표기 불일치(`gpt-4o-mini` vs 고품질 `gpt-4o`) · "누락만 보기"류 누락 위치 탐색 UX(QA 쪽 의심 위치 탐색은 Phase 3 에서 해결됐고 **이건 별개**다).
   - **deferred / adjacent(Phase 3 조사 중 확인, 이번엔 손대지 않음)**: `baseLocale='en'` 프로젝트가 실제로 지원되는데(`#설정_글언어` 첫 항목 = base, `sceneBuilder.setTextLocales`) 기존 `translate/index.ts` 의 `systemPrompt()` 은 source 를 **"Korean" 으로 하드코딩**한다. Phase 3 QA 는 `sourceLocale` 을 명시적으로 보내 이 문제를 **상속하지 않는다**. generation prompt 수정은 Phase 3 범위 밖이라 보류했고, 실사용에서 문제가 확인되면 **별도 post-v1 correction** 으로 처리한다.
 - **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
@@ -19,6 +20,45 @@
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 post-v1 번역 Phase 4 가 확정한 것 (QA Review Excel round-trip — 깨지 말 것)
+> ⚠️ 이 절도 **post-v1 번역 로드맵의 Phase 4** 다(v1 Phase 번호와 같은 축이 아니다).
+
+- **구현 = `6d7c1cb`** `feat: QA Review Excel round-trip 추가`(production 5 + tests 2).
+- **Phase 3 이 표시한 의심 번역을 앱 안에서 AI 로 고치지 않는다** — 좁은 전용 엑셀로 내보내고,
+  외부에서 **전체 대본 문맥과 함께** 고친 파일을 다시 읽어 **안전한 칸만** 반영한다.
+- **workbook 포맷**(`src/generators/translate/qaWorkbook.ts` 단일 소스, 일반 대본 엑셀과 **별개 좁은 포맷**):
+  - 보이는 열은 **언어 고정** `A 한국어 · B 영어 · C 일본어`(source/target 순서가 아니다).
+    `D 검수 대상` 은 **표시 전용** — importer 는 읽지 않는다(지우거나 고쳐도 적용 권한이 안 바뀐다).
+  - 적용 권한(flagged locale)의 **authority 는 숨은 metadata(E열 + `_naqa` 시트) 뿐**이고,
+    **export 당시 검수 대상이던 로케일만** 고칠 수 있다. 나머지 칸은 context-only 라 무시된다.
+  - 행1 헤더 5칸은 **structural contract** 다(exact 대조 — 영어/일본어 열을 통째로 바꿔치기한 파일을 여기서 막는다).
+    ⚠️ 헤더 이름으로 **동적 column mapping** 을 만들지 말 것.
+  - **현재 `translationQa` 캐시 없이도 import 된다**(내보내고 앱을 껐다 켠 다음 날 반영하는 게 정상 경로).
+- **안전 규칙**(전부 테스트가 지킨다):
+  - anchor 는 `source·target·speaker·narration` **exact** 비교이고 정본은 기존 **`isQaResultValid` 하나**다(새 술어 금지).
+  - 비교에 **`trim` 을 끼우지 않는다**(`"Hello "`→`"Hello!"` 가 stale 로 오판된다). trim 은 빈칸 판정에만 쓴다.
+  - 빈칸·공백만 남긴 칸은 **삭제가 아니라 무시**다(번역 삭제는 앱 UI 담당).
+  - 수식·숫자·불리언·날짜 셀은 **번역으로 적용하지 않는다**(`String()` 강제 변환 금지 — 전용 strict text cell reader 사용).
+  - 행 metadata 는 **fail-closed** — 필드 하나만 어긋나도 그 행 전체 폐기. 특히 `f`(권한)는 **부분 복구하지 않는다**.
+  - 같은 줄을 가리키는 정상 metadata 가 둘이면 **last-wins 가 아니라 둘 다 폐기**한다.
+  - 원문 열이 metadata 스냅샷과 다르면 **그 행을 통째로 건너뛴다**(숨은 열을 뺀 부분 정렬로 metadata 가 다른 줄에 붙는 사고 방어).
+    ⚠️ 행 전체(A:E)를 함께 옮기는 재정렬은 안전하지만, **원문이 완전히 같은 두 줄끼리 뒤바뀐 경우는 구별할 수 없다**(accepted limitation — UUID/hash 를 만들지 않는다).
+  - stale·빈칸·손상 행이 섞여 있어도 **valid candidate 는 그대로 적용**한다(run 전체 취소 금지). 전체 거절은 **구조 오류**뿐.
+- **적용(`applyQaWorkbook`, scriptSlice)**: 호출 시점의 **현재 project 로 다시 분석**하고(화면 preview 결과를 넘겨받지 않는다),
+  기존 `applyTranslationUpdates` 로 **`setScenes` 1회** 커밋한다(칸이 120개여도 1회 · per-cell setter 없음).
+  candidate 가 0이면 canonical 을 아예 건드리지 않는다. ⚠️ `translationQa` 캐시를 **직접 지우지 않는다** —
+  고친 칸의 경고는 anchor 불일치로 저절로 빠지고 안 고친 칸은 남는다. **자동 QA 재실행도 없다.**
+- **persistence 무변경**: Project schema · localStorage · `.npproj.zip` 포맷 **그대로**이고 workbook metadata 는 **어디에도 저장되지 않는다**(적용 결과는 평범한 `Line.i18n` 값 변경일 뿐).
+- **오용 가드**: 대본 엑셀 업로드(LeftPanel)에 QA 파일을 넣으면 `_naqa` **표식 하나만** 보고 막는다
+  (시트명·헤더·파일명 휴리스틱 금지). `parseExcel.ts`/`sceneBuilder.ts` 는 **무변경** — 일반 대본 파서와 semantic 을 공유·확장하지 않는다.
+- **최종 검증**: typecheck · vitest **57파일/934**(기존 회귀 0) · 스크래치 outDir 빌드 ·
+  **`dump:rpy` 22구성 245파일, clean HEAD 대비 recursive diff 0**(집계 해시 동일) ·
+  **openpyxl 실왕복 PASS**(외부 편집 후에도 숨은 열·`_naqa`·표식/버전 보존, flagged EN 만 반영·context JA 무시) ·
+  실브라우저(내보내기→외부 수정→반영→`tl/english/script.rpy` 에 새 번역 반영·JA 는 원값 유지 · 취소 무변경 ·
+  stale 재반영 시 no-op · 새로고침 유지 · `.npproj.zip` 왕복 유지 · 대본 업로드 오용 가드 · 1280/1536px 헤더).
+- ⚠️ **과장하지 말 것**: openpyxl 왕복은 **이번에 확인한 사실**이지 "모든 엑셀 도구·모든 버전과 영구 호환"이 아니다.
+  숨은 metadata 를 **문법적으로 멀쩡하게 위조**한 경우는 탐지 대상이 아니다(위협 모델은 non-adversarial 왕복 — HMAC/서명을 만들지 않는다).
 
 ## 📌 post-v1 번역 Phase 3 이 확정한 것 (번역 품질 QA — 깨지 말 것)
 > ⚠️ 이 절도 **post-v1 번역 로드맵의 Phase 3** 이다(v1 Phase 번호와 같은 축이 아니다).
@@ -277,3 +317,4 @@
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
 - **post-v1 번역 개선 Phase 3 — 번역 품질 QA·의심 번역 탐지**(기존식 Phase 아님): 번역이 있고 stale 도 아닌데 의미가 의심되는 칸을 규칙 1개 + AI 검수로 찾아 장면 카드에 표시한다(자동 수정 없음). 계약·검증·accepted limitation 은 위 📌 절이 정본. parser·Preview·save/load·`.npproj.zip`·Ren'Py export·Outfit/Expression AI 변경 0(`dump:rpy` clean HEAD 대비 diff 0).
+- **post-v1 번역 개선 Phase 4 — QA Review Excel round-trip**(기존식 Phase 아님): 의심 번역만 좁은 전용 엑셀로 내보내 외부에서 전체 대본 문맥과 함께 고치고, 되돌려 넣으면 **검수 대상이던 칸 중 지금도 유효하고 실제로 바뀐 것만** 반영한다. 계약·검증·accepted limitation 은 위 📌 절이 정본. Project schema·`.npproj.zip`·Preview·Ren'Py 생성기·일반 대본 parser 변경 0(`dump:rpy` clean HEAD 대비 diff 0).
