@@ -139,6 +139,47 @@ describe('O26 — 개별 적용/무시 vs 수동 편집의 semantics 차이', ()
     expect(lineOutfits(0)).toBeUndefined();
   });
 
+  // 같은 줄 다중 캐릭터는 수동 진입점(장면 카드 👗)의 핵심 시나리오다. O5 는 순수 mergeLineOutfit
+  // 만 보므로, store 배선(setLineOutfit → patchLineOutfit)이 그 규칙을 그대로 통과시키는지는
+  // 여기서 고정한다. ⚠️ 수동 UI 가 레코드를 직접 조립하면 이 보장이 깨진다.
+  it('수동 add 는 같은 줄의 다른 캐릭터 지정을 보존한다', () => {
+    const project = projectWith(
+      [
+        scene({
+          id: SCENE_ID,
+          lines: [
+            dialogue('민주', 'a', { outfits: { 지수: '교복' } }),
+            dialogue('지수', 'b'),
+            dialogue('민주', 'c'),
+          ],
+        }),
+      ],
+      { characters: [heroine(), heroine('지수')] },
+    );
+    seed(project);
+    useStore.getState().setLineOutfit(SCENE_ID, 0, '민주', '사복');
+    expect(lineOutfits(0)).toEqual({ 지수: '교복', 민주: '사복' });
+  });
+
+  it('수동 change 는 그 캐릭터 값만 교체한다(다른 키·키 개수 불변)', () => {
+    const project = projectWith(
+      [
+        scene({
+          id: SCENE_ID,
+          lines: [
+            dialogue('민주', 'a', { outfits: { 민주: '교복', 지수: '사복' } }),
+            dialogue('지수', 'b'),
+            dialogue('민주', 'c'),
+          ],
+        }),
+      ],
+      { characters: [heroine('민주', ['교복', '사복', '수영복']), heroine('지수')] },
+    );
+    seed(project);
+    useStore.getState().setLineOutfit(SCENE_ID, 0, '민주', '수영복');
+    expect(lineOutfits(0)).toEqual({ 민주: '수영복', 지수: '사복' });
+  });
+
   it('적용 불가/no-op 제안은 목록에서 제거하되 canonical·revision 은 안 건드린다(무한 실패 방지)', () => {
     const sc = baseScene();
     useStore.setState({

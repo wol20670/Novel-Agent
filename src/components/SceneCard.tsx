@@ -7,6 +7,7 @@ import {
   baseLocaleOf,
   LOCALE_LABEL,
   characterOutfits,
+  outfitFlags,
   resolveOutfit,
   spriteHiddenFlags,
   type SceneStatus,
@@ -17,7 +18,7 @@ import {
   type Scene,
 } from '../types';
 import { resolveEmotionDetailed } from '../generators/emotion/resolve';
-import type { OutfitSuggestion } from '../generators/outfit';
+import { getFirstEffectiveCgIndex, type OutfitSuggestion } from '../generators/outfit';
 import { activeQaIssues, type QaCategory, type TranslationQaResult } from '../generators/translate/qa';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
@@ -97,6 +98,18 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
       .map((nm) => charMap.get(nm))
       .filter((c): c is Character => !!c && (c.outfits?.length ?? 0) > 0);
   }, [scene.lines, charMap]);
+  // 줄마다의 유효 의상 — outfitFlags 단일 소스(generate.ts·ScenePlayer 와 동일 판정).
+  // hiddenFlags 와 같은 관용구로 **(장면,캐릭터)당 한 번만** 계산해 LineRow 에 나눠준다
+  // (줄마다 resolver 를 다시 돌리면 장면당 줄 수 × 캐릭터 수 만큼 반복된다).
+  const outfitFlagsByChar = useMemo(() => {
+    if (!outfitChars.length) return null;
+    const m = new Map<string, string[]>();
+    for (const c of outfitChars) m.set(c.name, outfitFlags(scene, outfitRules, c.name));
+    return m;
+  }, [scene, outfitRules, outfitChars]);
+  // 이 장면의 first effective CG — 그 뒤 줄의 의상 전환은 생성기가 복원·동기화를 통째로 막아
+  // dead write 다(AI 쪽 validateOutfitSuggestion gate 10 과 **같은 기준·같은 함수**).
+  const cgCutoff = useMemo(() => getFirstEffectiveCgIndex(scene), [scene]);
   // AI 의상 전환 제안(휘발성 — project 밖 런타임 state). 줄마다 store 를 구독하지 않도록 카드에서
   // 한 번 받아 lineIndex → 제안들 맵으로 만들고 hiddenFlags 처럼 props 로 내려준다.
   const outfitSuggestions = useStore((s) => s.outfitSuggestions[sceneId]);
@@ -324,6 +337,9 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
             scene={scene}
             charMap={charMap}
             effHidden={hiddenFlags[i]}
+            outfitChars={outfitChars}
+            outfitFlagsByChar={outfitFlagsByChar}
+            cgCutoff={cgCutoff}
             suggestions={suggestionsByLine?.get(i)}
             qaIssues={qaByLine?.get(i)}
           />
@@ -417,6 +433,9 @@ function LineRow({
   scene,
   charMap,
   effHidden,
+  outfitChars,
+  outfitFlagsByChar,
+  cgCutoff,
   suggestions,
   qaIssues,
 }: {
@@ -427,6 +446,12 @@ function LineRow({
   charMap: Map<string, Character>;
   /** 이 줄의 유효 숨김 상태(spriteHiddenFlags[index]) — 버튼 표시·title 안내용. */
   effHidden: boolean;
+  /** 수동 의상 전환 picker 의 캐릭터 후보 — 장면 시작 의상 selector 와 **같은 목록**(카드가 계산). */
+  outfitChars: Character[];
+  /** 캐릭터 → outfitFlags 결과. 후보가 없으면 null(카드가 한 번만 계산해 내려준다). */
+  outfitFlagsByChar: Map<string, string[]> | null;
+  /** 이 장면의 first effective CG 인덱스(없으면 null) — 수동 전환 writable 판정용. */
+  cgCutoff: number | null;
   /** 이 줄에 붙은 AI 의상 제안(휘발성) — 카드가 한 번에 그룹핑해 내려준다. */
   suggestions?: OutfitSuggestion[];
   /** 이 줄의 유효한 번역 QA 의심(휘발성) — 로케일 칸 단위라 한 줄에 EN·JA 둘 다 올 수 있다. */
@@ -434,6 +459,7 @@ function LineRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [outfitOpen, setOutfitOpen] = useState(false);
   const setText = useStore((s) => s.setLineText);
   const setTr = useStore((s) => s.setLineTranslation);
   const dismissQa = useStore((s) => s.dismissQaIssue);
@@ -449,6 +475,12 @@ function LineRow({
   const isSingleSpeaker = line.kind === 'dialogue' && !line.members?.length;
   const speakerChar = isSingleSpeaker ? charMap.get((line as DialogueLine).speaker) : undefined;
   const canVoice = !!speakerChar && !speakerChar.isProtagonist;
+  // 수동 의상 전환을 이 줄에 **쓸 수 있는가** — 진입 버튼과 패널 렌더가 **같은 하나의 조건**을 본다.
+  // 패널을 열어둔 채 #CG 추가·이름 변경·줄 삽입으로 cutoff 가 이 줄 앞으로 오면, cgCutoff 가 scene
+  // 파생값이라 다음 렌더에서 패널이 그대로 사라진다(useEffect·state 동기화 없이 mutation 이 막힌다).
+  // ⚠️ 기존 Line.outfits 칩과 ✕(해제)는 이 조건과 무관하게 계속 보이고 동작해야 한다 — cutoff 이후에
+  // 남은 값을 정리할 유일한 경로다(자동 정리는 하지 않는다).
+  const manualOutfitWritable = cgCutoff === null || index < cgCutoff;
 
   // CG 배경 전환 라인 — 이 지점부터 배경이 CG 로 바뀌고 등장인물이 사라진다(장면 끝까지).
   if (line.kind === 'cg') {
@@ -632,6 +664,36 @@ function LineRow({
 
         <LineHideToggle sceneId={sceneId} index={index} line={line} effHidden={effHidden} />
 
+        {/* 이 줄부터의 의상 전환 — 의상을 쓰는 장면에서만 보인다(후보 0이면 버튼 자체가 없다).
+            ⚠️ disabled 버튼은 브라우저에 따라 hover·title 이 뜨지 않으므로 이유는 **감싼 span** 이 갖는다. */}
+        {outfitChars.length > 0 && (
+          <span
+            className="shrink-0"
+            title={
+              manualOutfitWritable
+                ? '이 줄부터 갈아입을 의상을 지정합니다(AI 의상 제안이 있으면 초기화됩니다).'
+                : 'CG 구간이라 새 의상 전환을 추가할 수 없습니다(이미 지정된 전환의 해제는 가능합니다).'
+            }
+          >
+            <button
+              className={`text-[11px] rounded px-1 py-0.5 border outline-none ${
+                !manualOutfitWritable
+                  ? 'border-edge text-gray-600 bg-panel2 opacity-40 cursor-not-allowed'
+                  : outfitOpen
+                    ? 'border-teal-500 text-teal-500 bg-teal-500/10'
+                    : 'border-edge text-gray-400 bg-panel2 hover:text-gray-200'
+              }`}
+              disabled={!manualOutfitWritable}
+              onClick={(e) => {
+                e.stopPropagation();
+                setOutfitOpen((v) => !v);
+              }}
+            >
+              👗
+            </button>
+          </span>
+        )}
+
         {isDlg && (
           <LineEmotion sceneId={sceneId} index={index} line={line as DialogueLine} scene={scene} charMap={charMap} />
         )}
@@ -640,6 +702,81 @@ function LineRow({
       {voiceOpen && speakerChar && (
         <VoiceLab sceneId={sceneId} lineIndex={index} char={speakerChar} line={line as DialogueLine} baseLocale={base} />
       )}
+
+      {/* ⚠️ manualOutfitWritable 을 버튼과 **똑같이** 여기서도 본다 — 패널이 열린 뒤 CG cutoff 가
+          이 줄 앞으로 이동하면 다음 렌더에서 사라져 select 가 setLineOutfit 을 못 부른다. */}
+      {outfitOpen && manualOutfitWritable && outfitFlagsByChar && (
+        <LineOutfitPanel
+          sceneId={sceneId}
+          index={index}
+          line={line}
+          outfitChars={outfitChars}
+          outfitFlagsByChar={outfitFlagsByChar}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 대사/지문 한 줄의 의상 전환을 수동으로 추가·변경·해제하는 인라인 패널(👗 로 연다).
+ *
+ * 저장 대상은 **패널을 연 바로 그 줄의 index** 다 — 패널이 시각적으로 줄 아래 펼쳐진다고 해서 다음
+ * 줄에 쓰지 않는다. canonical semantic 은 파서 `#복장`·AI 추천과 동일한 **"이 줄부터 적용"** 이고,
+ * 판정은 언제나 outfitFlags 단일 소스다.
+ *
+ * 캐릭터 후보는 카드가 이미 만든 outfitChars(장면 시작 의상 selector 와 **같은 목록**)를 그대로 쓴다 —
+ * 수동 picker 전용 character resolution 을 새로 만들지 않는다. 의상 후보도 기존 characterOutfits 다.
+ *
+ * select 하나가 추가·변경·해제를 전부 처리하고 **선택 즉시** 기존 canonical 액션 setLineOutfit 을
+ * 부른다(드래프트 state·적용/취소 버튼·새 mutation path 없음 — 표정 select·👤 토글과 같은 관용구).
+ * 레코드 머지는 setLineOutfit → patchLineOutfit → mergeLineOutfit 이 하므로 **같은 줄의 다른 캐릭터
+ * 지정은 보존된다**(여기서 레코드를 직접 조립하지 않는다).
+ */
+function LineOutfitPanel({
+  sceneId,
+  index,
+  line,
+  outfitChars,
+  outfitFlagsByChar,
+}: {
+  sceneId: string;
+  index: number;
+  line: HideableLine;
+  outfitChars: Character[];
+  outfitFlagsByChar: Map<string, string[]>;
+}) {
+  const setLineOutfit = useStore((s) => s.setLineOutfit);
+  return (
+    <div
+      className="mt-1 ml-1 rounded border border-teal-500/30 bg-teal-500/5 px-2 py-1.5 space-y-1"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <p className="text-[10px] text-teal-600">👗 이 줄부터 갈아입기</p>
+      {outfitChars.map((c) => {
+        const current = line.outfits?.[c.name] ?? '';
+        // 표시 전용 힌트 — outfitFlags 는 **그 줄의 override 를 이미 적용한 뒤** 값이라 "전환 직전
+        // 의상"이 아니다. 그래서 문구도 "이 줄 적용 후"다(어떤 판정에도 쓰지 않는다).
+        const applied = outfitFlagsByChar.get(c.name)?.[index];
+        return (
+          <div key={c.name} className="flex items-center gap-1.5">
+            <span className="text-[11px] text-gray-400 shrink-0">{c.name}</span>
+            <select
+              className="field text-xs"
+              value={current}
+              onChange={(e) => setLineOutfit(sceneId, index, c.name, e.target.value || undefined)}
+            >
+              <option value="">(전환 없음)</option>
+              {characterOutfits(c).map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+            {applied && <span className="text-[10px] text-gray-500">이 줄 적용 후: {applied}</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }
