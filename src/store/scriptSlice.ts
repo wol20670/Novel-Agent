@@ -6,10 +6,11 @@ import {
   validateOutfitSuggestion,
   type OutfitSuggestion,
 } from '../generators/outfit';
-import type { Scene } from '../types';
+import { analyzeQaWorkbook, QA_COLUMN_LOCALES } from '../generators/translate/qaWorkbook';
+import type { Locale, Scene } from '../types';
 import type { State } from './types';
 import type { SliceCreator } from './context';
-import { localeMeta, unionChars, mergeChars, sceneById } from './helpers';
+import { applyTranslationUpdates, localeMeta, unionChars, mergeChars, sceneById } from './helpers';
 
 /**
  * Outfit AI 입력에 해당하는 Scene 키 — `updateScene` 은 무검증 제네릭 패처(`{...sc, ...patch}`)라
@@ -40,6 +41,7 @@ export const createScriptSlice: SliceCreator<
     | 'setLineHideSprites'
     | 'setLineText'
     | 'setLineTranslation'
+    | 'applyQaWorkbook'
     | 'setLineOutfit'
     | 'invalidateOutfitSuggestions'
     | 'applyOutfitSuggestion'
@@ -243,6 +245,69 @@ export const createScriptSlice: SliceCreator<
           return { ...sc, lines };
         }),
       );
+    },
+
+    /**
+     * QA 검수 Excel(외부에서 고친 번역)을 canonical 에 반영한다 — post-v1 번역 Phase 4-B.
+     *
+     * ⚠️ **커밋 시점의 현재 project 가 authority 다.** 화면이 confirm 전에 계산한 preview 분석을
+     * 넘겨받아 그대로 쓰지 않고 여기서 **다시 분석한다** — 파일을 읽고 사용자가 확인창을 누르는
+     * 사이에 대본·번역이 바뀌었을 수 있고, 그러면 그 칸만 stale 로 빠져야 한다(Phase 2·Phase 8 과
+     * 같은 규율). analyzeQaWorkbook 은 순수·결정론이라 같은 입력이면 같은 답을 낸다.
+     * ⚠️ 분석 ~ setScenes 사이에 **await/Promise/타이머를 넣지 말 것**(검증과 쓰기가 서로 다른
+     * 시점의 project 를 보면 방금 통과시킨 판정이 무의미해진다).
+     *
+     * 쓰기는 **단일 커밋**이다 — 칸마다 setLineTranslation 을 부르면 칸 수에 비례해 리렌더·저장이
+     * 반복된다(autoTranslateAll 이 같은 이유로 updates Map → 1회 커밋을 쓴다).
+     * ⚠️ translationQa 캐시는 **건드리지 않는다**: 고친 칸은 target 이 바뀌어 anchor 가 어긋나므로
+     * activeQaIssues 에서 저절로 빠지고, 안 고친 칸의 경고는 그대로 남아야 한다.
+     * ⚠️ 번역은 Outfit AI 의 입력이 아니므로 invalidateOutfitSuggestions 를 부르지 않는다
+     * (setLineTranslation 과 같은 관용구).
+     */
+    applyQaWorkbook: (doc) => {
+      const project = get().project;
+      const analysis = analyzeQaWorkbook(doc, project);
+      const { candidates, counts } = analysis;
+
+      if (candidates.length) {
+        // 같은 줄의 EN·JA 는 한 레코드로 합친다(줄 단위로 한 번만 쓰기 위해).
+        const updates = new Map<string, Map<number, Partial<Record<Locale, string>>>>();
+        for (const c of candidates) {
+          let lineMap = updates.get(c.sceneId);
+          if (!lineMap) {
+            lineMap = new Map();
+            updates.set(c.sceneId, lineMap);
+          }
+          // 값은 analyzer 가 돌려준 **raw 문자열 그대로** — 여기서 trim·정규화하지 않는다.
+          lineMap.set(c.lineIndex, { ...lineMap.get(c.lineIndex), [c.locale]: c.text });
+        }
+        // 유효성(장면·줄·화자·원문·번역 anchor)은 analyzer 가 이미 끝냈다 — 여기서 다시 판정하지
+        // 않는다(판정이 두 벌이 되는 순간 resolveEmotion 류의 어긋남이 생긴다).
+        setScenes(applyTranslationUpdates(project.scenes, updates));
+      }
+
+      // 집계 단위가 섞이지 않게 알린다 — 칸(번역 하나)과 행(엑셀 한 줄)은 다른 단위다.
+      const skippedCells = counts.stale + counts.blank + counts.invalidCell;
+      const skippedRows = counts.badMeta + counts.duplicate + counts.rowMismatch;
+      if (!candidates.length) {
+        flash(
+          `적용할 수정이 없습니다 — 바뀐 칸이 없거나(${counts.unchanged}칸) 대본이 그 사이 변경됐습니다.`,
+        );
+      } else {
+        const perLocale = QA_COLUMN_LOCALES.filter((l) => analysis.byLocale[l])
+          .map((l) => `${l.toUpperCase()} ${analysis.byLocale[l]}칸`)
+          .join(' · ');
+        flash(
+          `QA 수정 반영 완료 — ${perLocale}` +
+            (skippedCells ? ` · ${skippedCells}칸 건너뜀(대본 변경·빈칸·형식 오류)` : '') +
+            (skippedRows ? ` · ${skippedRows}행 건너뜀(정보 손상·중복·원문 불일치)` : '') +
+            (counts.ignoredEdits ? ` · 검수 대상이 아닌 수정 ${counts.ignoredEdits}칸은 무시했습니다` : ''),
+          skippedCells || skippedRows ? 'error' : 'success',
+        );
+      }
+      // 확인창을 띄운 화면이 **커밋 시점 실제 결과**를 그대로 쓸 수 있게 돌려준다(새 전역 상태를
+      // 만들지 않는다 — findOrphanAssets 가 목록을 돌려주는 것과 같은 등급).
+      return analysis;
     },
 
     // ── Outfit AI: 수동 편집 · 제안 적용/무시 ────────────────────────────────

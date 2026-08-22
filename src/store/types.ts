@@ -21,6 +21,7 @@ import type {
 import type { BuildResult } from '../parser';
 import type { OutfitSuggestion } from '../generators/outfit';
 import type { TranslationQaAnchor, TranslationQaCache } from '../generators/translate/qa';
+import type { QaWorkbookAnalysis, QaWorkbookDoc } from '../generators/translate/qaWorkbook';
 import type { AnalyzeMode } from '../project/mergeScenes';
 import type { VoiceEstimate } from '../generators/voice/estimate';
 import type { CollabStatus, PeerPresence } from '../collab';
@@ -68,6 +69,19 @@ export interface State {
   setLineText: (sceneId: string, lineIndex: number, text: string) => void;
   /** 대사/지문 한 줄의 로케일 번역(i18n)을 수정한다. 빈 값이면 그 로케일을 제거(원문 폴백). */
   setLineTranslation: (sceneId: string, lineIndex: number, locale: Locale, text: string) => void;
+  /**
+   * QA 검수 Excel(외부에서 고쳐 온 번역)을 canonical `Line.i18n` 에 반영한다.
+   *
+   * ⚠️ **호출 시점의 현재 project 로 다시 분석한다** — 화면이 확인창 전에 계산한 preview 결과를
+   * 넘겨받아 적용하지 않는다(그 사이 대본이 바뀌었으면 그 칸만 stale 로 빠져야 한다).
+   * 적용 대상은 analyzer 가 통과시킨 **safe candidate 뿐**이고(stale·빈칸·형식 오류·중복·손상·
+   * 검수 대상 아닌 칸은 제외), 그중 일부에 문제가 있다고 **run 전체를 취소하지 않는다**.
+   * 쓰기는 칸 수와 무관하게 **setScenes 1회**이며, candidate 가 0이면 canonical 을 아예 건드리지 않는다.
+   * ⚠️ `translationQa` 캐시는 읽지도 쓰지도 않는다 — 고친 칸의 경고는 anchor 불일치로 저절로
+   * 사라지고, 안 고친 칸의 경고는 남는다(여기서 clearTranslationQa 를 부르면 그것까지 날아간다).
+   * 반환값은 **커밋 시점 실제 분석 결과**다(화면이 적용 건수·건너뛴 이유를 그대로 보여줄 수 있게).
+   */
+  applyQaWorkbook: (doc: QaWorkbookDoc) => QaWorkbookAnalysis;
   /** 자동 번역 모드 변경(off/fast/quality). off 면 자동 번역 버튼이 숨겨진다. */
   setTranslateMode: (mode: TranslateMode) => void;
   /** 번역이 빈 대사·지문을 GPT 로 en·ja 채운다(빈 칸만). off/키없음이면 no-op/에러. */

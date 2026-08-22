@@ -1,9 +1,18 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useStore, type Tab } from '../store';
 import { baseLocaleOf, translateModeOf, translateModelFor, translateTargetsOf } from '../types';
 import { summarizeUntranslated } from '../generators/translate/collect';
 import { activeQaIssues } from '../generators/translate/qa';
 import { estimateQaCost } from '../generators/translate/qaEstimate';
+import {
+  analyzeQaWorkbook,
+  buildQaWorkbook,
+  collectQaWorkbookRows,
+  readQaWorkbook,
+  QA_COLUMN_LOCALES,
+} from '../generators/translate/qaWorkbook';
+import { sanitizeAscii } from '../project/safeName';
+import { downloadBlob } from '../zip/buildZip';
 import { jumpToScene, nextFlaggedSceneId } from './sceneJump';
 import SceneCard from './SceneCard';
 import AssetsTab from './AssetsTab';
@@ -37,6 +46,17 @@ const QA_HINT =
 const QA_RECHECK_HINT =
   '검수 기록("문제 없음" 포함)을 모두 지우고 처음부터 다시 검수합니다.\n' +
   '텍스트가 그대로인 칸도 전부 다시 보므로 비용이 더 듭니다.';
+
+/**
+ * QA 검수 엑셀 왕복(post-v1 번역 Phase 4) 안내. 두 버튼의 역할 차이를 여기서 못박는다 —
+ * 내보내기는 **지금 의심 표시된 칸만** 담고, 가져오기는 **그 칸만** 되돌려 받는다.
+ */
+const QA_XLSX_OUT_HINT =
+  '지금 의심 표시된 번역만 엑셀로 내려받습니다(한국어·영어·일본어 한 줄에 함께).\n' +
+  '외부에서 전체 대본과 함께 보며 고친 뒤 "QA 반영"으로 되돌려 넣으세요.';
+const QA_XLSX_IN_HINT =
+  '내려받은 QA 엑셀에서 고친 번역을 되돌려 넣습니다(적용 전에 건수를 확인합니다).\n' +
+  '검수 대상이던 칸만 반영되고, 그 사이 대본이 바뀐 칸은 자동으로 건너뜁니다.';
 
 export default function CenterPanel() {
   const activeTab = useStore((s) => s.activeTab);
@@ -127,12 +147,113 @@ export default function CenterPanel() {
     void reviewQa();
   };
 
+  // ── QA 검수 엑셀 왕복(post-v1 번역 Phase 4-C) ──────────────────────────────
+  // ⚠️ 이 두 핸들러는 **파일 입출력과 확인창만** 담당한다 — 대상 선별·유효성·적용 판정은 전부
+  //    Phase 4-A(순수 계약) / Phase 4-B(store) 가 소유한다. 여기서 필터를 복제하지 말 것.
+  const applyQaWorkbook = useStore((s) => s.applyQaWorkbook);
+  const setToast = useStore((s) => s.setToast);
+  const qaFileRef = useRef<HTMLInputElement>(null);
+  // 파일 읽기·XLSX 지연 로딩이 async 라 그 사이 같은 버튼이 다시 눌리는 것만 막는다
+  // (전역 busy 를 새로 만들지 않는다 — QA 실행 busy 와 다른 축이다).
+  const [qaIo, setQaIo] = useState(false);
+
+  /** 📤 지금 의심 표시된 칸만 QA 검수 엑셀로 내려받는다. */
+  const exportQaXlsx = async () => {
+    if (qaIo) return;
+    setQaIo(true);
+    try {
+      // 대상은 **클릭 시점 스냅샷**으로 먼저 확정한다 — 무거운 XLSX 를 받는 사이 프로젝트가 바뀌어도
+      // 사용자가 보고 누른 그 목록이 나가야 한다. 판정은 collectQaWorkbookRows(=activeQaIssues) 단일 소스.
+      const { project, translationQa } = useStore.getState();
+      const rows = collectQaWorkbookRows(project, translationQa);
+      if (!rows.length) {
+        setToast('내보낼 의심 번역이 없습니다(원문이나 번역이 바뀌어 경고가 해제됐을 수 있습니다).');
+        return;
+      }
+      const XLSX = await import('xlsx'); // 지연 로딩(초기 번들 경량화 — 기존 엑셀 경로와 같은 규칙)
+      const wb = buildQaWorkbook(XLSX, rows, {
+        baseLocale: baseLocaleOf(project),
+        exportedAt: new Date().toISOString(),
+      });
+      const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+      const safeName = sanitizeAscii(project.title, 40, 'visual-novel');
+      downloadBlob(new Blob([out], { type: 'application/octet-stream' }), `${safeName}_qa-review.xlsx`);
+      setToast(`QA 검수 엑셀을 내려받았습니다 — ${rows.length}줄.`);
+    } catch (e) {
+      setToast('QA 엑셀 생성 실패: ' + (e as Error).message);
+    } finally {
+      setQaIo(false);
+    }
+  };
+
+  /** 건너뛴 이유 요약 — 확인창과 "적용할 게 없음" 안내가 같은 문구를 쓴다. */
+  const skipSummary = (c: {
+    unchanged: number;
+    stale: number;
+    blank: number;
+    invalidCell: number;
+    badMeta: number;
+    duplicate: number;
+    rowMismatch: number;
+  }) =>
+    `변경 없음 ${c.unchanged}칸 · 오래된 정보 ${c.stale}칸 · 빈칸 ${c.blank}칸 · 셀 형식 오류 ${c.invalidCell}칸\n` +
+    `건너뛴 행: 원문 불일치 ${c.rowMismatch} · 정보 손상 ${c.badMeta} · 중복 ${c.duplicate}`;
+
+  /** 📥 외부에서 고쳐 온 QA 검수 엑셀을 반영한다(확인 후에만). */
+  const onQaFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setQaIo(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const XLSX = await import('xlsx');
+      // 구조 오류(표식 없음·모르는 버전·시트/헤더 손상·metadata 소실)는 여기서 예외 → 아래 catch.
+      // 행·칸 단위 문제(stale·빈칸·중복 등)는 오류가 아니라 아래 집계로 보고된다.
+      const doc = readQaWorkbook(XLSX, buf);
+      // ⚠️ 확인창에 보여줄 숫자는 **그 시점의 현재 project** 기준으로 다시 계산한다(파일 읽기와
+      //    XLSX 지연 로딩이 async 라 렌더 시점 closure 는 낡을 수 있다).
+      //    최종 authority 는 여전히 store 액션의 커밋 시점 재분석이다.
+      const preview = analyzeQaWorkbook(doc, useStore.getState().project);
+      const c = preview.counts;
+      const ignored = c.ignoredEdits ? `\n검수 대상이 아닌 수정 ${c.ignoredEdits}칸은 무시됩니다` : '';
+      if (!preview.candidates.length) {
+        // 적용할 게 없으면 store 액션을 부르지 않는다(canonical 을 건드릴 이유가 없다).
+        setToast(`적용 가능한 변경이 없습니다 — ${skipSummary(c).replace(/\n/g, ' · ')}`);
+        return;
+      }
+      const perLocale = QA_COLUMN_LOCALES.filter((l) => preview.byLocale[l])
+        .map((l) => `${l.toUpperCase()} ${preview.byLocale[l]}칸`)
+        .join(' · ');
+      const ok = window.confirm(
+        `QA 검수 엑셀을 반영합니다.\n\n` +
+          `행 ${c.rows}개 · 검수 대상 ${c.flaggedCells}칸\n` +
+          `적용 대상: ${perLocale}\n` +
+          `${skipSummary(c)}${ignored}\n\n` +
+          `실제 적용: ${preview.candidates.length}칸\n` +
+          `계속할까요?`,
+      );
+      if (!ok) return; // 취소 — canonical 무변경(오류 아님)
+      // ⚠️ **doc 만** 넘긴다. 위 preview 를 넘기거나 캐시하지 말 것 — 액션이 커밋 시점의 현재
+      //    project 로 다시 분석해야 확인창을 보는 동안 바뀐 칸이 걸러진다. 완료 안내도 store 몫이다.
+      applyQaWorkbook(doc);
+    } catch (err) {
+      setToast('QA 엑셀 읽기 실패: ' + (err as Error).message);
+    } finally {
+      if (qaFileRef.current) qaFileRef.current.value = ''; // 같은 파일 재선택 허용
+      setQaIo(false);
+    }
+  };
+
   const approved = scenes.filter((s) => s.status === 'approved').length;
   const allApproved = scenes.length > 0 && approved === scenes.length;
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 min-h-12 border-b border-edge bg-panel/40 backdrop-blur-sm sticky top-0 z-10">
+      {/* shrink-0: 이 헤더는 `h-full` 인 부모의 flex 아이템이라 기본 flex-shrink 로 **min-h-12(48px)까지
+          찌그러진다** — 버튼이 flex-wrap 으로 2~3줄이 돼도 상자는 48px 에 머물러 넘친 줄이 아래 장면
+          카드를 덮는다(1280px 실측). 각 버튼에 이미 걸려 있는 shrink-0 과 같은 종류의 방어이고,
+          flex-wrap 정책은 그대로다(줄바꿈은 하되 상자가 함께 자란다). */}
+      <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 min-h-12 shrink-0 border-b border-edge bg-panel/40 backdrop-blur-sm sticky top-0 z-10">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -231,6 +352,27 @@ export default function CenterPanel() {
                     ↺ 전체 재검수
                   </button>
                 )}
+                {/* 내보낼 대상은 "지금 의심 표시된 칸"이라 카운트가 0이면 버튼도 의미가 없다.
+                    반대로 가져오기는 **세션 QA 캐시가 없어도** 가능해야 한다(내보내고 앱을 껐다 켠 경우). */}
+                {qa.count > 0 && (
+                  <button
+                    className="btn-ghost shrink-0 whitespace-nowrap"
+                    onClick={() => void exportQaXlsx()}
+                    disabled={qaBusy || qaIo}
+                    title={QA_XLSX_OUT_HINT}
+                  >
+                    📤 QA 엑셀
+                  </button>
+                )}
+                <button
+                  className="btn-ghost shrink-0 whitespace-nowrap"
+                  onClick={() => qaFileRef.current?.click()}
+                  disabled={qaBusy || qaIo}
+                  title={QA_XLSX_IN_HINT}
+                >
+                  📥 QA 반영
+                </button>
+                <input ref={qaFileRef} type="file" accept=".xlsx" className="hidden" onChange={onQaFile} />
               </>
             )}
             <button

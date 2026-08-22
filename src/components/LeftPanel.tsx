@@ -4,6 +4,7 @@ import { downloadExcelTemplate, downloadTextTemplate } from '../template';
 import { translateModeOf } from '../types';
 import { getSubscription, type Subscription } from '../generators/voice/typecastProvider';
 import { parseText, parseWorkbook } from '../parser';
+import { isQaWorkbook } from '../generators/translate/qaWorkbook';
 import type { BuildResult } from '../parser';
 import { previewMerge, type AnalyzeMode } from '../project/mergeScenes';
 import Spinner from './Spinner';
@@ -70,6 +71,18 @@ export default function LeftPanel() {
     if (!file) return;
     try {
       const buf = await file.arrayBuffer();
+      // QA 검수 엑셀을 여기에 잘못 넣는 사고를 막는다 — 그 파일의 A열은 화자가 아니라 한국어 **대사**라
+      // 그대로 분석하면 대사마다 새 캐릭터가 생긴 쓰레기 대본이 병합 미리보기에 올라온다.
+      // ⚠️ 판별은 `_naqa` 표식 **하나**만 본다 — 시트 이름·A/B/C 헤더·파일명 같은 휴리스틱을 쓰지 말 것.
+      //    표식만 맞으면(버전이 낯설어도) 일반 대본 파서로 넘기지 않는다. 실제 버전 거절은 QA 반영 쪽
+      //    readQaWorkbook 이 담당한다. 표식이 없으면 아래 기존 흐름이 그대로 돈다.
+      const XLSX = await import('xlsx'); // 지연 로딩 유지(초기 번들에 넣지 않는다)
+      if (isQaWorkbook(XLSX, XLSX.read(buf, { type: 'array' }))) {
+        setToast('이 파일은 QA 검수용 엑셀입니다 — 장면 탭의 "📥 QA 반영"으로 가져오세요.');
+        return;
+      }
+      // parseWorkbook 이 한 번 더 파싱하지만(중복 parse) 대본 업로드는 빈도가 낮아 감수한다 —
+      // 이걸 아끼려고 parseWorkbook 시그니처를 바꾸거나 파싱 결과를 넘기지 말 것.
       const parsed = await parseWorkbook(buf);
       startAnalysis(parsed);
     } catch (err) {
