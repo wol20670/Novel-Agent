@@ -14,12 +14,40 @@
     ⚠️ **앱 내부 고품질 재번역은 채택하지 않았다** — 조건부 후보였던 "선택적 고품질 재검수·재번역"은 이 왕복 workflow 로 **대체**됐다. 고품질 모델 tier·AI 대체 번역 제안·auto-fix·대본 전체 context packing 을 앱 안에 다시 만들지 말 것(문맥 교정은 외부 전체 대본 + QA Review Excel 이 담당한다).
   - adjacent/backlog(위 계약과 섞지 말 것): LeftPanel 키 안내문의 모델 표기 불일치(`gpt-4o-mini` vs 고품질 `gpt-4o`) · "누락만 보기"류 누락 위치 탐색 UX(QA 쪽 의심 위치 탐색은 Phase 3 에서 해결됐고 **이건 별개**다).
   - **deferred / adjacent(Phase 3 조사 중 확인, 이번엔 손대지 않음)**: `baseLocale='en'` 프로젝트가 실제로 지원되는데(`#설정_글언어` 첫 항목 = base, `sceneBuilder.setTextLocales`) 기존 `translate/index.ts` 의 `systemPrompt()` 은 source 를 **"Korean" 으로 하드코딩**한다. Phase 3 QA 는 `sourceLocale` 을 명시적으로 보내 이 문제를 **상속하지 않는다**. generation prompt 수정은 Phase 3 범위 밖이라 보류했고, 실사용에서 문제가 확인되면 **별도 post-v1 correction** 으로 처리한다.
+- **post-v1 의상 전환 UX 개선** — ⚠️ 번역 로드맵·v1 Phase 번호와 **다른 축**이다. **Phase 1(구현)·Phase 2(검증·문서) 완료**, 남은 필수 작업 없음. 계약은 아래 📌 절이 정본이고 `CLAUDE.md` 의상 절에도 durable contract 한 줄이 있다.
 - **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
 - **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 post-v1 의상 전환 UX 개선이 확정한 것 (수동 line outfit — 깨지 말 것)
+> ⚠️ 이 절은 **의상 UX 축**이다(번역 로드맵·v1 Phase 번호와 같은 축이 아니다).
+
+- **새 의상 전환 시스템을 만들지 않았다** — 이미 있던 `Line.outfits` 시스템에 **수동 add/change 진입점만** 없었다.
+  값은 `Line.outfits`, 쓰기는 `setLineOutfit`(→ `patchLineOutfit` → `mergeLineOutfit`) **하나뿐**이라
+  수동 지정과 수락된 AI 제안이 canonical 에서 **구별되지 않는다**(수동 전용 state·mutation 금지).
+- **저장 index = `👗` 를 누른 바로 그 줄**, 의미는 파서 `#복장`·AI 와 동일한 **"이 줄부터"**.
+  패널이 시각적으로 줄 아래 펼쳐져도 다음 줄에 쓰지 않는다(off-by-one 금지).
+- **CG cutoff 는 `getFirstEffectiveCgIndex` 를 AI 와 공유**한다. 파생 조건 하나(`manualOutfitWritable`)를
+  **진입 버튼과 열린 패널 양쪽에** 걸어, 패널을 열어둔 뒤 cutoff 가 앞으로 와도 다음 렌더에서 mutation 이 막힌다.
+  ⚠️ **기존 값의 해제(`✕`)는 cutoff 와 무관하게 계속 허용**한다(남은 값을 정리할 유일한 경로 · 자동 정리 없음).
+- **캐릭터 후보는 기존 `outfitChars`**(장면 시작 의상 selector 와 같은 목록), 의상 후보는 `characterOutfits`.
+  수동 picker 전용 character resolution 을 만들지 않았고 AI `collectOutfitTargets` 와도 결합하지 않았다.
+- **의상 캐릭터가 0인 장면은 `👗` 자체가 안 보인다** — 의상을 안 쓰는 프로젝트는 화면이 그대로다.
+- ⚠️ **same-effective-outfit 지정은 별도 validation 을 두지 않아 가능하다** — 현재 `Line.outfits` semantics 를 따르는
+  **accepted limitation** 이지 보장하는 기능이 아니다. UX 문제가 실제로 확인되기 전엔 정책을 만들지 않는다.
+- **재분석 계약은 기존 `mergeScenes` 그대로**(실측): 원본 대본에 `#복장` 이 있는 줄은 재분석 때 **대본 값으로 되돌아가고**,
+  태그가 없는 줄의 수동 값은 **유지**된다(`next.outfits ?? prev.outfits`). 버그가 아니라 source-of-truth 계약이다.
+- **검증**: typecheck · vitest **57파일/936**(기존 회귀 0 · 신규 2 case 는 기존 `outfit-store.test.ts` O26 에 추가) ·
+  스크래치 outDir 빌드 · **`dump:rpy` 22구성 245파일 diff 0** · 실브라우저(추가/변경/해제 · 지문 줄 · 비화자 줄 ·
+  같은 줄 2캐릭터 보존 · CG 이후 차단+이유+`✕` 유지 · AI 제안 존재 시 기존 계약대로 전체 clear 1회 ·
+  새로고침 유지 · `.npproj.zip` 실왕복 · 1280/1536px 레이아웃 · 의상 0 프로젝트에서 미표시).
+  Preview 는 스프라이트 픽셀 샘플링으로 **그 줄부터** 바뀌는 것을 확인했고, Ren'Py 는 브라우저에서 뽑은 실제 project 로
+  `generateRenpyFiles`(= ZIP 이 쓰는 그 함수)를 돌려 `show <의상attr>` 과 비화자 동기화 show 를 확인했다.
+- ⚠️ **미검증(환경)**: Ren'Py **ZIP 탭 다운로드 전체 경로**는 오프라인이라 폰트 카탈로그(GCS) 대기에서 멈춰 확인하지 못했다.
+  `script.rpy` 생성 자체는 위처럼 확인했고, 이 기능은 `buildZip`·폰트 경로를 **건드리지 않는다**.
 
 ## 📌 post-v1 번역 Phase 4 가 확정한 것 (QA Review Excel round-trip — 깨지 말 것)
 > ⚠️ 이 절도 **post-v1 번역 로드맵의 Phase 4** 다(v1 Phase 번호와 같은 축이 아니다).
@@ -316,5 +344,4 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **post-v1 번역 개선 Phase 3 — 번역 품질 QA·의심 번역 탐지**(기존식 Phase 아님): 번역이 있고 stale 도 아닌데 의미가 의심되는 칸을 규칙 1개 + AI 검수로 찾아 장면 카드에 표시한다(자동 수정 없음). 계약·검증·accepted limitation 은 위 📌 절이 정본. parser·Preview·save/load·`.npproj.zip`·Ren'Py export·Outfit/Expression AI 변경 0(`dump:rpy` clean HEAD 대비 diff 0).
-- **post-v1 번역 개선 Phase 4 — QA Review Excel round-trip**(기존식 Phase 아님): 의심 번역만 좁은 전용 엑셀로 내보내 외부에서 전체 대본 문맥과 함께 고치고, 되돌려 넣으면 **검수 대상이던 칸 중 지금도 유효하고 실제로 바뀐 것만** 반영한다. 계약·검증·accepted limitation 은 위 📌 절이 정본. Project schema·`.npproj.zip`·Preview·Ren'Py 생성기·일반 대본 parser 변경 0(`dump:rpy` clean HEAD 대비 diff 0).
+- **post-v1 의상 전환 UX 개선 Phase 1·2 — 장면 카드 수동 의상 전환**(⚠️ 아직 커밋 전): 줄 action 의 `👗` 로 그 줄부터의 의상 전환을 직접 추가·변경·해제한다. 계약·검증은 아래 📌 절이 정본. **production 변경은 `SceneCard.tsx` 1개**이고 Project schema·parser·Preview·Ren'Py 생성기·store·AI core 변경 0(`dump:rpy` 22구성 245파일 diff 0).
