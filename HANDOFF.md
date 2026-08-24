@@ -12,9 +12,12 @@
   - **Phase 3 ✅ 완료** — 번역 품질 QA·의심 번역 탐지. 계약·검증·accepted limitation 은 아래 📌 절이 정본.
   - **Phase 4 ✅ 완료** — QA Review Excel round-trip(의심 번역만 엑셀로 내보내 외부에서 문맥 보고 고친 뒤 되돌려 넣기). 계약·검증은 아래 📌 절이 정본.
     ⚠️ **앱 내부 고품질 재번역은 채택하지 않았다** — 조건부 후보였던 "선택적 고품질 재검수·재번역"은 이 왕복 workflow 로 **대체**됐다. 고품질 모델 tier·AI 대체 번역 제안·auto-fix·대본 전체 context packing 을 앱 안에 다시 만들지 말 것(문맥 교정은 외부 전체 대본 + QA Review Excel 이 담당한다).
+  - **Phase 5 ✅ 완료** — QA Review Excel 의 **안 고치고 돌아온 칸**을 사용자 확인 뒤 `문제 없음` 으로 일괄 처리.
+    ⚠️ **unchanged 자동 승인이 아니다**(앱은 검수 여부를 모른다 — explicit confirm 이 판단을 만든다). 계약·검증은 아래 📌 절이 정본.
   - adjacent/backlog(위 계약과 섞지 말 것): LeftPanel 키 안내문의 모델 표기 불일치(`gpt-4o-mini` vs 고품질 `gpt-4o`) · "누락만 보기"류 누락 위치 탐색 UX(QA 쪽 의심 위치 탐색은 Phase 3 에서 해결됐고 **이건 별개**다).
   - **deferred / adjacent(Phase 3 조사 중 확인, 이번엔 손대지 않음)**: `baseLocale='en'` 프로젝트가 실제로 지원되는데(`#설정_글언어` 첫 항목 = base, `sceneBuilder.setTextLocales`) 기존 `translate/index.ts` 의 `systemPrompt()` 은 source 를 **"Korean" 으로 하드코딩**한다. Phase 3 QA 는 `sourceLocale` 을 명시적으로 보내 이 문제를 **상속하지 않는다**. generation prompt 수정은 Phase 3 범위 밖이라 보류했고, 실사용에서 문제가 확인되면 **별도 post-v1 correction** 으로 처리한다.
 - **post-v1 의상 전환 UX 개선** — ⚠️ 번역 로드맵·v1 Phase 번호와 **다른 축**이다. **Phase 1(구현)·Phase 2(검증·문서) 완료**, 남은 필수 작업 없음. 계약은 아래 📌 절이 정본이고 `CLAUDE.md` 의상 절에도 durable contract 한 줄이 있다.
+  **구현 = `258c637`(장면 카드 수동 의상 전환 UI) · 문서 = `95ba76e`** — 이 둘은 **post-v1 번역 Phase 5 를 시작하기 전에 이미 main 에 있었고** Phase 5 는 이 축을 건드리지 않았다(`SceneCard.tsx` 무수정 · `👗` 패널 실브라우저 smoke 확인). ⚠️ 번역 Phase 5 baseline 을 `76612eb` 로 착각하지 말 것 — 실제 baseline 은 **`95ba76e`** 다.
 - **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
 - **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
@@ -48,6 +51,65 @@
   `generateRenpyFiles`(= ZIP 이 쓰는 그 함수)를 돌려 `show <의상attr>` 과 비화자 동기화 show 를 확인했다.
 - ⚠️ **미검증(환경)**: Ren'Py **ZIP 탭 다운로드 전체 경로**는 오프라인이라 폰트 카탈로그(GCS) 대기에서 멈춰 확인하지 못했다.
   `script.rpy` 생성 자체는 위처럼 확인했고, 이 기능은 `buildZip`·폰트 경로를 **건드리지 않는다**.
+
+## 📌 post-v1 번역 Phase 5 가 확정한 것 (QA Excel unchanged → manual OK — 깨지 말 것)
+> ⚠️ 이 절도 **post-v1 번역 로드맵의 Phase 5** 다(v1 Phase 번호와 같은 축이 아니다).
+
+- **Phase 4 가 되돌려주지 못하던 절반을 채운다** — 외부 검수자가 **고친** 칸은 Phase 4 가 canonical 로
+  반영하지만, **"원래 번역이 맞다"고 판단해 그대로 둔** 칸은 앱에서 `문제 없음` 을 손으로 다시 눌러야 했다
+  (실사용: flagged 158칸 중 105 수정 / **53 무수정** → 53건이 의심 목록에 그대로 남음).
+- ⚠️ **unchanged 는 "검수 완료"의 증거가 아니다** — 앱은 검수 provenance 를 모른다(파일을 열어보지도 않고
+  그대로 다시 넣어도 unchanged 다). 그래서 analyzer 가 내는 건 **eligibility 뿐**이고, manual 판단은
+  **사용자의 명시적 confirm** 이 만든다. ⚠️ 자동 승인 금지 · UI 문구에 "검수 완료"라고 단정하지 말 것.
+- **workbook 은 v1 그대로**(새 열·시트·marker·버전 **0**) — 기존 hidden metadata 가 이미 anchor 8필드를
+  담고 있어 **세션 QA 캐시 없이도** 복원된다(내보내고 앱을 껐다 켠 다음 날 반영이 정상 경로).
+- **analyzer 출력이 두 축이 됐다**(`analyzeQaWorkbook`, Phase 4 판정 순서·집계는 무변경):
+  ```
+  candidates         = 고쳐 온 칸   → 기존 Phase 4 canonical correction
+  manualOkCandidates = 안 고친 칸   → "문제 없음" eligibility (TranslationQaAnchor[])
+  ```
+  `text === snapshot` 하나로 갈리므로 **상호배타**다. manual OK 자격은 **flagged · metadata strict ·
+  duplicate 아님 · 원문 열 일치 · strict text cell · exact unchanged · blank/공백 아님 · 현재 project
+  exact-valid** 전부를 만족해야 하고, 이 조건들은 **기존 pass 위치에서 그대로 나온다**(새 validity 술어 0).
+  anchor 정의는 `anchorOf` 하나를 changed·unchanged 두 경로가 공유한다.
+- ⚠️ **`counts.unchanged` 의 Phase 4 의미를 바꾸지 않았다**(blank·stale 인 unchanged 도 계속 포함).
+  빈/공백 칸은 **후보에서만** 빠지고 `counts.blank` 로 옮기지 않는다. ⚠️ **`unchanged − manualOk` 에
+  의미를 부여하지 말 것** — 그 차이엔 unchanged-but-stale 과 unchanged-but-blank 가 섞여 있어
+  stale 전용 숫자가 아니다(UI 도 두 숫자를 따로 보여줄 뿐이다). `counts.stale` 정의도 그대로다.
+- **store 는 액션 하나만 추가**(`applyQaWorkbookManualOk`, scriptSlice) — **`applyQaWorkbook` 은 무수정**.
+  같은 doc 을 받아 **커밋 시점 현재 project 로 재분석**하고(preview 를 넘겨받지 않는다), 결과는
+  `dismissQaIssue` 와 **정확히 같은 shape**(`verdict:'ok'`·`origin:'manual'`, category·reason·model 없음)이라
+  기존 재실행 skip(`shouldSkipCell`)·pending precedence(`manualByCell`)·`compactQaResults` 가 그대로 걸린다.
+  쓰기는 칸 수와 무관하게 **functional set 1회**(`upsertQaResults` 가 이미 배열 batch 다 — 새 primitive 금지),
+  후보 0이면 캐시를 아예 안 건드리고 `{ committed: 0 }`. ⚠️ 반환에 **`skipped` 를 만들지 말 것**
+  (stale·blank·non-flagged·badMeta·duplicate 는 denominator 가 달라 한 숫자로 못 섞는다).
+  ⚠️ canonical(`setScenes`/`autoSave`)·collab·persistence·`clearTranslationQa`·자동 QA 재실행 **전부 없다**.
+- **UI 는 확인창 2개가 독립**이다(`onQaFile`) — canonical 취소가 **handler 전체를 return 하지 않는다**
+  (기존 `if (!ok) return;` 을 분기 변수로 바꿨다). 네 조합이 전부 의미를 갖는다:
+  `YES/YES`(둘 다) · `YES/NO`(canonical 만, **rollback 없음**) · **`NO/YES`(canonical 무변경 + manual 만)** ·
+  `NO/NO`(무변경). canonical 0·manual>0 이면 confirm #1 을 **생략**하고, canonical>0·manual 0 이면
+  **기존 Phase 4 UX 그대로**(정보 줄도 안 붙는다), 둘 다 0이면 기존 no-candidate toast 다.
+  적용 건수 표시는 preview 가 아니라 **store 의 `committed`** 를 쓴다. `qaIo`·catch·finally 는 무변경.
+- **manual OK 는 Phase 3 과 같은 session-only 다** — Project schema·localStorage·`.npproj.zip`·협업
+  **어디에도 안 실린다**(실측: archive 는 `project.json` 하나뿐이고 QA 키 0 · `Line` 키는
+  `kind/speaker/text/i18n` 그대로 · localStorage 에도 QA 문자열 0). **fresh session 에서 복원되지 않는다**
+  — 실측으로 이전 세션에서 manual OK 한 3칸이 새 세션 견적에서 **다시 검수 대상 4칸**으로 잡혔다.
+  ⚠️ same-runtime project 교체(`importProject`/`resetAll`/`applyRemoteProject`)는 **Phase 3 동작 그대로**다:
+  `translationQa` 를 명시적으로 clear 하지 **않고**(셋 다 `invalidateOutfitSuggestions` 만 부른다),
+  anchor 가 같으면 ephemeral 결과가 계속 유효하고 달라지면 `activeQaIssues`/`isQaResultValid` 가 걸러낸 뒤
+  기존 `compactQaResults` 가 치운다. **Phase 5 에서 이 정책을 새로 만들지 않았다.**
+- **검증**: typecheck · vitest **57파일/966**(기존 954 회귀 0 · 신규 30 = analyzer 18 + store 12) ·
+  스크래치 outDir 빌드(xlsx 는 여전히 **동적 chunk 분리**, 자산 해시 4개 동일) ·
+  **`dump:rpy` 22구성 245파일 — clean HEAD `95ba76e` worktree 대비 recursive diff 0**(집계 해시 동일) ·
+  일반 Excel 회귀(`parseExcel`/`sceneBuilder` 무수정 · parser/excel/merge 69 tests) ·
+  실브라우저(4-way confirm 전 조합 · manual-only · opt-out · canonical 왕복 · `.npproj.zip` 실왕복 ·
+  fresh session 재검수 · Preview 렌더 · 의상 전환 `👗` 패널).
+- ⚠️ **accepted limitations(과장하지 말 것)**
+  - **"검수했다"는 주장을 검증할 수 없다** — 방어선은 confirm #2 의 explicit opt-in **하나**이고
+    그 이상의 provenance(서명·편집 흔적·타임스탬프)는 만들지 않는다. 위협 모델은 계속 **non-adversarial**.
+  - manual OK 는 새로고침이면 사라진다 — 복구 경로는 **그 엑셀을 다시 import** 하는 것뿐이다.
+  - Line UUID 가 없어, 완전히 동일한 semantic input 을 가진 두 줄의 rare ambiguity 는 Phase 3·4 와
+    똑같이 남고 same-runtime project 교체 경로에도 같은 형태로 존재한다(고치지 않는다).
 
 ## 📌 post-v1 번역 Phase 4 가 확정한 것 (QA Review Excel round-trip — 깨지 말 것)
 > ⚠️ 이 절도 **post-v1 번역 로드맵의 Phase 4** 다(v1 Phase 번호와 같은 축이 아니다).
@@ -344,4 +406,7 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **post-v1 의상 전환 UX 개선 Phase 1·2 — 장면 카드 수동 의상 전환**(⚠️ 아직 커밋 전): 줄 action 의 `👗` 로 그 줄부터의 의상 전환을 직접 추가·변경·해제한다. 계약·검증은 아래 📌 절이 정본. **production 변경은 `SceneCard.tsx` 1개**이고 Project schema·parser·Preview·Ren'Py 생성기·store·AI core 변경 0(`dump:rpy` 22구성 245파일 diff 0).
+- **post-v1 번역 Phase 5 — QA Excel unchanged → manual OK 왕복**(⚠️ 아직 커밋 전): 외부 검수에서 **안 고치고
+  돌아온** flagged 칸을 사용자 확인(confirm #2) 뒤 `문제 없음` 으로 일괄 처리한다. 계약·검증은 위 📌 절이 정본.
+  production 변경 4개(`qaWorkbook.ts` 분류 1축 + store 액션 1개 + `CenterPanel` 확인창 분기) ·
+  workbook v1·Project schema·persistence·협업·Ren'Py 생성기 변경 0(`dump:rpy` 22구성 245파일 diff 0).
