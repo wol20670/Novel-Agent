@@ -20,6 +20,7 @@ import {
   QA_WORKBOOK_MARKER,
   QA_WORKBOOK_VERSION,
 } from '../src/generators/translate/qaWorkbook';
+import { sameQaAnchor } from '../src/generators/translate/qa';
 import type { TranslationQaAnchor, TranslationQaCache } from '../src/generators/translate/qa';
 import { baseLocaleOf, type Line, type Locale, type Project } from '../src/types';
 import { dialogue, projectWith, scene } from './fixtures';
@@ -859,5 +860,258 @@ describe('QA workbook — 행 재정렬', () => {
     const { candidates, counts } = analyze(wb, project);
     expect(counts.rows).toBe(1);
     expect(candidates).toHaveLength(1);
+  });
+});
+
+// ── ⑩ manual OK 후보 — post-v1 번역 Phase 5-A ────────────────────────────────
+//
+// "외부에서 **고치지 않고** 돌아온 flagged 칸" 중 지금 "문제 없음"(origin:'manual')으로 확정해도
+// 안전한 것만 골라낸다. 여기서 지키는 계약:
+//   ① candidates(changed)와 **상호배타** — 한 칸은 둘 중 하나만 된다
+//   ② 안전 조건이 전부 **기존 pass 위치**에서 나온다(새 validity 술어 없음)
+//   ③ 빈/공백 칸은 후보에서만 빠지고 **counts.blank 로 옮겨가지 않는다**
+//   ④ **Phase 4 counts 는 한 칸도 달라지지 않는다**
+// ⚠️ 이 목록은 eligibility 일 뿐 "사용자가 검수했다"는 증거가 아니다 — 확정은 호출측 opt-in 뒤.
+
+describe('QA workbook — manual OK 후보(Phase 5-A)', () => {
+  /** 아무것도 고치지 않고 그대로 돌아온 workbook(= 외부 검수 결과 "원래 번역이 맞다"). */
+  function untouched(project: Project, refs: CellRef[] = [{ lineIndex: 0, locale: 'en' }]) {
+    return exportWorkbook(project, qaCacheFor(project, refs));
+  }
+
+  /** Phase 3 이 **현재 project 에서** 만드는 anchor — 복원 결과와 대조할 정답지. */
+  function anchorAt(project: Project, lineIndex: number, locale: Locale): TranslationQaAnchor {
+    const line = project.scenes[0].lines[lineIndex];
+    if (line.kind !== 'dialogue' && line.kind !== 'narration') throw new Error('fixture');
+    return {
+      sceneId: 's1',
+      lineIndex,
+      sourceLocale: baseLocaleOf(project),
+      targetLocale: locale,
+      source: line.text,
+      target: line.i18n![locale]!,
+      speaker: line.kind === 'dialogue' ? line.speaker : undefined,
+      narration: line.kind === 'narration',
+    };
+  }
+
+  // ① 기본 — unchanged + flagged + exact-valid
+  it('고치지 않고 돌아온 flagged 칸은 manual OK 후보이고 canonical candidate 가 아니다', () => {
+    const project = baseProject();
+    const { candidates, manualOkCandidates, counts } = analyze(untouched(project), project);
+
+    expect(candidates).toEqual([]);
+    expect(counts.unchanged).toBe(1);
+    expect(manualOkCandidates).toEqual([anchorAt(project, 0, 'en')]);
+  });
+
+  it('지문 줄도 후보가 된다(speaker 부재·narration true 가 anchor 에 그대로 실린다)', () => {
+    const project = baseProject();
+    const { manualOkCandidates } = analyze(untouched(project, [{ lineIndex: 2, locale: 'ja' }]), project);
+
+    expect(manualOkCandidates).toHaveLength(1);
+    expect(manualOkCandidates[0].speaker).toBeUndefined();
+    expect(manualOkCandidates[0].narration).toBe(true);
+  });
+
+  // ② ~ ⑤ stale — 현재 project 와 어긋나면 사람의 판단을 붙이지 않는다
+  it('원문이 그 사이 바뀌면 후보가 아니다(unchanged 집계는 그대로)', () => {
+    const project = baseProject();
+    const wb = untouched(project);
+    const changed = baseProject();
+    (changed.scenes[0].lines[0] as Extract<Line, { kind: 'dialogue' }>).text = '오늘은 좀 별로였어.';
+
+    const { manualOkCandidates, counts } = analyze(wb, changed);
+    expect(manualOkCandidates).toEqual([]);
+    expect(counts.unchanged).toBe(1); // ⚠️ unchanged 는 stale 여부와 무관하게 그대로다
+    expect(counts.stale).toBe(0); // ⚠️ unchanged-but-stale 을 stale 로 옮기지 않는다
+  });
+
+  it('번역이 앱에서 그 사이 바뀌면 후보가 아니다', () => {
+    const project = baseProject();
+    const wb = untouched(project);
+    const changed = baseProject();
+    (changed.scenes[0].lines[0] as Extract<Line, { kind: 'dialogue' }>).i18n = { en: '앱에서 이미 고친 값', ja: JA1 };
+
+    expect(analyze(wb, changed).manualOkCandidates).toEqual([]);
+  });
+
+  it('화자 변경·대사↔지문 변경이면 후보가 아니다', () => {
+    const project = baseProject();
+
+    const speakerChanged = baseProject();
+    (speakerChanged.scenes[0].lines[0] as Extract<Line, { kind: 'dialogue' }>).speaker = '서연';
+    expect(analyze(untouched(project), speakerChanged).manualOkCandidates).toEqual([]);
+
+    const kindChanged = baseProject();
+    kindChanged.scenes[0].lines[0] = narration(KO1, { i18n: { en: EN1, ja: JA1 } });
+    expect(analyze(untouched(project), kindChanged).manualOkCandidates).toEqual([]);
+  });
+
+  it('장면·줄이 사라져도 후보 0이고 예외를 던지지 않는다', () => {
+    const project = baseProject();
+    const wb = untouched(project);
+
+    expect(analyze(wb, projectWith([], { translateMode: 'fast' })).manualOkCandidates).toEqual([]);
+
+    const shortened = baseProject();
+    shortened.scenes[0].lines = [];
+    expect(analyze(wb, shortened).manualOkCandidates).toEqual([]);
+  });
+
+  it('baseLocale 이 내보낼 때와 달라지면 후보가 아니다', () => {
+    const project = baseProject();
+    expect(analyze(untouched(project), baseProject({ baseLocale: 'ja' })).manualOkCandidates).toEqual([]);
+  });
+
+  // ⑥ 권한 — 검수 대상이 아닌 칸
+  it('검수 대상이 아닌(non-flagged) 칸은 손대지 않아도 후보가 아니다', () => {
+    const project = baseProject();
+    // EN 만 flagged 로 내보낸다 → 같은 행의 JA 는 context-only 다.
+    const { manualOkCandidates, counts } = analyze(untouched(project, [{ lineIndex: 0, locale: 'en' }]), project);
+
+    expect(counts.flaggedCells).toBe(1); // JA 는 flaggedCells 에도 안 잡힌다
+    expect(manualOkCandidates.map((a) => a.targetLocale)).toEqual(['en']);
+  });
+
+  // ⑦ 행/셀 단위 폐기
+  it('badMeta 행은 후보가 아니다(Pass 3 에 도달하지 않는다)', () => {
+    const project = baseProject();
+    const wb = untouched(project);
+    patchMeta(wb, 0, { i: '0' }); // schema 위반 — i 는 number 여야 한다
+
+    const { manualOkCandidates, counts } = analyze(wb, project);
+    expect(counts.badMeta).toBe(1);
+    expect(manualOkCandidates).toEqual([]);
+  });
+
+  it('duplicate identity 행은 둘 다 후보가 아니다', () => {
+    const project = baseProject();
+    const rows = collectQaWorkbookRows(project, qaCacheFor(project, [{ lineIndex: 0, locale: 'en' }]));
+    const wb = buildQaWorkbook(XLSX, [rows[0], { ...rows[0] }], { baseLocale: 'ko', exportedAt: EXPORTED_AT });
+
+    const { manualOkCandidates, counts } = analyze(wb, project);
+    expect(counts.duplicate).toBe(2);
+    expect(manualOkCandidates).toEqual([]);
+  });
+
+  it('원문 열이 어긋난(rowMismatch) 행은 후보가 아니다', () => {
+    const project = baseProject();
+    const wb = untouched(project);
+    editCell(wb, 0, 'ko', '원문을 건드렸다');
+
+    const { manualOkCandidates, counts } = analyze(wb, project);
+    expect(counts.rowMismatch).toBe(1);
+    expect(manualOkCandidates).toEqual([]);
+  });
+
+  it('수식·비텍스트 셀은 unchanged 판정 전에 걸려 후보가 아니다', () => {
+    const project = baseProject();
+    const wb = untouched(project);
+    putCell(wb, 0, colOf('en'), { t: 's', v: EN1, f: 'CONCATENATE("a","b")' });
+
+    const { manualOkCandidates, counts } = analyze(wb, project);
+    expect(counts.invalidCell).toBe(1);
+    expect(counts.unchanged).toBe(0);
+    expect(manualOkCandidates).toEqual([]);
+  });
+
+  // ⑧ 상호배타
+  it('고쳐 온 칸은 canonical candidate 이고 manual OK 후보가 아니다', () => {
+    const project = baseProject();
+    const wb = untouched(project);
+    editCell(wb, 0, 'en', 'Today was really fun.');
+
+    const { candidates, manualOkCandidates, counts } = analyze(wb, project);
+    expect(candidates).toHaveLength(1);
+    expect(manualOkCandidates).toEqual([]);
+    expect(counts.unchanged).toBe(0);
+  });
+
+  // ⑨ 같은 행에서 EN 은 고치고 JA 는 그대로
+  it('EN 은 고치고 JA 는 그대로면 각각 다른 경로로 간다(같은 줄)', () => {
+    const project = baseProject();
+    const wb = untouched(project, [
+      { lineIndex: 0, locale: 'en' },
+      { lineIndex: 0, locale: 'ja' },
+    ]);
+    editCell(wb, 0, 'en', 'Today was really fun.');
+
+    const { candidates, manualOkCandidates, counts } = analyze(wb, project);
+    expect(candidates).toEqual([{ sceneId: 's1', lineIndex: 0, locale: 'en', text: 'Today was really fun.' }]);
+    expect(manualOkCandidates).toEqual([anchorAt(project, 0, 'ja')]);
+    expect(counts.flaggedCells).toBe(2);
+    expect(counts.unchanged).toBe(1);
+  });
+
+  // ⑩⑪ 빈칸·공백 — 후보에서만 빼고 counts 는 건드리지 않는다
+  it('snapshot 이 빈 문자열이면 unchanged 로 세되 후보가 아니고 blank 집계도 그대로다', () => {
+    const project = baseProject();
+    const wb = untouched(project);
+    // 내보낸 뒤 그 칸이 빈 값이 된 상황을 metadata·표시 칸 양쪽에 만든다(= exact unchanged).
+    patchMeta(wb, 0, { v: { ko: KO1, en: '', ja: JA1 } });
+    putCell(wb, 0, colOf('en'), null); // 빈 셀 → text === '' === snapshot
+
+    const { manualOkCandidates, counts } = analyze(wb, project);
+    expect(counts.unchanged).toBe(1); // ⚠️ Phase 4 집계 그대로
+    expect(counts.blank).toBe(0); // ⚠️ counts.blank 로 옮기지 않는다
+    expect(manualOkCandidates).toEqual([]);
+  });
+
+  it('snapshot 이 공백뿐이어도 같다(unchanged 유지 · blank 불변 · 후보 0)', () => {
+    const project = baseProject();
+    const wb = untouched(project);
+    patchMeta(wb, 0, { v: { ko: KO1, en: '   ', ja: JA1 } });
+    editCell(wb, 0, 'en', '   ');
+
+    const { manualOkCandidates, counts } = analyze(wb, project);
+    expect(counts.unchanged).toBe(1);
+    expect(counts.blank).toBe(0);
+    expect(manualOkCandidates).toEqual([]);
+  });
+
+  // ⑫ Phase 4 counts 완전 보존
+  it('Phase 4 의 counts 는 manual OK 후보 유무와 무관하게 동일하다', () => {
+    const project = baseProject();
+    const wb = untouched(project, [
+      { lineIndex: 0, locale: 'en' },
+      { lineIndex: 1, locale: 'en' },
+      { lineIndex: 2, locale: 'ja' },
+    ]);
+    editCell(wb, 1, 'en', 'See you tomorrow.'); // 1건만 고쳐 온다
+
+    const { counts, candidates, manualOkCandidates } = analyze(wb, project);
+    expect(counts).toEqual({
+      rows: 3,
+      flaggedCells: 3,
+      unchanged: 2,
+      blank: 0,
+      stale: 0,
+      invalidCell: 0,
+      badMeta: 0,
+      duplicate: 0,
+      rowMismatch: 0,
+      ignoredEdits: 0,
+    });
+    expect(candidates).toHaveLength(1);
+    expect(manualOkCandidates).toHaveLength(2);
+  });
+
+  // ⑬ anchor lossless — 세션 캐시 없이 metadata 만으로 복원된다
+  it('후보 anchor 8필드는 workbook metadata 만으로 lossless 복원된다(세션 캐시 불필요)', () => {
+    const project = baseProject();
+    const wb = untouched(project, [
+      { lineIndex: 0, locale: 'en' },
+      { lineIndex: 2, locale: 'ja' },
+    ]);
+
+    const { manualOkCandidates } = analyze(wb, project);
+    expect(manualOkCandidates).toHaveLength(2);
+    // Phase 3 이 현재 project 에서 만드는 anchor 와 **필드 단위로 동일**해야 한다.
+    for (const a of manualOkCandidates) {
+      const expected = anchorAt(project, a.lineIndex, a.targetLocale);
+      expect(sameQaAnchor(a, expected)).toBe(true);
+      expect(a).toEqual(expected);
+    }
   });
 });

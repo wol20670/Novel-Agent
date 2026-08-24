@@ -82,6 +82,26 @@ export interface State {
    * 반환값은 **커밋 시점 실제 분석 결과**다(화면이 적용 건수·건너뛴 이유를 그대로 보여줄 수 있게).
    */
   applyQaWorkbook: (doc: QaWorkbookDoc) => QaWorkbookAnalysis;
+  /**
+   * QA 검수 Excel 에서 **고치지 않고 돌아온** 칸을 "문제 없음"(origin:'manual')으로 일괄 확정한다
+   * — post-v1 번역 Phase 5-B. `applyQaWorkbook` 과 **같은 doc** 을 받지만 축이 다르다:
+   * 그쪽은 canonical(`Line.i18n`)을 쓰고, 이쪽은 **session QA 캐시만** 쓴다(canonical 무변경).
+   *
+   * ⚠️ **자동으로 부르면 안 된다.** unchanged 라는 사실은 "사용자가 검수했다"는 증거가 아니다
+   * (앱은 검수 provenance 를 모른다 — 파일을 열어보지도 않고 다시 넣어도 unchanged 다).
+   * 호출측의 **명시적 opt-in** 뒤에만 부른다.
+   * ⚠️ **커밋 시점의 현재 project 로 다시 분석한다** — 화면 preview 결과를 넘겨받지 않는다
+   * (`applyQaWorkbook` 과 같은 규율). 그 사이 anchor 가 깨진 칸은 재분석에서 저절로 빠진다.
+   * ⚠️ 결과 shape 은 `dismissQaIssue` 와 **정확히 같다**(`verdict:'ok'`·`origin:'manual'`) —
+   * category·reason·model·timestamp·승인 metadata 를 붙이지 않는다. 그래야 기존 재실행 skip
+   * (`shouldSkipCell`)·pending precedence(`manualByCell`)·compaction 이 그대로 적용된다.
+   * 쓰기는 칸 수와 무관하게 **functional set 1회**이고, 후보가 0이면 캐시를 아예 건드리지 않는다.
+   * ⚠️ canonical(`setScenes`/`autoSave`)·`clearTranslationQa`·자동 QA 재실행을 하지 않는다.
+   *
+   * 반환은 이번 호출에서 실제 등록한 칸 수뿐이다. ⚠️ `skipped` 를 만들지 말 것 —
+   * stale·blank·non-flagged·badMeta·duplicate 는 denominator 가 서로 달라 한 숫자로 섞을 수 없다.
+   */
+  applyQaWorkbookManualOk: (doc: QaWorkbookDoc) => { committed: number };
   /** 자동 번역 모드 변경(off/fast/quality). off 면 자동 번역 버튼이 숨겨진다. */
   setTranslateMode: (mode: TranslateMode) => void;
   /** 번역이 빈 대사·지문을 GPT 로 en·ja 채운다(빈 칸만). off/키없음이면 no-op/에러. */

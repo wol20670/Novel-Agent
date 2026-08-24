@@ -151,6 +151,7 @@ export default function CenterPanel() {
   // ⚠️ 이 두 핸들러는 **파일 입출력과 확인창만** 담당한다 — 대상 선별·유효성·적용 판정은 전부
   //    Phase 4-A(순수 계약) / Phase 4-B(store) 가 소유한다. 여기서 필터를 복제하지 말 것.
   const applyQaWorkbook = useStore((s) => s.applyQaWorkbook);
+  const applyQaWorkbookManualOk = useStore((s) => s.applyQaWorkbookManualOk);
   const setToast = useStore((s) => s.setToast);
   const qaFileRef = useRef<HTMLInputElement>(null);
   // 파일 읽기·XLSX 지연 로딩이 async 라 그 사이 같은 버튼이 다시 눌리는 것만 막는다
@@ -216,26 +217,64 @@ export default function CenterPanel() {
       const preview = analyzeQaWorkbook(doc, useStore.getState().project);
       const c = preview.counts;
       const ignored = c.ignoredEdits ? `\n검수 대상이 아닌 수정 ${c.ignoredEdits}칸은 무시됩니다` : '';
-      if (!preview.candidates.length) {
+      // 이 파일이 만들 수 있는 결과는 **두 축**이다(post-v1 번역 Phase 5-C):
+      //   canonical  = 외부에서 고쳐 온 칸 → Line.i18n 수정
+      //   manualOk   = 안 고치고 돌아온 칸 → "문제 없음"(session QA 캐시)
+      // 서로 다른 판단이라 **동의도 따로 받는다**(하나의 확인창으로 묶지 않는다).
+      const canonicalCandidates = preview.candidates.length;
+      const manualCandidates = preview.manualOkCandidates.length;
+      if (!canonicalCandidates && !manualCandidates) {
         // 적용할 게 없으면 store 액션을 부르지 않는다(canonical 을 건드릴 이유가 없다).
         setToast(`적용 가능한 변경이 없습니다 — ${skipSummary(c).replace(/\n/g, ' · ')}`);
         return;
       }
-      const perLocale = QA_COLUMN_LOCALES.filter((l) => preview.byLocale[l])
-        .map((l) => `${l.toUpperCase()} ${preview.byLocale[l]}칸`)
-        .join(' · ');
-      const ok = window.confirm(
-        `QA 검수 엑셀을 반영합니다.\n\n` +
-          `행 ${c.rows}개 · 검수 대상 ${c.flaggedCells}칸\n` +
-          `적용 대상: ${perLocale}\n` +
-          `${skipSummary(c)}${ignored}\n\n` +
-          `실제 적용: ${preview.candidates.length}칸\n` +
-          `계속할까요?`,
-      );
-      if (!ok) return; // 취소 — canonical 무변경(오류 아님)
-      // ⚠️ **doc 만** 넘긴다. 위 preview 를 넘기거나 캐시하지 말 것 — 액션이 커밋 시점의 현재
-      //    project 로 다시 분석해야 확인창을 보는 동안 바뀐 칸이 걸러진다. 완료 안내도 store 몫이다.
-      applyQaWorkbook(doc);
+
+      // ── 확인창 ① — canonical 번역 수정 ──
+      // ⚠️ 취소는 **canonical 적용만** 건너뛴다. 여기서 return 하면 아래 manual 분기가 죽어
+      //    "고친 건 됐고 안 고친 건 문제없다" 중 후자만 반영하려는 사용자가 길을 잃는다.
+      let canonicalApplied = 0;
+      if (canonicalCandidates > 0) {
+        const perLocale = QA_COLUMN_LOCALES.filter((l) => preview.byLocale[l])
+          .map((l) => `${l.toUpperCase()} ${preview.byLocale[l]}칸`)
+          .join(' · ');
+        const applyCanonical = window.confirm(
+          `QA 검수 엑셀을 반영합니다.\n\n` +
+            `행 ${c.rows}개 · 검수 대상 ${c.flaggedCells}칸\n` +
+            `적용 대상: ${perLocale}\n` +
+            `${skipSummary(c)}${ignored}\n\n` +
+            `실제 적용: ${canonicalCandidates}칸\n` +
+            // mixed 일 때만 붙는 **정보 한 줄** — 여기서 manual OK 동의까지 받지 않는다.
+            (manualCandidates ? `(변경되지 않은 검수 대상 ${manualCandidates}칸은 이후 별도로 확인합니다)\n` : '') +
+            `계속할까요?`,
+        );
+        if (applyCanonical) {
+          // ⚠️ **doc 만** 넘긴다. 위 preview 를 넘기거나 캐시하지 말 것 — 액션이 커밋 시점의 현재
+          //    project 로 다시 분석해야 확인창을 보는 동안 바뀐 칸이 걸러진다. 완료 안내도 store 몫이다.
+          canonicalApplied = applyQaWorkbook(doc).candidates.length;
+        }
+      }
+
+      // ── 확인창 ② — "문제 없음" 일괄 처리(explicit opt-in) ──
+      // ⚠️ **unchanged 는 "검수 완료"의 증거가 아니다** — 파일을 열어보지도 않고 그대로 다시
+      //    넣어도 그 칸들은 unchanged 다. 앱은 검수 provenance 를 모르므로 그렇게 단정해 쓰지 않고,
+      //    이 확인창 자체가 사용자에게 확인을 받는 단계다(자동 처리 금지).
+      // ⚠️ 여기서 anchor 재생성·stale 판정·캐시 쓰기를 하지 않는다 — 전부 store 액션이 소유한다.
+      if (manualCandidates > 0) {
+        const confirmManual = window.confirm(
+          `검수 대상 중 번역이 변경되지 않은 ${manualCandidates}칸이 있습니다.\n\n` +
+            `이 ${manualCandidates}칸도 외부 검수에서 현재 번역이 문제없다고 확인하셨나요?\n\n` +
+            `[확인]하면 현재 번역에 대해 "문제 없음"으로 처리합니다.\n` +
+            `원문이나 번역이 바뀌면 이 판단은 더 이상 유효하지 않습니다.`,
+        );
+        if (confirmManual) {
+          // 표시는 preview 의 eligibility 가 아니라 **실제 커밋 수**를 쓴다(그 사이 바뀐 칸은 빠진다).
+          const { committed } = applyQaWorkbookManualOk(doc);
+          // canonical 쪽 완료 안내는 store 가 이미 띄웠다 — 그걸 덮지 않도록 실제 적용 건수를 함께 적는다.
+          setToast(
+            (canonicalApplied ? `QA 수정 ${canonicalApplied}칸 반영 · ` : '') + `"문제 없음" 처리 ${committed}칸.`,
+          );
+        }
+      }
     } catch (err) {
       setToast('QA 엑셀 읽기 실패: ' + (err as Error).message);
     } finally {

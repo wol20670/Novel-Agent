@@ -144,6 +144,20 @@ export interface QaWorkbookAnalysis {
   counts: QaWorkbookCounts;
   /** 로케일별 적용 예정 칸 수(확인창 표시용). */
   byLocale: Partial<Record<Locale, number>>;
+  /**
+   * 외부에서 **고치지 않고 돌아온** flagged 칸 중, 지금 "문제 없음"(origin:'manual')으로
+   * 확정해도 안전한 칸의 anchor — post-v1 번역 Phase 5-A.
+   *
+   * ⚠️ **이 목록은 "검수를 완료했다"는 증거가 아니다.** 앱은 검수 provenance 를 모른다 —
+   *    사용자가 파일을 열어보지도 않고 그대로 다시 넣어도 그 칸들은 unchanged 다. 그래서 이 값은
+   *    **eligibility(처리 가능)** 일 뿐이고, 실제 manual 확정은 호출측의 **명시적 opt-in** 뒤에만
+   *    일어난다. UI 문구에 "검수 완료"라고 단정해 쓰지 말 것.
+   * ⚠️ `counts.unchanged` 와 이 배열의 **차이에 의미를 부여하지 말 것** — 그 차이에는
+   *    unchanged-but-stale 과 unchanged-but-blank 가 섞여 있다(stale 전용 숫자가 아니다).
+   * ⚠️ candidates 와 **상호배타**다(한 칸은 changed 이거나 unchanged 이거나 둘 중 하나).
+   * anchor 는 workbook metadata 만으로 lossless 복원되므로 **세션 QA 캐시가 없어도** 만들어진다.
+   */
+  manualOkCandidates: TranslationQaAnchor[];
 }
 
 /** schema 검증을 통과한 행 metadata(내부 전용). */
@@ -479,6 +493,27 @@ function rowIdentity(meta: QaRowMeta): string {
   return JSON.stringify([meta.sceneId, meta.lineIndex]);
 }
 
+/**
+ * 행 metadata + 대상 로케일 → **export 시점 anchor**. Phase 3 의 8필드를 workbook 값만으로
+ * lossless 복원한다(그래서 세션 QA 캐시 없이도 stale 판정·manual 확정이 가능하다).
+ * ⚠️ candidate 경로(changed)와 manual OK 경로(unchanged)가 **같은 anchor 정의**를 써야 한다 —
+ *    두 벌이 되는 순간 한쪽만 고쳐지는 resolveEmotion 류의 어긋남이 생긴다.
+ * `target` 은 **현재 셀 값이 아니라 export 스냅샷**이다: changed 는 "옛 번역에 대한 수정"인지를,
+ * unchanged 는 "그 번역이 지금도 그대로인지"를 각각 exact 로 물어야 하기 때문이다.
+ */
+function anchorOf(meta: QaRowMeta, loc: Locale): TranslationQaAnchor {
+  return {
+    sceneId: meta.sceneId,
+    lineIndex: meta.lineIndex,
+    sourceLocale: meta.sourceLocale,
+    targetLocale: loc,
+    source: meta.values[meta.sourceLocale],
+    target: meta.values[loc],
+    speaker: meta.speaker,
+    narration: meta.narration,
+  };
+}
+
 // ── import: 3-pass 분석 ───────────────────────────────────────────────────────
 
 /**
@@ -493,6 +528,12 @@ function rowIdentity(meta: QaRowMeta): string {
  *   Pass 2 schema-valid 행끼리만 identity group → 충돌하면 **전부 폐기**(last-wins 금지)
  *   Pass 3 원문 열 정합성 → 로케일별 판정
  * 로케일 판정 순서도 계약이다: invalid → **exact** unchanged → whitespace-only blank → stale → candidate.
+ *
+ * 출력은 **두 축**이다(Phase 5-A):
+ *   candidates        = 외부에서 **고쳐 온** 칸 중 canonical 에 반영해도 안전한 것
+ *   manualOkCandidates = 외부에서 **안 고치고 돌아온** 칸 중 "문제 없음"으로 확정해도 안전한 것
+ * 둘은 `text === snapshot` 하나로 갈리므로 **상호배타**다. ⚠️ 후자는 eligibility 일 뿐이고
+ * "사용자가 검수했다"는 증거가 아니다 — 확정은 호출측의 명시적 opt-in 뒤에만 한다.
  */
 export function analyzeQaWorkbook(
   doc: QaWorkbookDoc,
@@ -514,6 +555,7 @@ export function analyzeQaWorkbook(
   };
   const candidates: QaWorkbookCandidate[] = [];
   const byLocale: Partial<Record<Locale, number>> = {};
+  const manualOkCandidates: TranslationQaAnchor[] = [];
 
   // ── Pass 1 — metadata schema 검증 ──
   const valid: { raw: QaRawRow; meta: QaRowMeta }[] = [];
@@ -567,23 +609,26 @@ export function analyzeQaWorkbook(
       }
       const text = cell.kind === 'blank' ? '' : cell.v;
       if (text === snapshot) {
-        counts.unchanged += 1; // **exact** 비교(trim 금지)
+        counts.unchanged += 1; // **exact** 비교(trim 금지) — Phase 4 집계 semantics 그대로
+        // ⚠️ 여기서 trim 을 쓰는 건 **manual OK 후보 자격 판정뿐**이다. 위 exact 비교(그리고
+        //    아래 candidate 경로 전체)에는 절대 끼우지 않는다.
+        // 빈/공백 칸은 "이 번역이 문제없다"는 판단을 붙일 대상이 아니다(그건 Phase 1 missing 의
+        // 영역이다). ⚠️ 그렇다고 counts.blank 로 옮기지 않는다 — 그 숫자는 "고쳐서 비운 칸"
+        // 전용이고 Phase 4 의미를 바꾸면 안 된다. **manual OK 후보에서만** 뺀다.
+        if (text.trim().length === 0) continue;
+        // 원문·화자·지문·번역이 export 이후 그대로인지 — 정본은 Phase 3 의 isQaResultValid 하나다.
+        const unchangedAnchor = anchorOf(meta, loc);
+        if (isQaResultValid(unchangedAnchor, sceneMap.get(meta.sceneId), sourceLocale)) {
+          manualOkCandidates.push(unchangedAnchor);
+        }
+        // ⚠️ 여기서 counts.stale 을 올리지 않는다 — 그 숫자는 changed 경로 전용이다(Phase 4 보존).
         continue;
       }
       if (text.trim().length === 0) {
         counts.blank += 1; // 빈칸은 삭제가 아니라 무시다
         continue;
       }
-      const anchor: TranslationQaAnchor = {
-        sceneId: meta.sceneId,
-        lineIndex: meta.lineIndex,
-        sourceLocale: meta.sourceLocale,
-        targetLocale: loc,
-        source: meta.values[meta.sourceLocale],
-        target: snapshot,
-        speaker: meta.speaker,
-        narration: meta.narration,
-      };
+      const anchor = anchorOf(meta, loc); // target = export 스냅샷(= snapshot)
       if (!isQaResultValid(anchor, sceneMap.get(meta.sceneId), sourceLocale)) {
         counts.stale += 1;
         continue;
@@ -593,5 +638,5 @@ export function analyzeQaWorkbook(
     }
   }
 
-  return { candidates, counts, byLocale };
+  return { candidates, counts, byLocale, manualOkCandidates };
 }

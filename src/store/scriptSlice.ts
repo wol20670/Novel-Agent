@@ -6,6 +6,8 @@ import {
   validateOutfitSuggestion,
   type OutfitSuggestion,
 } from '../generators/outfit';
+import { upsertQaResults } from '../generators/translate/qa';
+import type { TranslationQaResult } from '../generators/translate/qa';
 import { analyzeQaWorkbook, QA_COLUMN_LOCALES } from '../generators/translate/qaWorkbook';
 import type { Locale, Scene } from '../types';
 import type { State } from './types';
@@ -42,6 +44,7 @@ export const createScriptSlice: SliceCreator<
     | 'setLineText'
     | 'setLineTranslation'
     | 'applyQaWorkbook'
+    | 'applyQaWorkbookManualOk'
     | 'setLineOutfit'
     | 'invalidateOutfitSuggestions'
     | 'applyOutfitSuggestion'
@@ -308,6 +311,45 @@ export const createScriptSlice: SliceCreator<
       // 확인창을 띄운 화면이 **커밋 시점 실제 결과**를 그대로 쓸 수 있게 돌려준다(새 전역 상태를
       // 만들지 않는다 — findOrphanAssets 가 목록을 돌려주는 것과 같은 등급).
       return analysis;
+    },
+
+    /**
+     * QA 검수 Excel 에서 **고치지 않고 돌아온** 칸을 "문제 없음" 으로 일괄 확정 — Phase 5-B.
+     *
+     * `applyQaWorkbook` 과 **같은 doc·같은 analyzer** 를 쓰지만 축이 완전히 다르다:
+     *   applyQaWorkbook        → analysis.candidates         → canonical(Line.i18n) 쓰기
+     *   applyQaWorkbookManualOk → analysis.manualOkCandidates → session QA 캐시 쓰기
+     * 그래서 이 액션은 canonical 을 **한 글자도 건드리지 않는다** — setScenes·autoSave·
+     * applyTranslationUpdates·collab push·persistence 어느 것도 부르지 않는다.
+     *
+     * ⚠️ **커밋 시점의 현재 project 가 authority 다**(applyQaWorkbook 과 같은 규율) — 화면이
+     * 확인창 전에 계산한 preview 를 넘겨받지 않고 여기서 다시 분석한다. 파일을 읽고 사용자가
+     * 확인창을 누르는 사이 대본·번역이 바뀌었으면 그 칸만 재분석에서 빠져야 한다.
+     * ⚠️ 안전 조건(flagged·metadata·duplicate·rowMismatch·strict cell·exact unchanged·
+     * non-blank·현재 project exact-valid)은 **analyzer 가 이미 전부 끝냈다** — 여기서 다시
+     * 판정하지 않는다(판정이 두 벌이 되는 순간 resolveEmotion 류의 어긋남이 생긴다).
+     * ⚠️ 분석 ~ set 사이에 await/Promise/타이머를 넣지 말 것.
+     *
+     * 결과 shape 은 dismissQaIssue 와 **정확히 같다** — 그래야 기존 재실행 skip·pending
+     * precedence·compaction 이 새 result 에도 그대로 걸린다(새 manual 형식을 만들지 않는다).
+     * 쓰기는 후보가 몇 개든 **functional set 1회**다(per-cell dismissQaIssue 반복 금지 —
+     * 53칸이면 set 53회 = zustand 셀렉터 53회 재실행이다). upsertQaResults 가 이미 배열
+     * batch primitive 라 새 helper 를 만들지 않는다.
+     */
+    applyQaWorkbookManualOk: (doc) => {
+      const { manualOkCandidates } = analyzeQaWorkbook(doc, get().project);
+      if (!manualOkCandidates.length) return { committed: 0 }; // 캐시를 아예 건드리지 않는다
+
+      // category·reason·model 은 담지 않는다 — 사람이 확정한 ok 에는 분류도 근거도 모델도 없다
+      // (dismissQaIssue 와 같은 shape). workbook metadata 도 캐시로 새어 나가지 않는다.
+      const manualResults: TranslationQaResult[] = manualOkCandidates.map((anchor) => ({
+        anchor,
+        verdict: 'ok',
+        origin: 'manual',
+      }));
+      // ⚠️ 미리 읽어둔 스냅샷이 아니라 **현재 state 기준** upsert 다(dismissQaIssue 와 같은 형태).
+      set((s) => ({ translationQa: upsertQaResults(s.translationQa, manualResults) }));
+      return { committed: manualResults.length };
     },
 
     // ── Outfit AI: 수동 편집 · 제안 적용/무시 ────────────────────────────────
