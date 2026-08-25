@@ -1,4 +1,4 @@
-import type { Scene, Locale, Expression, Character, Project } from '../types';
+import type { Scene, Line, Locale, Expression, Character, Project } from '../types';
 import type { ScriptMeta } from '../parser';
 import { sanitizeWindowsPath } from '../project/safeName';
 
@@ -41,24 +41,75 @@ export function sceneById(scenes: Scene[], id: string | null | undefined): Scene
   return idx.get(id);
 }
 
+/**
+ * 음성 작업이 **어느 Line 을 대상으로 시작됐는지**를 식별하는 request-time snapshot.
+ *
+ * ⚠️ 반드시 **최초 async boundary(TTS·업로드) 이전**에 그 줄에서 떠야 한다 — 늦게(첨부 시점) 현재
+ * lines[lineIndex] 를 읽어 만들면, 그 사이 구조가 바뀐 경우 **이미 밀려 들어온 다른 줄**에서 anchor 를
+ * 뜨게 되어 검증이 통과해버린다(그게 원래 버그다).
+ * ⚠️ live Line 참조가 아니라 **문자열 복사본**이어야 한다(요청 뒤 그 객체가 갱신될 수 있다).
+ *
+ * 필드 구성은 기존 관용구를 그대로 따른다 — validateEmotionUpdates(speaker/text) ·
+ * mergeScenes.lineKey(`dialogue|speaker|text`). 새 anchor framework 로 키우지 말 것.
+ */
+export interface VoiceLineAnchor {
+  /** 요청 시점 line.speaker. */
+  speaker: string;
+  /** 요청 시점 **canonical** line.text — 로케일 synthesis text 가 아니다. */
+  text: string;
+}
+
+/**
+ * 지금 그 자리에 있는 줄이 요청 시점의 그 줄인가 — **anchor 판정의 단일 소스**.
+ * fail-fast(attachVoiceQuiet 진입) · 단건 커밋 · 배치 커밋(applyVoiceUpdates) 셋이 공유한다.
+ * ⚠️ 세 곳이 각자 비교식을 쓰면 그 순간 판정이 갈라진다(resolveEmotion 과 같은 규칙).
+ *
+ * ⚠️ 인접한 두 대사의 speaker·text 가 **완전히 동일**하면 둘을 구별하지 못한다 — 번역 QA Phase 3·4·5 가
+ * 이미 명시한 것과 **같은 등급의 accepted limitation** 이다(UUID·revision 을 만들지 않는다).
+ *
+ * 반환 타입은 **type guard** 다 — 통과하면 호출측이 그 줄을 dialogue 로 좁혀 voiceAssetIds 를 읽을 수
+ * 있어야 하고, 그래야 커밋 직전 판정과 값 접근이 같은 검사 하나에서 나온다.
+ */
+export function voiceLineAnchorMatches(
+  line: Line | undefined,
+  anchor: VoiceLineAnchor,
+): line is Extract<Line, { kind: 'dialogue' }> {
+  if (!line || line.kind !== 'dialogue') return false;
+  return line.speaker === anchor.speaker && line.text === anchor.text;
+}
+
 /** 보이스 일괄 생성 중 attachVoiceQuiet 가 즉시 커밋하지 않고 모아두는 항목 하나. */
 export interface VoiceAttachUpdate {
   sceneId: string;
   lineIndex: number;
   locale: Locale;
   assetId: string;
+  /** 요청 시점 anchor — 커밋까지 동행해 좌표가 밀렸는지 판정한다. */
+  anchor: VoiceLineAnchor;
 }
 
 /**
  * attachVoiceQuiet 가 모아둔 항목들을 scenes 에 한 번에 반영하는 순수 함수(부수효과 없음) —
  * 배치 중 매 줄마다 전체 scenes 를 재빌드하던 것을 배치 끝에 1회로 줄인다(autoTranslateAll 의
  * updates Map 누적 → 단일 커밋 패턴과 동일). voiceLocales 에 새로 추가할 로케일 집합도 함께 반환.
+ *
+ * ⚠️ **커밋 직전 anchor 재검증이 여기 있다.** 배치는 요청(collectVoiceTargets)과 커밋 사이가
+ * 항목당 TTS + 페이싱 + 백오프만큼 길어서, 그 사이 줄이 추가·삭제되면 같은 lineIndex 에 **다른
+ * dialogue** 가 들어온다. 예전엔 `kind === 'dialogue'` 만 봤기 때문에 그 다른 대사에 음성이 그대로
+ * 붙었다(persistent 오부착). 지금은 어긋난 항목만 버린다.
+ * ⚠️ **run 전체를 폐기하지 않는다** — 나머지 valid 항목은 그대로 적용한다(기존 부분 적용 계약 유지).
+ * ⚠️ 밀린 좌표를 **재계산해 옮겨 붙이지 않는다**(index remapping 금지 — 버려진 blob 은 기존 고아 에셋
+ * 스윕이 회수한다).
  */
 export function applyVoiceUpdates(scenes: Scene[], updates: VoiceAttachUpdate[]): { scenes: Scene[]; locales: Locale[] } {
   if (!updates.length) return { scenes, locales: [] };
   const bySceneLine = new Map<string, Map<number, Partial<Record<Locale, string>>>>();
   const localeSet = new Set<Locale>();
   for (const u of updates) {
+    // 그룹핑 **전에** 거른다 — 버려진 항목은 locales 집계에도 들어가면 안 된다(쓰지도 않을 로케일이
+    // project.voiceLocales 에 추가되면 내보내기에 빈 음성 언어가 생긴다).
+    const line = sceneById(scenes, u.sceneId)?.lines[u.lineIndex];
+    if (!voiceLineAnchorMatches(line, u.anchor)) continue;
     localeSet.add(u.locale);
     let lineMap = bySceneLine.get(u.sceneId);
     if (!lineMap) {
@@ -67,6 +118,7 @@ export function applyVoiceUpdates(scenes: Scene[], updates: VoiceAttachUpdate[])
     }
     lineMap.set(u.lineIndex, { ...lineMap.get(u.lineIndex), [u.locale]: u.assetId });
   }
+  if (!bySceneLine.size) return { scenes, locales: [] };
   const nextScenes = scenes.map((sc) => {
     const lineMap = bySceneLine.get(sc.id);
     if (!lineMap) return sc;

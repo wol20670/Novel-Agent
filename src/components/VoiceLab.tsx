@@ -218,7 +218,13 @@ export default function VoiceLab({
   const settings: VoiceSettings = { tempo, pitch, volume };
 
   const generate = async () => {
-    if (!typecastKey || !voiceId || !sceneId || lineIndex === undefined) return;
+    if (!typecastKey || !voiceId || !sceneId || lineIndex === undefined || !line) return;
+    // ★ request-time identity anchor — **최초 await(typecastTTS) 이전에** 지금 이 줄에서 값으로 뜬다.
+    // TTS 는 수 초가 걸리고 그동안 줄이 추가·삭제되면 lineIndex 는 **다른 대사**를 가리키게 된다.
+    // 나중에(attach 시점) 만들면 그 다른 대사에서 anchor 를 뜨는 꼴이라 검증이 무의미해진다.
+    // ⚠️ line 객체 참조가 아니라 문자열 복사본이어야 하고, synthesis 용 text(위 L158, 로케일 해석
+    // 결과)가 아니라 **canonical line.text** 여야 한다.
+    const anchor = { speaker: line.speaker, text: line.text };
     setBusy(true);
     setError('');
     try {
@@ -228,7 +234,7 @@ export default function VoiceLab({
       setSeconds(result.seconds);
       // 생성 즉시 이 대사·언어에 자동 적용 — 별도 "적용" 클릭을 기다리다 새로고침으로 날리는 일이
       // 없게(크레딧 써서 만든 오디오라 손실이 특히 아까움).
-      await attachLineVoice(sceneId, lineIndex, lang, result.blob, char.name);
+      await attachLineVoice(sceneId, lineIndex, lang, result.blob, char.name, anchor);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -272,10 +278,12 @@ export default function VoiceLab({
   };
 
   const attachToLine = async (blob: Blob) => {
-    if (!sceneId || lineIndex === undefined) return;
+    if (!sceneId || lineIndex === undefined || !line) return;
+    // generate 와 같은 이유로 최초 await(업로드) 이전에 뜬다 — 파일 선택 후 첨부까지도 async 다.
+    const anchor = { speaker: line.speaker, text: line.text };
     setAttaching(true);
     try {
-      await attachLineVoice(sceneId, lineIndex, lang, blob, char.name);
+      await attachLineVoice(sceneId, lineIndex, lang, blob, char.name, anchor);
     } finally {
       setAttaching(false);
     }

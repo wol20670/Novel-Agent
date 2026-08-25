@@ -1,4 +1,5 @@
 import type { StoreApi } from 'zustand';
+import type { VoiceLineAnchor } from './helpers';
 import type {
   Project,
   Scene,
@@ -277,8 +278,22 @@ export interface State {
   /**
    * VoiceLab(🎙)에서 생성한 음성을 이 대사·언어에 매단다(voices.rpy 의 vo() 가 내보내기 때
    * game/voices/{lang}/*.mp3 로 실제 반영). project.voiceLocales 에 해당 언어가 없으면 자동 추가.
+   *
+   * ⚠️ anchor 는 호출측이 **최초 async boundary(TTS·파일 선택) 이전에** 그 줄에서 떠서 넘긴다 —
+   * 여기서(또는 첨부 시점에) 현재 lines[lineIndex] 를 읽어 만들면 이미 늦다. TTS 가 도는 동안 앞줄이
+   * 추가·삭제되면 같은 좌표에 **다른 대사**가 들어오는데, 그때 anchor 를 뜨면 그 다른 대사 기준으로
+   * 검증이 통과해 음성이 엉뚱한 줄에 붙는다(이게 원래 결함이다).
+   * ⚠️ charName 은 파일명 용도라 anchor 를 대신하지 않는다 — anchor 는 line 에서 직접 뜬다.
+   * anchor 가 어긋나면 **어느 줄에도 쓰지 않는다**(좌표를 재계산해 옮겨 붙이지 않는다).
    */
-  attachLineVoice: (sceneId: string, lineIndex: number, locale: Locale, blob: Blob, charName: string) => Promise<void>;
+  attachLineVoice: (
+    sceneId: string,
+    lineIndex: number,
+    locale: Locale,
+    blob: Blob,
+    charName: string,
+    anchor: VoiceLineAnchor,
+  ) => Promise<void>;
   /** 이 대사·언어의 매단 음성을 해제. */
   detachLineVoice: (sceneId: string, lineIndex: number, locale: Locale) => Promise<void>;
   /**

@@ -9,7 +9,13 @@ import { deleteAsset } from '../storage/assetStore';
 import { extFromMime } from '../renpy/generate';
 import type { State } from './types';
 import type { SliceCreator } from './context';
-import { safeFileName, applyVoiceUpdates, type VoiceAttachUpdate } from './helpers';
+import {
+  safeFileName,
+  applyVoiceUpdates,
+  voiceLineAnchorMatches,
+  type VoiceAttachUpdate,
+  type VoiceLineAnchor,
+} from './helpers';
 
 export const createVoiceSlice: SliceCreator<
   Pick<State, 'attachLineVoice' | 'detachLineVoice' | 'batchVoiceCharacter' | 'batchVoiceAll' | 'estimateVoiceCost'>
@@ -29,22 +35,40 @@ export const createVoiceSlice: SliceCreator<
     locale: Locale,
     blob: Blob,
     charName: string,
+    anchor: VoiceLineAnchor,
     collector?: VoiceAttachUpdate[],
-  ): Promise<void> => {
+  ): Promise<boolean> => {
+    // ⚠️ anchor 는 **여기서 만들지 않는다** — 호출측이 최초 async boundary(TTS·파일 선택) 이전에
+    // 그 줄에서 떠서 넘긴다. 이 함수는 TTS 가 끝난 뒤에 불리므로, 여기서 현재 lines[lineIndex] 를
+    // 읽어 anchor 를 만들면 그 사이 밀려 들어온 **다른 대사**에서 anchor 를 뜨게 되어 검증이 그대로
+    // 통과한다(원래 오부착 결함의 정체).
+    //
+    // ① fail-fast — 요청과 커밋 사이 구조가 이미 바뀌었으면 업로드(크레딧·시간·고아 blob) 전에 멈춘다.
     const scene = get().project.scenes.find((s) => s.id === sceneId);
     const line = scene?.lines[lineIndex];
-    if (!scene || !line || line.kind !== 'dialogue') return;
+    if (!scene || !voiceLineAnchorMatches(line, anchor)) return false;
     const mime = blob.type || 'audio/mpeg';
     const ext = extFromMime(blob.type);
     const file = new File([blob], `voice_${safeFileName(charName)}_${lineIndex}_${locale}.${ext}`, {
       type: mime,
     });
     const id = await uploadAsset(file, 'voice', file.name);
-    const prev = line.voiceAssetIds?.[locale];
     if (collector) {
-      collector.push({ sceneId, lineIndex, locale, assetId: id });
-    } else {
-      set((s) => ({
+      // 배치는 여기서 커밋하지 않는다 — anchor 를 함께 실어 보내고 최종 커밋(applyVoiceUpdates)이
+      // **그 시점의 현재 scenes** 로 다시 대조한다(요청~커밋 사이가 가장 긴 경로다).
+      collector.push({ sceneId, lineIndex, locale, assetId: id, anchor });
+      return true;
+    }
+    // ② 커밋 직전 재검증 — fail-fast 이후 uploadAsset 을 기다리는 동안에도 구조는 바뀔 수 있다.
+    //    판정은 set 안에서 **그 순간의 state** 로 한다(밖에서 미리 읽은 스냅샷을 믿지 않는다).
+    let applied = false;
+    let prev: string | undefined;
+    set((s) => {
+      const cur = s.project.scenes.find((sc) => sc.id === sceneId)?.lines[lineIndex];
+      if (!voiceLineAnchorMatches(cur, anchor)) return {}; // 다른 줄에 쓰지 않는다(좌표 remap 금지)
+      applied = true;
+      prev = cur.voiceAssetIds?.[locale]; // 술어가 dialogue 로 좁혀준다
+      return {
         project: {
           ...s.project,
           voiceLocales: s.project.voiceLocales?.includes(locale)
@@ -63,9 +87,12 @@ export const createVoiceSlice: SliceCreator<
               : sc,
           ),
         },
-      }));
-    }
-    if (prev) await deleteAsset(prev).catch(() => {});
+      };
+    });
+    // 교체된 이전 음성만 지운다 — 적용을 안 했으면 남의 에셋이므로 절대 건드리지 않는다.
+    // (이번에 올린 blob 은 적용 실패 시 고아가 되고, 기존 고아 에셋 스윕이 회수한다.)
+    if (applied && prev) await deleteAsset(prev).catch(() => {});
+    return applied;
   };
 
   // 배치 확인창·완료 메시지에 쓸 잔여 크레딧(plan_credits - used_credits) — 조회 실패해도(키
@@ -135,7 +162,17 @@ export const createVoiceSlice: SliceCreator<
       }
       totalSeconds += result.seconds;
       try {
-        await attachVoiceQuiet(item.sceneId, item.lineIndex, locale, result.blob, charName, collector);
+        // anchor 는 collectVoiceTargets 가 **최초 await 이전에** 뜬 request-time snapshot 이다.
+        await attachVoiceQuiet(
+          item.sceneId,
+          item.lineIndex,
+          locale,
+          result.blob,
+          charName,
+          { speaker: item.anchorSpeaker, text: item.anchorText },
+          collector,
+        );
+        // ⚠️ done 은 기존 의미(생성·전달 성공) 그대로다 — 커밋 시점 stale drop 을 여기 배선하지 않는다.
         done++;
       } catch (e) {
         failed++;
@@ -146,9 +183,15 @@ export const createVoiceSlice: SliceCreator<
   };
 
   return {
-    attachLineVoice: async (sceneId, lineIndex, locale, blob, charName) => {
+    attachLineVoice: async (sceneId, lineIndex, locale, blob, charName, anchor) => {
       try {
-        await attachVoiceQuiet(sceneId, lineIndex, locale, blob, charName);
+        const applied = await attachVoiceQuiet(sceneId, lineIndex, locale, blob, charName, anchor);
+        if (!applied) {
+          // 생성/선택을 시작한 그 줄이 지금 그 자리에 없다 — 엉뚱한 줄에 붙이느니 알리고 만다.
+          // 기존 flash 관용구만 쓴다(새 토스트 시스템·재시도 큐를 만들지 않는다).
+          flash('대본이 바뀌어 이 음성을 적용하지 않았습니다 — 해당 대사에서 다시 생성해주세요.', 'error');
+          return;
+        }
         autoSave();
         flash(`이 대사에 ${locale.toUpperCase()} 음성을 적용했습니다 — Ren'Py 내보내기에 반영됩니다.`);
       } catch (e) {

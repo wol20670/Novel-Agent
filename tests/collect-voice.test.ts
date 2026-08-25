@@ -14,7 +14,9 @@ describe('collectVoiceTargets', () => {
       }),
     ]);
     const items = collectVoiceTargets(p, '한지수', 'ko', 'ko');
-    expect(items).toEqual([{ sceneId: 's1', lineIndex: 0, text: '안녕' }]);
+    expect(items).toEqual([
+      { sceneId: 's1', lineIndex: 0, text: '안녕', anchorSpeaker: '한지수', anchorText: '안녕' },
+    ]);
   });
 
   it('이미 그 언어 음성이 있는 줄은 건너뛴다(개별 미세조정 보존)', () => {
@@ -27,7 +29,9 @@ describe('collectVoiceTargets', () => {
       }),
     ]);
     const items = collectVoiceTargets(p, '한지수', 'ko', 'ko');
-    expect(items).toEqual([{ sceneId: 's1', lineIndex: 1, text: '잘가' }]);
+    expect(items).toEqual([
+      { sceneId: 's1', lineIndex: 1, text: '잘가', anchorSpeaker: '한지수', anchorText: '잘가' },
+    ]);
   });
 
   it('합동 대사(members)는 제외한다(generate.ts 도 vo() 를 안 냄)', () => {
@@ -49,9 +53,10 @@ describe('collectVoiceTargets', () => {
       }),
     ]);
     const items = collectVoiceTargets(p, '한지수', 'en', 'ko');
+    // ⚠️ text(synthesis input) 와 anchorText(canonical) 가 **다른 값**이라는 것이 이 케이스의 핵심이다.
     expect(items).toEqual([
-      { sceneId: 's1', lineIndex: 0, text: 'Hello' },
-      { sceneId: 's1', lineIndex: 1, text: '잘가' },
+      { sceneId: 's1', lineIndex: 0, text: 'Hello', anchorSpeaker: '한지수', anchorText: '안녕' },
+      { sceneId: 's1', lineIndex: 1, text: '잘가', anchorSpeaker: '한지수', anchorText: '잘가' },
     ]);
   });
 });
