@@ -20,6 +20,8 @@
 - **post-v1 대본 한 줄 삭제 UX 개선** — ⚠️ 위 두 축(번역 로드맵·의상 UX)과도 **다른 축**이고 v1 Phase 번호와 섞지 말 것. **Phase 1(구현·검증)·Phase 2(문서) 완료**, 남은 필수 작업 없음. 계약은 아래 📌 절이 정본이고 `CLAUDE.md` 에도 durable contract 가 있다. ⚠️ `item`/`cg`/`bgm` control line 삭제는 **이번 scope 밖**이다(별도 Phase — 사용자 지시가 있을 때만).
   **구현 = `258c637`(장면 카드 수동 의상 전환 UI) · 문서 = `95ba76e`** — 이 둘은 **post-v1 번역 Phase 5 를 시작하기 전에 이미 main 에 있었고** Phase 5 는 이 축을 건드리지 않았다(`SceneCard.tsx` 무수정 · `👗` 패널 실브라우저 smoke 확인). ⚠️ 번역 Phase 5 baseline 을 `76612eb` 로 착각하지 말 것 — 실제 baseline 은 **`95ba76e`** 다.
 - **post-v1 장면 중간 CG 종료 / 일반 장면 복귀 UX** — ⚠️ 위 세 축(번역 로드맵·의상 UX·줄 삭제)과도 **다른 축**이고 v1 Phase 번호와 섞지 말 것. **Phase 1(구현·검증)·Phase 2(문서) 완료**, 남은 필수 작업 없음. 계약은 아래 📌 절이 정본이고 `CLAUDE.md` 에도 durable contract 가 있다. ⚠️ **Outfit AI 를 post-CG 구간으로 넓히는 것은 이번 scope 밖**이다(별도 Phase — 사용자 지시가 있을 때만).
+  - **SceneCard 수동 삽입 UX(같은 CG 축의 후속)** — 대본을 고쳐 재분석하지 않고도 장면 카드에서 `#CG끝` 을 꽂는다. **Phase 1A(Voice 선행 안전성)·1B(구현·검증)·2(문서) 완료**, 남은 필수 작업 없음. **1A = `4067a57` · 1B = `d22c325`**. ⚠️ **CG 종료 marker 삭제·undo·CG 시작 수동 삽입은 여전히 없다**(별도 Phase — 사용자 지시가 있을 때만).
+- **post-v1 Voice request-time anchor** — ⚠️ CG 축이 아니라 **Voice 안전성 축**이다(줄 구조가 바뀌는 모든 경로에 적용된다). **완료(구현 `4067a57`)**, 남은 필수 작업 없음. 계약은 아래 📌 절이 정본이고 `CLAUDE.md` 에도 durable contract 가 있다.
 - **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
 - **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
@@ -107,8 +109,9 @@
   graceful degradation 만 기대한다(*"항상 orphan no-op"* 이라고 단정하지 말 것: 기존 프로젝트에 설명
   없는 CG 가 있으면 빈 desc 가 그 CG 와 매칭될 수 있다).
 - **SceneCard UX** — 종료 마커를 기존 control chip 스타일로 **`🖼 CG 종료`** 로 표시한다(CG 에셋 목록
-  `🎴 CG:` 에는 안 들어간다). control line 이라 **줄 삭제 `🗑` 대상도 아니다**. ⚠️ **CG 종료 삽입 버튼·
-  삭제 버튼·CG 관리 모달을 만들지 않았다.**
+  `🎴 CG:` 에는 안 들어간다). control line 이라 **줄 삭제 `🗑` 대상도 아니다**.
+  ⚠️ **삭제 버튼·CG 관리 모달은 여전히 없다**(삽입만 있다 — 바로 아래 절 참고).
+
 - **검증**: `typecheck` PASS · `vitest` **63파일/1040 tests passed · failed 0**(신규·확장 **+58**).
   고정한 것 = `#CG끝` 텍스트·엑셀 파싱 · `cgActiveFlags` 레거시/orphan/end/다중구간 ·
   `getFirstEffectiveCgIndex` 기존 cutoff 보존 · **레거시 폴백 + 첫 줄 `#CG끝` edge** ·
@@ -134,6 +137,147 @@
   4. CG 복귀 transition 은 **`dissolve` 고정**이다(설정 노출 없음).
   5. CG 구간에 남은 `Line.outfits` 를 **자동 정리하지 않는다**(기존 정책 승계 — 복원 fold 에는 반영된다).
   6. 구버전 앱에서는 CG 종료 semantics 가 보장되지 않는다.
+
+### 🖼끝 — SceneCard 수동 삽입(구현 `d22c325`)
+- **문제**: 마커 문법은 있는데 진입점이 없어서, "여기서 CG 를 끝내고 싶다"는 순간마다 왼쪽 패널 원본으로
+  돌아가 `#CG끝` 을 타이핑하고 다시 분석해야 했다. 이번 작업은 **그 진입점 하나**를 여는 것이고
+  **CG semantics 를 새로 만들지 않는다.**
+- **동작**: CG active 인 대사·지문의 액션 영역(`👗` 와 표정 select 사이) `🖼끝` → **그 줄 바로 뒤**에
+  기존 canonical 마커 `{ kind:'cg', desc:'', end:true }` 를 꽂는다. 의미는
+  **"이 줄까지 CG → 바로 뒤에서 종료 → 다음 구간부터 일반 배경 + 기존 visible 스프라이트 복귀"** 다.
+- **버튼 노출 조건** — 셋을 모두 만족할 때만이고, 불충족이면 **disabled 가 아니라 미렌더**다
+  (CG 가 아닌 줄에 "CG 종료"는 의미가 없다 — `👗` 가 이유를 알리려고 disabled 인 것과 반대 판단):
+  ```
+  kind ∈ {dialogue, narration}  ∧  cgActiveFlags[index] >= 0  ∧  바로 다음 줄이 end:true 마커가 아님
+  ```
+  ⚠️ **판정은 `cgActiveFlags`(per-line 상태)** 다 — `getFirstEffectiveCgIndex`(최초 경계 · Outfit AI
+  cutoff)를 쓰면 위에서 확정한 divergence 가 배선 사고로 무너진다. **둘을 합치지 말 것.**
+  ```
+  SceneCard 수동 CG 상태 판단 = cgActiveFlags
+  Outfit AI cutoff           = getFirstEffectiveCgIndex
+  ```
+  dialogue/narration 은 CG 상태를 바꾸지 않아 `flags[i-1] === flags[i]` 라, 이 두 kind 에서는
+  **before/after off-by-one 이 생기지 않는다**(그래서 `flags[index] >= 0` 하나로 충분하다).
+- **canonical action 은 `insertCgEndAfterLine(sceneId, lineIndex)` 하나**다(`src/store/scriptSlice.ts`).
+  ⚠️ **범용 `insertLine` 을 만들지 않았다** — 임의 kind 삽입은 `#아이템끝` 짝·`play music` 시작점·CG
+  cutoff 같은 상태 전이 semantic 을 UI 로 흘린다(`deleteLine` 이 그 kind 들을 거절하는 것과 같은 이유).
+  ```
+  삽입 위치    : lineIndex + 1
+  허용 kind    : dialogue · narration 뿐
+  허용 상태    : cgActiveFlags[lineIndex] >= 0 (지금 CG 구간)
+  중복 방지    : 바로 다음 줄이 이미 end:true 면 no-op
+  무효 요청    : 완전 no-op
+  기존 Line    : 객체 **참조 그대로** 뒤로 밀린다(복제·정규화 없음)
+  건드리지 않음: Scene.cg · cgAssetIds · rawInput
+  ```
+  ⚠️ **guard 전부가 `invalidateOutfitSuggestions`·`setScenes`·`flash` 보다 먼저**다(`deleteLine` 과 같은
+  순서 계약) — 무효·중복 요청은 observable state 를 **하나도** 건드리지 않는다. 테스트가 호출 전후의
+  `project`·`scenes`·`scene[0]`·`lines` **참조**와 `rawInput`·`outfitSuggestions`·revision·sentinel
+  toast 를 전부 대조해 이 순서를 고정한다.
+  ⚠️ 중복 판정 범위는 **바로 다음 줄 하나뿐**이다 — 뒤쪽 종료 마커를 탐색하거나 CG timeline 편집 정책을
+  만들지 않았다. 다음 줄이 **새 `#CG` 시작 마커**인 경우는 막지 않는다(표현 가능한 의도다).
+- **Outfit 제안**: 유효 삽입은 줄 배열을 바꾸므로 **기존 `invalidateOutfitSuggestions()` 정책 그대로**
+  (전체 clear + revision++). 무효 삽입은 제안·revision 까지 완전 무변경. **새 index shift 알고리즘 없음.**
+- **안내 토스트는 사용자에게 1개**여야 한다 — `flash` 는 단일 `toast` state 라 뒤 메시지가 앞을 덮고,
+  `invalidateOutfitSuggestions` 는 pending 이 있으면 자체 flash 를 낸다. 그래서 **공유 액션을 고치지 않고**
+  (다른 호출 경로가 전부 그대로여야 한다) 호출측에서 **pending 을 먼저 세어** 마지막 합성 메시지에 담는다:
+  `pending 계산 → invalidate → setScenes → flash(합성)`. ⚠️ `silent` 플래그·toast 큐를 만들지 말 것.
+  invalid/duplicate 에서는 **flash 자체를 부르지 않는다.**
+- **rawInput / persistence / reparse — 헷갈리기 쉬운 지점(둘은 다른 계약이다)**
+  ```
+  save/load persistence  ≠  rawInput reparse persistence
+  ```
+  이 삽입은 **parsed-only manual edit** 이다: 마커는 `Scene.lines` 에 들어가고 **`project.rawInput` 은
+  건드리지 않는다**(`deleteLine`·`setLineText` 와 같은 source/parsed-data 계약).
+  - **유지되는 곳** — localStorage save/load · `.npproj.zip` · 협업 · 생성 출력. 전부 parsed Scene 을 쓴다.
+  - **사라질 수 있는 곳** — 원본 대본에 `#CG끝` 이 **없는 채로 같은 rawInput 을 다시 분석**하면 수동 마커가
+    빠진다(실측: 병합 미리보기가 `➖ 삭제` 로 먼저 예고한다). 원본에 `#CG끝` 을 직접 적어두면 재분석
+    뒤에도 같은 자리에 남는다(실측).
+  ⚠️ **재분석을 undo·복구 수단으로 설명하지 말 것** — 재분석은 `#CG끝` 만이 아니라 다른 parsed/manual
+  상태에도 각자의 merge 계약을 적용한다. 버튼 title 과 토스트도 **"재분석 시 사라질 수 있다"는 경고까지만**
+  하고 복구 경로를 안내하지 않는다.
+  ⚠️ **CG 종료 marker 삭제 UX · undo/redo · control-line 삭제 · rawInput reverse writer · parser source map ·
+  source provenance · Line UUID 를 만들지 않았다.**
+- **structural line-index 안전성은 줄 삭제 축의 방어를 그대로 재사용**한다(`scene.lines.length` 가 n → n+1
+  이므로 삭제와 정확히 같은 신호다). **새 revision·UI state 시스템을 만들지 않았다.**
+  - **`LineRow`**: key 에 줄 수가 섞여 있어 구조 변경이면 remount 된다 → `editing`·`voiceOpen`·`outfitOpen`
+    같은 positional UI state 가 **다른 줄로 이월되지 않는다**(실측: 삽입 뒤 모든 row 의 textarea 0개).
+  - **`ScenePlayer`**: 기존 `[scene.id, scene.lines.length]` reset dependency 가 그대로 걸려 첫 step 으로
+    돌아간다(실측 `4 / 5` → `1 / 6` · `total` 은 control line 포함 `scene.lines.length`). **ScenePlayer 무수정.**
+  - **Translation QA**: 캐시를 직접 지우지 않는다 — 밀린 결과는 기존 content anchor(`activeQaIssues`)에서 빠진다.
+  - **Expression / autoTranslate**: 기존 commit-time anchor 재검증 그대로. **새 조치 없음.**
+  - **Voice**: Phase 1A 의 request-time anchor 가 막는다(아래 📌 Voice 절) — 이번 Phase 에서 Voice 프로덕션
+    코드를 다시 손대지 않았다.
+- **Preview / 생성기 core 무변경** — 마커가 canonical `Scene.lines` 에 들어간 뒤는 기존 경로가 그대로 소비한다.
+  ```
+  SceneCard → 기존 end:true 마커 삽입 → 기존 cgActiveFlags
+            → 기존 ScenePlayer CG 복원 → 기존 생성기 #CG끝 복원
+  ```
+  parser CG core · Preview CG core · generator CG core · Project schema/migration · `mergeScenes` CG
+  semantic · Outfit AI first-CG cutoff **전부 무수정**이다. 특히 **`#CG끝` 그 줄에서 즉시 일반 배경 +
+  visible 스프라이트가 복귀**하는 기존 semantic 을 UI 가 그대로 쓴다.
+- **검증(수동 삽입)**: `typecheck` PASS · `vitest` **65파일/1067 tests passed · failed 0**(신규
+  `tests/cg-end-insert.test.ts` 19) · `git diff --check` clean ·
+  `dump:rpy` **23구성 256파일 recursive diff 0**(생성기 출력이 1바이트도 안 바뀜).
+  뮤테이션으로 테스트 실효성도 확인했다 — off-by-one·guard 순서 역전·중복 가드 제거·CG active 가드 제거
+  각각에서 해당 테스트가 실제로 깨진다.
+  실브라우저: **CG active 대사·지문에만 `🖼끝`**(CG 이전·`#CG끝` 이후·control line·중복 위치 미노출) ·
+  클릭한 줄 **바로 뒤**에 `🖼 CG 종료` chip 즉시 등장 · **토스트 1개** · LineRow 로컬 state 이월 없음 ·
+  ScenePlayer 첫 step reset · **`#CG끝` 다음 줄에서 수동 `👗` 재활성**(같은 화면에서 CG 구간은 disabled) ·
+  **마커 스텝에서 일반 배경 + 스프라이트 즉시 복원**(CG 스텝의 전면 이미지가 사라지고 스프라이트가 나타남) ·
+  새로고침 유지 · `.npproj.zip` 실왕복 유지 · **rawInput 에 없으면 재분석 시 소실 / 직접 적어두면 유지** ·
+  줄 수가 안 바뀌는 텍스트 편집에서 remount·포커스 회귀 없음.
+
+## 📌 post-v1 Voice request-time anchor 가 확정한 것 (async 음성 첨부 — 깨지 말 것)
+> ⚠️ 이 절은 **Voice 안전성 축**이다(CG·의상·줄 삭제·번역 로드맵과 같은 축이 아니다). 구현 = `4067a57`.
+> CG 종료 수동 삽입(`d22c325`)의 **선행 조건**이라 같이 했을 뿐, 구조가 바뀌는 모든 경로에 적용된다.
+
+- **고친 결함**: 음성 작업은 `(sceneId, lineIndex)` **좌표만** 들고 async(TTS → 업로드)를 건너간 뒤
+  커밋하는데, 커밋 경로가 `kind === 'dialogue'` 만 확인했다. 그 사이 줄이 추가·삭제되면 **같은 좌표에
+  들어온 다른 대사**에 `voiceAssetIds` 가 붙었다 — transient UI stale 이 아니라 **persistent 오부착**이다.
+  배치는 요청~커밋 사이가 항목당 TTS + 페이싱 + 백오프라 window 가 가장 넓다.
+- **anchor 는 반드시 "요청 시점" 값**이다 — **최초 async boundary 이전에** 그 줄에서 뜬다:
+  ```
+  { speaker: line.speaker, text: line.text }   // text 는 canonical 원문
+  ```
+  ⚠️ **`attachVoiceQuiet` 진입 시점에 현재 `lines[lineIndex]` 를 읽어 만들면 이미 늦다** — 그 지점은 TTS 가
+  **끝난 뒤**라, 구조가 밀렸으면 **이미 들어온 다른 대사**에서 anchor 를 뜨게 되어 검증이 그대로 통과한다.
+  ⚠️ live Line 참조가 아니라 **문자열 복사본**이어야 한다.
+- **전달 경로**(둘 다 최초 await 이전에 캡처해 커밋까지 동행):
+  ```
+  단건 : VoiceLab.generate / attachToLine  →  attachLineVoice  →  attachVoiceQuiet  →  set()
+  배치 : collectVoiceTargets  →  runCharacterVoiceBatch  →  attachVoiceQuiet  →  collector
+         →  applyVoiceUpdates
+  ```
+- **검증은 두 지점**이다 — 한 곳만으로는 두 구간 중 하나가 뚫린다:
+  ① `attachVoiceQuiet` **진입 fail-fast**(요청 ~ 진입 사이 shift · 업로드 전에 멈춰 크레딧·고아 blob 낭비 방지)
+  ② **커밋 직전 재검증** — 단건은 `set()` 안에서 *그 순간의 state* 로, 배치는 `applyVoiceUpdates` 가 그룹핑
+  **전에** 현재 scenes 로. 어긋난 항목은 **그 항목만 drop** 하고 **run 전체를 폐기하지 않는다**.
+  ⚠️ 어긋나면 **어느 줄에도 쓰지 않는다** — 밀린 좌표를 재계산해 옮겨 붙이지 않는다(index remapping 금지).
+  버려진 blob 은 **기존 고아 에셋 스윕**이 회수한다(새 정리 경로를 만들지 않았다).
+- **판정 단일 소스는 `voiceLineAnchorMatches`(`src/store/helpers.ts`)** 하나다 — fail-fast · 단건 커밋 ·
+  배치 커밋 셋이 공유한다(각자 비교식을 쓰면 그 순간 판정이 갈라진다 — `resolveEmotion` 과 같은 규칙).
+  반환은 type guard 라 통과하면 호출측이 dialogue 로 좁혀 `voiceAssetIds` 를 읽는다.
+- ⚠️ **synthesis text 와 identity anchor 는 다른 축이다** — `VoiceBatchItem.text` 는 TTS 에 넘길 값이라
+  비-base 로케일이면 **번역문**이고, `anchorText` 는 **canonical `line.text`** 다. 둘을 같은 필드로 쓰면
+  "번역이 없는 줄"과 "원문이 같은 다른 줄"을 구별하지 못한다.
+- **만들지 않은 것**: Line UUID · 범용 provenance · index remapping · voice revision/epoch · abort/cancel
+  primitive · locale-aware anchor framework · voice architecture rewrite.
+- **accepted limitation**: 인접한 두 대사의 `speaker` 와 canonical `text` 가 **완전히 동일**하면 content
+  anchor 로 구별할 수 없다 — 번역 QA Phase 3·4·5 가 이미 명시한 것과 **같은 등급의 기존 한계**다.
+- **의도된 동작 변화**: 배치가 도는 동안 사용자가 그 줄의 **원문을 편집**하면 그 항목은 버려진다
+  (`setLineText` 가 같은 상황에서 `i18n` 을 버리는 것과 같은 규율).
+- **배치 요약 카운트(`done`)에 커밋 시점 drop 을 배선하지 않았다** — 기존 best-effort 집계 그대로다.
+- **검증**: `typecheck` PASS · `vitest` **64파일/1048 tests passed · failed 0**(신규 `tests/voice-anchor.test.ts` 8 ·
+  `tests/collect-voice.test.ts` shape 갱신) · `dump:rpy` **23구성 256파일 recursive diff 0**.
+  뮤테이션 확인 — 커밋 검증을 옛 `kind === 'dialogue'` guard 로 되돌리면 해당 테스트가 실제로 깨진다.
+  실브라우저: 단건 파일 업로드 적용이 **연 그 줄에 정확히** 부착(`voice_<이름>_<index>_<locale>.mp3`) ·
+  교체 시 그 줄의 assetId 만 갱신되고 다른 줄 무변경.
+- ⚠️ **미검증(환경)**: 실제 **TTS 생성·배치 생성**은 Typecast 실키가 없어 브라우저에서 확인하지 못했다.
+  그쪽에서 이번에 바꾼 두 끝(`collectVoiceTargets`·`applyVoiceUpdates`)과 거부 경로는 **테스트로만** 고정돼 있다.
+- **open question**: 로케일 synthesis text 의 staleness(예: TTS 도는 동안 **번역만** 고친 경우)는 이번
+  anchor 에 포함하지 않았다 — content-staleness 정책 확장이라 별도 판단이다. collector 에 이미 실려 오므로
+  나중에 필드 추가 없이 켤 수 있다.
 
 ## 📌 post-v1 대본 한 줄 삭제 UX 가 확정한 것 (수동 line delete — 깨지 말 것)
 > ⚠️ 이 절은 **줄 삭제 축**이다(번역 로드맵·의상 UX·v1 Phase 번호와 같은 축이 아니다).
