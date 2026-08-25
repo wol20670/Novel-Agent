@@ -6,6 +6,7 @@ import {
   emojiFor,
   baseLocaleOf,
   LOCALE_LABEL,
+  cgActiveFlags,
   characterOutfits,
   outfitFlags,
   resolveOutfit,
@@ -18,7 +19,7 @@ import {
   type Scene,
 } from '../types';
 import { resolveEmotionDetailed } from '../generators/emotion/resolve';
-import { getFirstEffectiveCgIndex, type OutfitSuggestion } from '../generators/outfit';
+import { type OutfitSuggestion } from '../generators/outfit';
 import { activeQaIssues, type QaCategory, type TranslationQaResult } from '../generators/translate/qa';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
@@ -107,9 +108,11 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
     for (const c of outfitChars) m.set(c.name, outfitFlags(scene, outfitRules, c.name));
     return m;
   }, [scene, outfitRules, outfitChars]);
-  // 이 장면의 first effective CG — 그 뒤 줄의 의상 전환은 생성기가 복원·동기화를 통째로 막아
-  // dead write 다(AI 쪽 validateOutfitSuggestion gate 10 과 **같은 기준·같은 함수**).
-  const cgCutoff = useMemo(() => getFirstEffectiveCgIndex(scene), [scene]);
+  // 줄마다의 CG 활성 상태 — CG 구간에선 생성기가 복원·동기화를 통째로 막아 의상 전환이 dead write 다.
+  // ⚠️ **`getFirstEffectiveCgIndex`(AI cutoff)가 아니라 `cgActiveFlags`(구간)를 쓴다** — `#CG끝` 이후는
+  // 생성기가 그 줄의 fold 의상으로 다시 세우므로 dead write 가 아니고, 수동 지정을 막을 이유가 없다.
+  // Outfit **AI** 는 Phase 14 동결 계약대로 계속 first-CG cutoff 를 쓴다(의도된 divergence).
+  const cgFlags = useMemo(() => cgActiveFlags(scene), [scene]);
   // AI 의상 전환 제안(휘발성 — project 밖 런타임 state). 줄마다 store 를 구독하지 않도록 카드에서
   // 한 번 받아 lineIndex → 제안들 맵으로 만들고 hiddenFlags 처럼 props 로 내려준다.
   const outfitSuggestions = useStore((s) => s.outfitSuggestions[sceneId]);
@@ -344,7 +347,7 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
             effHidden={hiddenFlags[i]}
             outfitChars={outfitChars}
             outfitFlagsByChar={outfitFlagsByChar}
-            cgCutoff={cgCutoff}
+            cgFlags={cgFlags}
             suggestions={suggestionsByLine?.get(i)}
             qaIssues={qaByLine?.get(i)}
           />
@@ -440,7 +443,7 @@ function LineRow({
   effHidden,
   outfitChars,
   outfitFlagsByChar,
-  cgCutoff,
+  cgFlags,
   suggestions,
   qaIssues,
 }: {
@@ -455,8 +458,8 @@ function LineRow({
   outfitChars: Character[];
   /** 캐릭터 → outfitFlags 결과. 후보가 없으면 null(카드가 한 번만 계산해 내려준다). */
   outfitFlagsByChar: Map<string, string[]> | null;
-  /** 이 장면의 first effective CG 인덱스(없으면 null) — 수동 전환 writable 판정용. */
-  cgCutoff: number | null;
+  /** 줄마다의 CG 활성 상태(-1 = 일반 장면) — 수동 전환 writable 판정용. */
+  cgFlags: number[];
   /** 이 줄에 붙은 AI 의상 제안(휘발성) — 카드가 한 번에 그룹핑해 내려준다. */
   suggestions?: OutfitSuggestion[];
   /** 이 줄의 유효한 번역 QA 의심(휘발성) — 로케일 칸 단위라 한 줄에 EN·JA 둘 다 올 수 있다. */
@@ -482,18 +485,28 @@ function LineRow({
   const speakerChar = isSingleSpeaker ? charMap.get((line as DialogueLine).speaker) : undefined;
   const canVoice = !!speakerChar && !speakerChar.isProtagonist;
   // 수동 의상 전환을 이 줄에 **쓸 수 있는가** — 진입 버튼과 패널 렌더가 **같은 하나의 조건**을 본다.
-  // 패널을 열어둔 채 #CG 추가·이름 변경·줄 삽입으로 cutoff 가 이 줄 앞으로 오면, cgCutoff 가 scene
+  // 패널을 열어둔 채 #CG 추가·이름 변경·줄 삽입으로 이 줄이 CG 구간에 들어가면, cgFlags 가 scene
   // 파생값이라 다음 렌더에서 패널이 그대로 사라진다(useEffect·state 동기화 없이 mutation 이 막힌다).
-  // ⚠️ 기존 Line.outfits 칩과 ✕(해제)는 이 조건과 무관하게 계속 보이고 동작해야 한다 — cutoff 이후에
+  // ⚠️ 기존 Line.outfits 칩과 ✕(해제)는 이 조건과 무관하게 계속 보이고 동작해야 한다 — CG 구간에
   // 남은 값을 정리할 유일한 경로다(자동 정리는 하지 않는다).
-  const manualOutfitWritable = cgCutoff === null || index < cgCutoff;
+  const manualOutfitWritable = (cgFlags[index] ?? -1) < 0;
 
-  // CG 배경 전환 라인 — 이 지점부터 배경이 CG 로 바뀌고 등장인물이 사라진다(장면 끝까지).
+  // CG 배경 전환 라인 — 이 지점부터 배경이 CG 로 바뀌고 등장인물이 사라진다(`#CG끝` 전까지).
+  // `end` 는 그 반대 마커(`#CG끝`): 배경을 장면의 일반 배경으로 되돌리고 인물을 그 자리에 복원한다.
   if (line.kind === 'cg') {
     return (
       <div className="flex items-center gap-1.5 py-0.5 text-xs">
-        <span className="rounded px-1.5 py-0.5 border border-violet-500/40 text-violet-400 bg-violet-500/5 shrink-0">🖼 CG 전환</span>
-        <span className="text-gray-300">{line.desc || '(설명 없음)'}</span>
+        {line.end ? (
+          <>
+            <span className="rounded px-1.5 py-0.5 border border-emerald-500/40 text-emerald-400 bg-emerald-500/5 shrink-0">🖼 CG 종료</span>
+            <span className="text-gray-300">일반 배경·인물로 복귀</span>
+          </>
+        ) : (
+          <>
+            <span className="rounded px-1.5 py-0.5 border border-violet-500/40 text-violet-400 bg-violet-500/5 shrink-0">🖼 CG 전환</span>
+            <span className="text-gray-300">{line.desc || '(설명 없음)'}</span>
+          </>
+        )}
       </div>
     );
   }

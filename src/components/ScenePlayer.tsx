@@ -9,7 +9,6 @@ import { canvasSprite } from '../generators/image/canvasSprite';
 import { canvasImage } from '../generators/image/canvasProvider';
 import { getAsset } from '../storage/assetStore';
 import { arrangePositions, attrFor, selectSprite, spriteSlots, type SpriteSlot } from '../renpy/generate';
-import { getFirstEffectiveCgIndex } from '../generators/outfit';
 import {
   resolveTheme,
   withGuiOverrides,
@@ -22,6 +21,7 @@ import { gradientAlphaAt } from '../generators/image/canvasMenu';
 import {
   emojiFor,
   spriteAssetId,
+  cgActiveFlags,
   outfitFlags,
   spriteHiddenFlags,
   type Scene,
@@ -61,10 +61,14 @@ export function computeStagePositions(
   if (activeCgIdx >= 0) return new Map();
   const hiddenFlags = spriteHiddenFlags(scene);
   if (hiddenFlags[uptoLine]) return new Map();
+  // CG 구간의 줄은 **숨김 줄과 똑같이** 누적에서 뺀다 — 생성기도 CG 중엔 newlyRevealed 가 빈 배열이라
+  // revealedOrder 가 자라지 않는다. `#CG끝` 이 생긴 뒤로는 CG 뒤 줄도 그려지므로, 이걸 빼먹으면
+  // **CG 중에만 말한 화자가 복귀 순간 유령처럼 자리를 차지한다**(생성기는 다음 발화에서야 세운다).
+  const cgFlags = cgActiveFlags(scene);
   const isNarrOnly = (name: string) => !!characters.find((c) => c.name === name)?.isProtagonist;
   const order: string[] = [];
   for (let k = 0; k <= uptoLine && k < scene.lines.length; k++) {
-    if (hiddenFlags[k]) continue;
+    if (hiddenFlags[k] || cgFlags[k] >= 0) continue;
     const l = scene.lines[k];
     if (l.kind !== 'dialogue') continue;
     for (const sp of speakersOf(l)) if (!isNarrOnly(sp) && !order.includes(sp)) order.push(sp);
@@ -104,10 +108,10 @@ export function computeSpriteDisplay(
   const charByName = new Map(characters.map((c) => [c.name, c]));
   const isNarrOnly = (name: string) => !!charByName.get(name)?.isProtagonist;
   const hiddenFlags = spriteHiddenFlags(scene);
-  // CG 가 실제로 켜지는 줄(생성기 cgActive 와 같은 4갈래). 한 번 켜지면 장면 끝까지 유지된다 —
-  // 끄는 코드가 생성기에 없다. 그 구간에선 생성기가 숨김 전이·의상 동기화·화자 show 를 전부
-  // 건너뛰어 lastShown 이 얼어붙으므로, 아래 carried 도 같이 얼린다.
-  const cgStart = getFirstEffectiveCgIndex(scene);
+  // 줄마다의 CG 활성 상태(cgActiveFlags 단일 소스 — 생성기 cgActive 와 같은 갈래 + `#CG끝`).
+  // CG 구간에선 생성기가 숨김 전이·의상 동기화·화자 show 를 전부 건너뛰어 lastShown 이 얼어붙으므로
+  // 아래 carried 도 같이 얼리고, `#CG끝` 줄부터 다시 녹는다(생성기의 즉시 복원과 대응).
+  const cgFlags = cgActiveFlags(scene);
 
   // 대본 전체의 논리 표정 집합 — 생성기 expressionPlan 과 **같은 의미**(승인 장면의 대사, 합동
   // 대사는 멤버 전개, 미등록 이름 제외). 기본 의상 칸이 "업로드 + 대본 사용 표정"이라 이걸 모르면
@@ -162,19 +166,21 @@ export function computeSpriteDisplay(
     const l = scene.lines[k];
     const hidden = hiddenFlags[k];
 
-    // ── 기존 논리 표정 fold(의미 무변경: 숨김 줄 건너뜀, 대사 줄의 화자만 갱신) ──
-    if (!hidden && l.kind === 'dialogue') {
+    // ── 논리 표정 fold(숨김 줄 건너뜀, 대사 줄의 화자만 갱신) ──
+    // ⚠️ CG 구간도 건너뛴다: 여기만 갱신되고 carried 는 아래에서 동결되면, **CG 중에만 말한 캐릭터가
+    // logical 에만 남아** 복귀 후 legacy spriteAssetId 경로(아래 out 루프의 폴백)로 그려진다 —
+    // 생성기는 revealedOrder 에 넣지 않았으므로 안 그린다. 정확히 divergence 다.
+    // (CG 종료가 없던 시절엔 렌더 게이트가 CG 이후를 전부 막아 이 차이가 드러나지 않았다.)
+    if (!hidden && cgFlags[k] < 0 && l.kind === 'dialogue') {
       const emo = resolveEmotion(l, scene, { expressions });
       for (const sp of speakersOf(l)) if (!isNarrOnly(sp)) logical.set(sp, emo);
     }
 
     // ── 실제 표시 속성 fold(생성기의 세 전이에 대응) ──
-    // ⚠️ CG 조건은 **오늘 관측되지 않는다**(테스트로 잡히지 않으니 죽은 코드로 보고 지우지 말 것):
-    // 아래 렌더 게이트가 `uptoLine >= cgStart` 를 전부 빈 Map 으로 돌려주므로, 이 분기를 탄 fold 의
-    // 결과는 어차피 밖으로 안 나간다. 그래도 두는 이유는 이 fold 가 생성기 lastShown 의 **모델**이기
-    // 때문이다 — 생성기도 CG 구간에서 세 전이를 전부 건너뛴다. 지금 CG 가 장면 끝까지 안 꺼지는 것에
-    // 기대어 규칙을 빼면, 나중에 CG 해제가 생기는 순간 조용히 어긋난다.
-    if (hidden || (cgStart !== null && k >= cgStart)) continue; // 숨김·CG 구간은 동결
+    // 생성기도 CG 구간에서 세 전이를 전부 건너뛰어 lastShown 이 동결된다. `#CG끝` 줄에서는 동결이
+    // 풀리고(cgFlags 가 -1) 아래 ①이 그 줄의 의상으로 다시 폴백을 태우는데, 이게 생성기의
+    // restoreShownSprites(markerIdx) 와 **같은 판정**이라 marker 시점 state 가 양쪽에서 일치한다.
+    if (hidden || cgFlags[k] >= 0) continue; // 숨김·CG 구간은 동결
     const speakers = l.kind === 'dialogue' ? speakersOf(l).filter((sp) => !isNarrOnly(sp)) : [];
     // ① 이미 서 있는 비화자의 의상 동기화 + 숨김 복원 — **표시 속성**을 이어받아 다시 폴백을 태운다.
     for (const [nm, attr] of carried) {
@@ -191,9 +197,9 @@ export function computeSpriteDisplay(
     }
   }
 
-  // 렌더 게이트 — CG 가 켜졌거나 지금 줄이 숨김이면 아무도 안 그린다(computeStagePositions 와 대칭).
+  // 렌더 게이트 — CG 가 켜져 있거나 지금 줄이 숨김이면 아무도 안 그린다(computeStagePositions 와 대칭).
   const out = new Map<string, SpriteDisplay>();
-  if (hiddenFlags[uptoLine] || (cgStart !== null && uptoLine >= cgStart)) return out;
+  if (hiddenFlags[uptoLine] || cgFlags[uptoLine] >= 0) return out;
 
   for (const [nm, ex] of logical) {
     const slots = slotsByChar.get(nm);
@@ -323,20 +329,14 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
   const projW = useStore((s) => s.project.width);
   const projH = useStore((s) => s.project.height);
 
-  // CG 배경 전환(generate.ts 와 동일 규칙): 현재 줄까지 나온 마지막 kind:'cg' 라인의 CG 가 배경이
-  // 되고 스프라이트는 숨긴다. 위치 마커가 없는 기존 데이터는 첫 CG 를 장면 시작부터 배경으로 폴백.
+  // CG 배경 전환 — 판정은 cgActiveFlags(types/project.ts) 단일 소스에 위임한다(생성기와 같은 갈래).
+  // 예전엔 이 자리에 같은 fold 가 한 벌 더 있었는데, `#CG끝` 이 생기면 두 구현이 갈라진다.
+  // ⚠️ 줄이 0개인 장면은 flags 도 비어 있어 예전 폴백 결과(scene.cg 가 있으면 0)를 그대로 돌려준다.
   const activeCgIdx = useMemo(() => {
-    if (!scene.cg.length) return -1;
-    if (!scene.lines.some((l) => l.kind === 'cg')) return 0;
-    let idx = -1;
-    for (let k = 0; k <= i && k < total; k++) {
-      const l = scene.lines[k];
-      if (l.kind !== 'cg') continue;
-      const j = scene.cg.findIndex((d) => d.trim() === l.desc);
-      if (j >= 0) idx = j;
-    }
-    return idx;
-  }, [scene, i, total]);
+    const flags = cgActiveFlags(scene);
+    if (!flags.length) return scene.cg.length ? 0 : -1;
+    return flags[Math.min(i, flags.length - 1)];
+  }, [scene, i]);
 
   // 순수 함수(computeStagePositions, 위에서 export)로 위임 — 생성기(scriptBody)와 같은
   // arrangePositions 를 같은 방식(현재 줄까지 점진적으로 커지는 order)으로 호출한다.
@@ -392,7 +392,9 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
         ? `🎁 아이템 팝업: ${cur.name}`
         : '🎁 아이템 닫기'
       : cur.kind === 'cg'
-        ? `🖼 CG 배경 전환: ${cur.desc || '(설명 없음)'}`
+        ? cur.end
+          ? '🖼 CG 종료 (일반 장면 복귀)'
+          : `🖼 CG 배경 전환: ${cur.desc || '(설명 없음)'}`
         : cur.kind === 'bgm'
           ? `🎵 BGM: ${cur.name}` // 미리보기는 오디오를 재생하지 않으므로 표시만(실제 재생은 generate.ts)
           : cur.text;

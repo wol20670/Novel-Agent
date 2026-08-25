@@ -321,6 +321,14 @@ export class SceneBuilder {
     sc.cg.push(v);
     sc.lines.push({ kind: 'cg', desc: v });
   }
+  /**
+   * #CG끝 — 그 위치에서 배경을 장면의 일반 배경으로 되돌리는 종료 마커(`#아이템끝` 과 같은 관용구).
+   * ⚠️ **scene.cg / cgAssetIds 에는 넣지 않는다** — 종료는 에셋이 아니다. desc 는 항상 ''.
+   * 구분은 `end` 필드로만 한다(설명 없는 `#CG` 도 desc:'' 라, 빈 desc 로 판정하면 그게 조용히 종료가 된다).
+   */
+  addCgEnd() {
+    this.ensureScene().lines.push({ kind: 'cg', desc: '', end: true });
+  }
   addChoice(choice: Choice) {
     this.ensureScene().choices.push(choice);
   }
@@ -422,6 +430,11 @@ export function applyTag(b: SceneBuilder, body: string): boolean {
   }
   if (t.startsWith('#연출')) {
     b.addDirection(t.replace(/^#연출\s*/, ''));
+    return true;
+  }
+  // CG 배경 전환. #CG끝(종료)을 #CG 보다 먼저 매칭한다(#아이템끝/#아이템 과 같은 순서 규칙).
+  if (t.startsWith('#CG끝')) {
+    b.addCgEnd();
     return true;
   }
   if (t.startsWith('#CG')) {

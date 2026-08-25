@@ -112,6 +112,43 @@ function withLineOutfits(): Project {
   return { ...p, scenes: p.scenes.map((s, i) => (i === scIdx ? { ...s, lines } : s)) };
 }
 
+// CG 종료(#CG끝) 구성 — `일반 → CG → 일반` 복귀 경로(배경 되돌리기 + **즉시** 스프라이트 복원)를
+// 굳힌다. withOutfits() 위에 얹어 **CG 구간 안에서 바뀐 의상이 복원 show 에 반영되는지**까지 한
+// 구성에서 본다. 이 구성만 `#CG끝` 을 쓰므로, 나머지 구성이 전부 동일해야 "안 켠 프로젝트 회귀 0"이
+// 증명된다.
+// ⚠️ 스프라이트 보유 화자가 CG **이전에** 한 번은 서 있어야(revealedOrder/lastShown 이 채워져야)
+// 복원할 대상이 생긴다 — 안 그러면 덤프가 CG 없는 구성과 똑같아져 이 경로가 대조에서 빠진다
+// (CLAUDE.md "덤프가 plain 과 같아지는" 함정. 실제로 첫 시도가 여기 걸렸다).
+function withCgEnd(): Project {
+  const p = withOutfits();
+  const target = p.characters.find((c) => c.outfits?.length);
+  if (!target) return p;
+  const isTarget = (l: Project['scenes'][number]['lines'][number]) =>
+    l.kind === 'dialogue' && l.speaker === target.name;
+  const scIdx = p.scenes.findIndex((s) => s.lines.some(isTarget));
+  if (scIdx < 0) return p;
+  const sc = p.scenes[scIdx];
+  const stood = sc.lines.findIndex(isTarget); // 이 줄에서 스프라이트가 선다 = 복원 대상 확보
+  const cgDesc = 'CG 종료 검증용 컷';
+  const lines: Project['scenes'][number]['lines'] = [
+    ...sc.lines.slice(0, stood + 1),
+    { kind: 'cg', desc: cgDesc },
+    // CG 중 의상 변경 — 복원 show 는 "내려가기 직전 값"이 아니라 이 fold 값을 써야 한다.
+    { kind: 'dialogue', speaker: target.name, text: 'CG 위에서 이어지는 대사.', outfits: { [target.name]: '기본' } },
+    { kind: 'cg', desc: '', end: true }, // ← 배경 복귀 + 복원 show 가 여기서 즉시 나가야 한다
+    { kind: 'narration', text: '다시 일반 배경으로 돌아왔다.' },
+    { kind: 'dialogue', speaker: target.name, text: '일반 장면에서 계속.' },
+    ...sc.lines.slice(stood + 1),
+  ];
+  const next = {
+    ...sc,
+    cg: [...sc.cg, cgDesc],
+    cgAssetIds: [...(sc.cgAssetIds ?? []), 'a-cg'],
+    lines,
+  };
+  return { ...p, scenes: p.scenes.map((x, i) => (i === scIdx ? next : x)) };
+}
+
 const configs: Record<string, Project> = {
   plain: base(),
   'genre-thriller': { ...base(), genre: 'thriller' },
@@ -135,6 +172,7 @@ const configs: Record<string, Project> = {
   'menu-art': { ...base(), menuArt: { main: 'a-main' } },
   outfits: withOutfits(),
   'outfits-line': withLineOutfits(),
+  'cg-end': withCgEnd(),
 };
 for (const id of Object.keys(MAIN_MENU_PRESETS) as MainMenuPresetId[]) {
   configs[`preset-${id}`] = { ...base(), mainMenuUi: { preset: id } };

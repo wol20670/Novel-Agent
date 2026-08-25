@@ -124,9 +124,16 @@ export type Line =
   | { kind: 'item'; name: string }
   /**
    * CG 배경 전환 인라인 이벤트. 이 지점부터 장면 배경을 CG로 바꾸고 스프라이트를 모두 숨긴다
-   * (장면 끝까지 유지, 대사창·TTS 는 계속). desc 는 Scene.cg 항목과 트림 기준으로 매칭된다.
+   * (`#CG끝` 전까지 유지, 대사창·TTS 는 계속). desc 는 Scene.cg 항목과 트림 기준으로 매칭된다.
+   *
+   * `end === true` 는 **CG 종료 마커**(`#CG끝`)다 — 그 지점에서 배경을 장면의 일반 배경으로
+   * 되돌리고 그때 보여야 할 스프라이트를 즉시 복원한다. `#아이템끝`(`name === ''`)과 같은
+   * "같은 kind + 종료 payload" 관용구이고, 종료 마커는 **Scene.cg / cgAssetIds 에 들어가지
+   * 않는다**(에셋이 아니다 — desc 는 항상 '').
+   * ⚠️ **빈 desc 자체를 종료로 재해석하지 말 것** — 설명 없는 `#CG` 도 `desc: ''` 를 만든다
+   * (정상 start marker). 판정은 오직 `end` 필드로 한다.
    */
-  | { kind: 'cg'; desc: string }
+  | { kind: 'cg'; desc: string; end?: true }
   /**
    * BGM 시작 위치 마커. 곡 자체는 Scene.bgm/bgmAssetId(장면당 1곡)에 있고 이 라인은
    * 대본에서 `#BGM` 태그가 나온 "그 자리"만 담는다 — 장면 맨 앞에서 지정되면(대사 이전) 굳이
@@ -567,6 +574,52 @@ export function spriteHiddenFlags(scene: Scene): boolean[] {
       hidden = line.hideSprites;
     }
     flags.push(hidden);
+  }
+  return flags;
+}
+
+/**
+ * 이 장면에 **시작** CG 마커가 있는가(`#CG끝` 종료 마커는 제외).
+ * 레거시 폴백("scene.cg 는 있는데 위치 마커가 없다 → 장면 시작부터 CG") 판정의 **단일 소스**다 —
+ * 같은 술어를 cgActiveFlags · getFirstEffectiveCgIndex · generate.ts 세 곳이 쓰는데, 한 곳만
+ * `l.kind === 'cg'` 로 재면 **종료 마커를 시작 마커로 세어** 그 장면의 폴백이 조용히 죽는다.
+ */
+export function hasCgStartMarker(scene: Scene): boolean {
+  return scene.lines.some((l) => l.kind === 'cg' && !l.end);
+}
+
+/**
+ * 장면의 줄마다 "그 줄을 처리한 뒤 배경에 떠 있는 CG"의 scene.cg 인덱스(-1 = CG 아님, 일반 배경).
+ * spriteHiddenFlags/outfitFlags 와 같은 규칙의 단일 소스 — generate.ts(scriptBody)와 ScenePlayer
+ * 가 각자 계산하면 어긋난다. 예전엔 CG 가 한 번 켜지면 장면 끝까지 안 꺼져서 세 구현이 우연히
+ * 일치했지만, `#CG끝` 이 생긴 뒤로는 이 함수가 정본이다.
+ *
+ * 갈래(기존 4갈래 + 종료):
+ *  ① scene.cg 없음                          → 전 구간 -1
+ *  ② scene.cg 는 있는데 **시작** 마커가 없음 → 레거시 폴백으로 장면 시작부터 cg[0]
+ *  ③ desc 가 매칭되는 시작 마커              → 그 줄부터 그 인덱스
+ *  ④ 시작 마커가 전부 orphan(매칭 실패)      → CG 가 안 켜진다(-1 유지)
+ *  ⑤ `end` 마커                              → 그 줄부터 다시 -1
+ * 대입 뒤 push 라 **마커 줄 자신부터** 새 값이 유효하다(생성기가 마커 위치에서 scene 문을 내는 것과 대응).
+ *
+ * ⚠️ getFirstEffectiveCgIndex(generators/outfit)와 **의미가 다르다** — 이건 "지금 CG 인가"(상태),
+ * 저건 "이 장면의 최초 CG 경계가 어디인가"(경계)다. 레거시 폴백 장면의 첫 줄이 `#CG끝` 이면
+ * 여기선 전 구간 -1 이지만 저기선 0 이다(둘 다 맞다). **하나로 합치지 말 것** — 합치면 그 장면에서
+ * Outfit AI writable 이 장면 전체로 열려 이번 Phase 가 하지 않기로 한 확장이 배선 실수로 일어난다.
+ */
+export function cgActiveFlags(scene: Scene): number[] {
+  const flags: number[] = [];
+  let cur = scene.cg.length && !hasCgStartMarker(scene) ? 0 : -1;
+  for (const line of scene.lines) {
+    if (line.kind === 'cg') {
+      if (line.end) {
+        cur = -1;
+      } else {
+        const j = scene.cg.findIndex((d) => d.trim() === line.desc);
+        if (j >= 0) cur = j;
+      }
+    }
+    flags.push(cur);
   }
   return flags;
 }

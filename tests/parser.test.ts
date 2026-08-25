@@ -230,3 +230,52 @@ describe('parser: #복장 위치 의미(장면 시작 의상 vs 줄 단위 전�
     expect(outfitLines(scenes[1].lines)).toEqual([['셋', undefined]]);
   });
 });
+
+describe('parser: #CG / #CG끝 (post-v1 CG 종료)', () => {
+  type CgLine = { kind: 'cg'; desc: string; end?: true };
+  const cgLines = (lines: Line[]) => lines.filter((l) => l.kind === 'cg') as CgLine[];
+
+  it('#CG끝 을 종료 마커(end:true)로 파싱하고 #CG 보다 먼저 매칭한다', () => {
+    const { scenes } = parseText(
+      ['#S s', '민주: 하나', '#CG 첫 컷', '민주: 둘', '#CG끝', '민주: 셋'].join('\n'),
+    );
+    const lines = scenes[0].lines;
+    expect(lines.map((l) => l.kind)).toEqual(['dialogue', 'cg', 'dialogue', 'cg', 'dialogue']);
+    expect(cgLines(lines)).toEqual([
+      { kind: 'cg', desc: '첫 컷' },
+      { kind: 'cg', desc: '', end: true },
+    ]);
+  });
+
+  it('#CG끝 은 Scene.cg(에셋 목록)를 건드리지 않는다', () => {
+    const { scenes } = parseText(['#S s', '#CG 첫 컷', '민주: 하나', '#CG끝'].join('\n'));
+    expect(scenes[0].cg).toEqual(['첫 컷']); // 종료 마커 몫의 빈 항목이 늘지 않는다
+  });
+
+  it('설명 없는 #CG 는 여전히 정상 시작 마커다(빈 desc 를 종료로 재해석하지 않는다)', () => {
+    const { scenes } = parseText(['#S s', '#CG', '민주: 하나'].join('\n'));
+    expect(cgLines(scenes[0].lines)).toEqual([{ kind: 'cg', desc: '' }]); // end 없음
+    expect(scenes[0].cg).toEqual(['']); // 기존대로 에셋 슬롯이 생긴다
+  });
+
+  it('한 장면에 CG 구간이 여러 개여도 순서대로 파싱된다', () => {
+    const { scenes } = parseText(
+      ['#S s', '#CG A', '민주: 하나', '#CG끝', '민주: 둘', '#CG B', '민주: 셋', '#CG끝'].join('\n'),
+    );
+    expect(cgLines(scenes[0].lines).map((l) => [l.desc, l.end ?? false])).toEqual([
+      ['A', false],
+      ['', true],
+      ['B', false],
+      ['', true],
+    ]);
+    expect(scenes[0].cg).toEqual(['A', 'B']);
+  });
+
+  it('#CG끝 은 pending #복장/#인물숨김 을 소비하지 않는다(다른 마커와 같은 규칙)', () => {
+    const { scenes } = parseText(
+      ['#S s', '#CG 컷', '민주: 하나', '#복장 민주:사복', '#CG끝', '민주: 둘'].join('\n'),
+    );
+    const last = scenes[0].lines[scenes[0].lines.length - 1];
+    expect(last.kind === 'dialogue' && last.outfits).toEqual({ 민주: '사복' });
+  });
+});

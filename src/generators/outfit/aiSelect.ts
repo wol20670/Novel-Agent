@@ -24,6 +24,7 @@ import {
   characterOutfits,
   outfitFlags,
   spriteHiddenFlags,
+  hasCgStartMarker,
   type Character,
   type Line,
   type OutfitRule,
@@ -136,20 +137,31 @@ export interface OutfitWindowPlan {
 }
 
 /**
- * Preview(ScenePlayer.activeCgIdx)·Export(generate.ts 의 cgActive)와 **동일한 4갈래**.
+ * 이 장면의 **최초 CG 경계**(Outfit AI writable 집합의 cutoff). 4갈래:
  *  ① scene.cg 가 없음 → CG 없음(전체 writable)
- *  ② scene.cg 는 있는데 kind:'cg' 줄이 하나도 없음 → 레거시 폴백으로 **장면 시작부터** CG active
- *     (생성기 게이트가 "유효 마커 없음"이 아니라 "cg 라인 전무"다) → writable 0줄
- *  ③ scene.cg 와 desc 가 매칭되는 첫 마커 → 그 지점부터 CG active
- *  ④ 마커는 있는데 전부 orphan(매칭 실패) → 폴백도 마커도 안 먹혀 CG 가 끝까지 안 켜진다 → 전체 writable
- * cgActive 는 한 번 켜지면 되돌지 않고 그 뒤 복원·의상 동기화·화자 show 를 전부 막으므로,
- * cutoff 이후의 transition 은 **dead write** 다(그래서 대상에서 뺀다).
+ *  ② scene.cg 는 있는데 **시작** 마커가 하나도 없음 → 레거시 폴백으로 **장면 시작부터** CG → writable 0줄
+ *  ③ scene.cg 와 desc 가 매칭되는 첫 **시작** 마커 → 그 지점이 경계
+ *  ④ 시작 마커는 있는데 전부 orphan(매칭 실패) → 폴백도 마커도 안 먹혀 CG 가 안 켜진다 → 전체 writable
+ *
+ * ⚠️ **`cgActiveFlags`(types/project.ts)와 의미가 다르다 — 합치지 말 것.**
+ *   · cgActiveFlags = "그 줄을 처리한 뒤 지금 CG 인가"(per-line **상태**)
+ *   · 이 함수      = "이 장면의 최초 CG 경계가 어디인가"(1회 **경계**)
+ * 레거시 폴백 장면의 첫 줄이 `#CG끝` 이면 cgActiveFlags 는 전 구간 -1 이지만 이 함수는 **0** 이다
+ * (둘 다 맞다 — 전자는 "지금은 일반 장면", 후자는 "이 장면은 시작부터 CG 였다"). `findIndex(v>=0)` 로
+ * 파생하면 그 장면에서 이 함수가 null 이 되어 **Outfit AI writable 이 장면 전체로 열린다** — post-CG
+ * 구간까지 AI 제안을 확장하는 건 별도 Phase 의 판단이지 배선 사고로 일어나선 안 된다.
+ *
+ * `#CG끝` 은 **시작 마커가 아니므로** ②·③ 둘 다에서 제외한다(hasCgStartMarker 와 같은 술어).
+ * 기존 저장 데이터엔 `end` 필드가 없어 `!l.end` 는 항상 true — 기존 4갈래 결과는 그대로다.
+ *
+ * Outfit **AI** 는 이 cutoff 이후를 계속 대상에서 뺀다(Phase 14 동결 계약). 반면 장면 카드의 **수동**
+ * 의상 전환은 `cgActiveFlags` 기준이라 `#CG끝` 이후 다시 허용된다 — **의도된 divergence** 다.
  */
 export function getFirstEffectiveCgIndex(scene: Scene): number | null {
   if (!scene.cg.length) return null;
-  if (!scene.lines.some((l) => l.kind === 'cg')) return 0;
+  if (!hasCgStartMarker(scene)) return 0;
   const i = scene.lines.findIndex(
-    (l) => l.kind === 'cg' && scene.cg.some((d) => d.trim() === l.desc),
+    (l) => l.kind === 'cg' && !l.end && scene.cg.some((d) => d.trim() === l.desc),
   );
   return i >= 0 ? i : null;
 }

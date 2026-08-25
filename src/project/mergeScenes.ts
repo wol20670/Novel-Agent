@@ -51,13 +51,16 @@ export interface MergePreview {
 /**
  * 라인의 "내용 동일성" 키 — kind/화자/본문(또는 아이템 이름·CG 설명·BGM 곡명)이 전부 같아야 같은
  * 라인으로 본다. item/cg/bgm 라인은 이 필드들만으로 완전한 동일성 판정이 된다(추가 메타 없음).
+ * cg 는 시작/종료(`#CG끝`)를 가운데 슬롯으로 구분한다 — `end` 가 없으면 슬롯이 비어 기존 키
+ * `cg||<desc>` 가 **문자 그대로 유지**되므로 기존 CG 줄의 merge identity 는 바뀌지 않고,
+ * 설명 없는 `#CG`(`cg||`)와 종료 마커(`cg|end|`)만 갈린다.
  */
 function lineKey(line: Line): string {
   if (line.kind === 'dialogue') return `dialogue|${line.speaker}|${line.text}`;
   if (line.kind === 'narration') return `narration||${line.text}`;
   if (line.kind === 'item') return `item|${line.name}|`;
   if (line.kind === 'bgm') return `bgm|${line.name}|`;
-  return `cg||${line.desc}`;
+  return `cg|${line.end ? 'end' : ''}|${line.desc}`;
 }
 
 /** 두 라인 배열이 순서까지 완전히 동일한 내용인지(상태 승계 판정용). */

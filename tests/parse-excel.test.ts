@@ -66,3 +66,33 @@ describe('parseWorkbook: 콜론형(장면:/배경: ...) 필드 태그 인식', (
     expect(line.i18n).toEqual({ en: 'Hello', ja: 'こんにちは' });
   });
 });
+
+describe('parseWorkbook: #CG끝 (원시 태그 경로 — 새 필드 문법을 만들지 않는다)', () => {
+  it('B열 #CG끝 이 종료 마커로 파싱된다', async () => {
+    const buf = toBuffer([
+      ['', '#S s'],
+      ['', '#CG 첫 컷'],
+      ['민주', '하나'],
+      ['', '#CG끝'],
+      ['민주', '둘'],
+    ]);
+    const { scenes } = await parseWorkbook(buf);
+    const cg = scenes[0].lines.filter((l) => l.kind === 'cg') as {
+      kind: 'cg';
+      desc: string;
+      end?: true;
+    }[];
+    expect(cg).toEqual([{ kind: 'cg', desc: '첫 컷' }, { kind: 'cg', desc: '', end: true }]);
+    expect(scenes[0].cg).toEqual(['첫 컷']);
+  });
+
+  it('콜론형 "CG: 끝" 은 종료가 아니라 "끝"이라는 이름의 CG 다(모호성 방지 — 문법을 늘리지 않았다)', async () => {
+    const buf = toBuffer([
+      ['', '#S s'],
+      ['', 'CG: 끝'],
+    ]);
+    const { scenes } = await parseWorkbook(buf);
+    expect(scenes[0].cg).toEqual(['끝']);
+    expect(scenes[0].lines.filter((l) => l.kind === 'cg')).toEqual([{ kind: 'cg', desc: '끝' }]);
+  });
+});

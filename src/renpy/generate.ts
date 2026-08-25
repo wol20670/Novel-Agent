@@ -20,6 +20,7 @@ import {
   effectiveVoiceLocales,
   outfitFlags,
   spriteHiddenFlags,
+  hasCgStartMarker,
   MAIN_MENU_SLOTS,
   MENU_BUTTON_STATES,
   mainMenuLayout,
@@ -721,6 +722,31 @@ function scriptBody(
       const owned = spritesByChar.get(id);
       return owned && owned.length ? owned : undefined;
     };
+    /**
+     * 내려가 있던 스프라이트를 그 자리·**그 줄의 의상**으로 다시 세운다 — 복원 알고리즘의 단일 소스.
+     * 두 경로가 이걸 공유한다: ① 인물 숨김 해제(hide→show 전이) ② `#CG끝`(CG 종료 즉시 복원).
+     * 알고리즘을 두 벌로 복제하면 그 순간 둘이 어긋난다(resolveEmotion 규칙과 같은 이유).
+     *
+     * · 숨김/CG 구간에서 처음 말한 캐릭터는 revealedOrder 에 들어간 적이 없어(그 구간엔 newlyRevealed
+     *   가 항상 빈 배열) 여기서 유령처럼 튀어나오지 않는다 — 다음에 말할 때 정상적으로 새로 등장한다.
+     * · 의상은 "내려가기 직전 값"이 아니라 **lineIdx 시점의 fold 값**이다(숨어 있는/CG 인 동안 #복장이
+     *   바뀌었으면 새 옷을 입고 나와야 한다). 표정은 마지막으로 **실제 표시된** shown.attr 을 유지하되,
+     *   새 의상에 그 표정이 없으면 pickSpriteAttrs 가 neutral/pool[0] 로 내려준다.
+     * · hide 뒤엔 태그의 속성 기억이 사라지므로 반드시 속성 전체를 다시 준다(속성 없는 show 는 크래시).
+     */
+    const restoreShownSprites = (lineIdx: number) => {
+      for (const id of revealedOrder) {
+        const shown = lastShown.get(id);
+        if (!shown) continue;
+        const owned = ownedOf(id);
+        const wanted = owned ? outfitAt(owned[0].charName, lineIdx) : shown.wanted;
+        const picked = owned
+          ? pickSpriteAttrs(owned, wanted, shown.attr)
+          : { outfitAttr: shown.outfitAttr, attr: shown.attr };
+        out.push(`${indent(1)}show ${id} ${picked.outfitAttr} ${picked.attr} at vn_char(${currentPos.get(id) ?? 50})`);
+        lastShown.set(id, { ...picked, wanted });
+      }
+    };
     let hiddenNow = false; // 지금까지 반영된 "유효 숨김" 상태(장면 시작은 항상 false — 아직 아무도 안 섰으므로 hide 대상이 없다).
     out.push(`# ── ${commentSafe(s.title)} ──`);
     out.push(`label ${r.label}:`);
@@ -737,10 +763,12 @@ function scriptBody(
       // 안 타면 출력은 지금과 완전히 동일하다(회귀 0).
       out.push(`${indent(1)}stop music fadeout 1.0`);
     }
-    // CG 배경 전환: kind:'cg' 라인 위치에서 발동 — 그 지점부터 배경=CG, 스프라이트 숨김(장면 끝까지),
+    // CG 배경 전환: kind:'cg' 라인 위치에서 발동 — 그 지점부터 배경=CG, 스프라이트 숨김(`#CG끝` 전까지),
     // 대사창·TTS 는 계속. 위치 마커가 없는 기존 저장 데이터(재파싱 전)는 첫 CG 를 장면 시작부터 배경으로 폴백.
+    // ⚠️ 폴백 판정은 hasCgStartMarker 단일 소스다 — `l.kind === 'cg'` 로 재면 **종료 마커만 남은 장면**에서
+    //    폴백이 조용히 죽는다(cgActiveFlags·getFirstEffectiveCgIndex 와 같은 술어를 써야 셋이 일치한다).
     let cgActive = false;
-    if (r.cgTags.length && !s.lines.some((l) => l.kind === 'cg')) {
+    if (r.cgTags.length && !hasCgStartMarker(s)) {
       out.push(`${indent(1)}$ persistent.cg_seen["${r.cgTags[0]}"] = True`);
       out.push(`${indent(1)}scene ${r.cgTags[0]}_scene with dissolve`);
       cgActive = true;
@@ -768,6 +796,24 @@ function scriptBody(
         continue;
       }
       if (line.kind === 'cg') {
+        if (line.end) {
+          // `#CG끝` — **이 줄 하나가 일반 장면 복귀를 완료한다**(다음 대사에 미루지 않는다):
+          // 배경을 장면의 일반 배경으로 되돌리고, 그때 보여야 할 스프라이트를 즉시 복원한다.
+          // scene 문이 이미지 레이어를 다시 지우므로 복원 show 는 반드시 이 뒤에 나가야 하고,
+          // 선택지(menu)는 줄 루프 밖에서 나가므로 이 복원이 **선택지 화면보다 항상 앞**이다.
+          // ⚠️ CG 가 안 켜져 있으면 배경 문도 내지 않는 완전 no-op 이다(orphan `#CG끝`).
+          if (cgActive) {
+            out.push(`${indent(1)}scene ${r.bgTag} at vn_bg with dissolve`);
+            cgActive = false;
+            // 인물 숨김은 CG 와 **별개 상태**다 — 종료 시점에 이미 숨김이면 아무도 세우지 않고,
+            // 나중에 `#인물표시` 로 풀릴 때 위 전이 분기가 같은 helper 로 복원한다.
+            // (hideSprites 는 캐릭터별이 아니라 장면 전체 boolean 이다 — spriteHiddenFlags 참고.)
+            const hiddenAtEnd = hiddenFlags[lineIdx];
+            if (!hiddenAtEnd) restoreShownSprites(lineIdx);
+            hiddenNow = hiddenAtEnd; // 다음 textual 줄에서 중복 복원이 나지 않도록 상태를 확정
+          }
+          continue;
+        }
         // 배경을 CG 합성판(<tag>_scene)으로 교체 — scene 문이 서 있던 스프라이트를 전부 지운다(개별 hide 불필요).
         // 같은 장면에 CG 가 또 나오면 배경만 다음 CG 로 다시 교체된다.
         const cgIdx = s.cg.findIndex((d) => d.trim() === line.desc);
@@ -799,23 +845,8 @@ function scriptBody(
           // 반드시 lastShown 에 적어둔 속성으로 show 를 다시 내야 한다(속성 없는 show 는 크래시).
           for (const id of revealedOrder) out.push(`${indent(1)}hide ${id}`);
         } else {
-          // 숨기기 직전 그 자리로 복원(lastShown). 숨김 구간에서 처음 말한 캐릭터는 애초에
-          // revealedOrder 에 들어간 적이 없으므로(아래 newlyRevealed 가 숨김 중엔 항상 빈 배열) 여기서
-          // 유령처럼 튀어나오지 않는다 — 다음에 말할 때 정상적으로 새로 등장한다.
-          // 의상은 "숨기기 직전 값"이 아니라 **지금 줄의 fold 값**이다 — 숨어 있는 동안 #복장이
-          // 바뀌었으면 다시 나타날 때 새 옷을 입고 나와야 한다. 표정은 마지막 표정(shown.attr)을
-          // 유지하되, 새 의상에 그 표정이 없으면 pickSpriteAttrs 가 neutral/pool[0] 로 내려준다.
-          for (const id of revealedOrder) {
-            const shown = lastShown.get(id);
-            if (!shown) continue;
-            const owned = ownedOf(id);
-            const wanted = owned ? outfitAt(owned[0].charName, lineIdx) : shown.wanted;
-            const picked = owned
-              ? pickSpriteAttrs(owned, wanted, shown.attr)
-              : { outfitAttr: shown.outfitAttr, attr: shown.attr };
-            out.push(`${indent(1)}show ${id} ${picked.outfitAttr} ${picked.attr} at vn_char(${currentPos.get(id) ?? 50})`);
-            lastShown.set(id, { ...picked, wanted });
-          }
+          // 숨기기 직전 그 자리로 복원 — `#CG끝` 과 **같은 helper**(알고리즘 1벌).
+          restoreShownSprites(lineIdx);
         }
       }
       hiddenNow = effHidden;
