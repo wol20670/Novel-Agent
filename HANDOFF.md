@@ -19,12 +19,121 @@
 - **post-v1 의상 전환 UX 개선** — ⚠️ 번역 로드맵·v1 Phase 번호와 **다른 축**이다. **Phase 1(구현)·Phase 2(검증·문서) 완료**, 남은 필수 작업 없음. 계약은 아래 📌 절이 정본이고 `CLAUDE.md` 의상 절에도 durable contract 한 줄이 있다.
 - **post-v1 대본 한 줄 삭제 UX 개선** — ⚠️ 위 두 축(번역 로드맵·의상 UX)과도 **다른 축**이고 v1 Phase 번호와 섞지 말 것. **Phase 1(구현·검증)·Phase 2(문서) 완료**, 남은 필수 작업 없음. 계약은 아래 📌 절이 정본이고 `CLAUDE.md` 에도 durable contract 가 있다. ⚠️ `item`/`cg`/`bgm` control line 삭제는 **이번 scope 밖**이다(별도 Phase — 사용자 지시가 있을 때만).
   **구현 = `258c637`(장면 카드 수동 의상 전환 UI) · 문서 = `95ba76e`** — 이 둘은 **post-v1 번역 Phase 5 를 시작하기 전에 이미 main 에 있었고** Phase 5 는 이 축을 건드리지 않았다(`SceneCard.tsx` 무수정 · `👗` 패널 실브라우저 smoke 확인). ⚠️ 번역 Phase 5 baseline 을 `76612eb` 로 착각하지 말 것 — 실제 baseline 은 **`95ba76e`** 다.
+- **post-v1 장면 중간 CG 종료 / 일반 장면 복귀 UX** — ⚠️ 위 세 축(번역 로드맵·의상 UX·줄 삭제)과도 **다른 축**이고 v1 Phase 번호와 섞지 말 것. **Phase 1(구현·검증)·Phase 2(문서) 완료**, 남은 필수 작업 없음. 계약은 아래 📌 절이 정본이고 `CLAUDE.md` 에도 durable contract 가 있다. ⚠️ **Outfit AI 를 post-CG 구간으로 넓히는 것은 이번 scope 밖**이다(별도 Phase — 사용자 지시가 있을 때만).
 - **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
 - **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 post-v1 CG 종료 / 일반 장면 복귀가 확정한 것 (`#CG끝` — 깨지 말 것)
+> ⚠️ 이 절은 **CG 종료 축**이다(번역 로드맵·의상 UX·줄 삭제·v1 Phase 번호와 같은 축이 아니다).
+
+- **기능**: 대본에 `#CG끝` 한 줄을 적으면 `일반 장면 → CG → 일반 장면` 이 된다. `#CG` 로 켠 CG 를 끄고
+  **같은 Scene 의 일반 background** 로 되돌린 뒤 **그때 보여야 할 스프라이트를 즉시 복원**한다.
+  ⚠️ **`#CG끝` 은 "다음 대사가 있어야 작동하는" 마커가 아니다 — 마커 그 자체에서 복귀가 완료된다.**
+  그래서 `#CG끝 → 대사` · `→ 지문` · `→ 선택지` · `→ 장면 종료` 네 경우 모두 일반 장면 상태가
+  **먼저** 확정된다(선택지 화면이 CG 위에 뜨지 않는다).
+- **Line 표현은 새 kind 가 아니라 기존 cg Line 의 optional field** 다:
+  ```
+  종료 마커 : { kind: 'cg', desc: '',    end: true }
+  일반 CG   : { kind: 'cg', desc: '...', end: undefined }
+  ```
+  ⚠️ **`desc === ''` 를 종료 판정으로 쓰지 말 것** — 설명 없는 `#CG` 도 `desc: ''` 를 만든다(정상 시작
+  마커). 판정은 **반드시 `end === true`**. 종료 마커는 `Scene.lines` 에만 들어가고
+  **`Scene.cg`·`cgAssetIds` 에는 들어가지 않는다**(에셋이 아니라 control marker 다).
+- **parser 가 읽는 canonical 대본 문법**이라 `rawInput → parse → Scene.lines(end:true) → save/load →
+  재분석` 전 구간에서 유지된다(실측: 재분석 시 병합 미리보기가 "변경 없음"). `#아이템끝` 과 같은
+  관용구이고 `applyTag` 에서 **`#CG` 보다 먼저** 매칭한다. 엑셀은 기존 B열 원시 `#` 태그 경로로
+  `#CG끝` 을 지원한다. ⚠️ **`CG: 끝` 같은 필드형 문법은 지원하지 않는다**("끝"이라는 이름의 CG 와
+  구별할 수 없다 — `FIELD_TAG_MAP` 무변경). ⚠️ **SceneCard 에서 `#CG끝` 을 수동 삽입·삭제하는 UI 는
+  만들지 않았다.**
+- **신규 pure derived helper 2개**(`src/types/project.ts`, `spriteHiddenFlags`/`outfitFlags` 옆):
+  - `hasCgStartMarker(scene)` — 실제 CG **시작** 마커 존재 여부(종료 마커를 start 로 세지 않는다).
+    레거시 폴백 판정의 단일 소스이고 세 곳(`cgActiveFlags`·`getFirstEffectiveCgIndex`·생성기)이 공유한다.
+  - `cgActiveFlags(scene)` — 각 줄을 처리한 **뒤**의 CG active 상태(`-1` = 일반 장면, `0 이상` =
+    `scene.cg` 인덱스). `일반 → CG A → 일반 → CG B → 일반` 다중 구간을 그대로 지원한다.
+  ⚠️ **`Scene.cgRanges`·timeline·persistent range state 를 만들지 않았다.**
+- ⚠️ **`cgActiveFlags` 와 `getFirstEffectiveCgIndex` 를 합치지 말 것 — semantic 이 다르다.**
+  ```
+  cgActiveFlags            = 그 줄 시점의 CG active 여부(per-line range 판정)
+  getFirstEffectiveCgIndex = 이 Scene 의 최초 CG boundary(1회)
+  ```
+  대표 edge — `Scene.cg=['legacy']` · `lines[0]=#CG끝` · `lines[1]=dialogue`:
+  ```
+  cgActiveFlags            = [-1, -1]   (지금은 일반 장면 → 수동 의상 허용)
+  getFirstEffectiveCgIndex = 0          (이 장면은 시작부터 CG 였다 → AI writable 0줄)
+  ```
+  **둘 다 의도된 값**이다. 미래 리팩터에서 `getFirstEffectiveCgIndex = cgActiveFlags.findIndex(...)`
+  로 합치면 그 장면에서 **Outfit AI writable 이 장면 전체로 열린다**(하지 않기로 한 확장이 배선
+  사고로 일어난다). 테스트가 이 차이 자체를 고정한다.
+- **Ren'Py 복원 계약** — `#CG끝` 에서 생성기는 즉시 ① `scene <일반 배경> at vn_bg with dissolve`
+  ② CG active 종료 ③ 현재 `hideSprites` 상태 확인 ④ 표시 가능하면 기존 revealed 스프라이트를
+  **즉시** 복원 ⑤ generator hidden 상태 동기화. **복원을 다음 대사로 미루지 않는다.**
+  복원은 새 snapshot 이 아니라 기존 runtime state(`revealedOrder`·`currentPos`·`lastShown`·`outfitAt`)를
+  재사용하고, **기존 `#인물숨김 → #인물표시` 복원과 CG 종료 복원이 generator-local restore helper
+  한 벌을 공유**한다(`restoreShownSprites`). ⚠️ **새 snapshot·history·state-machine 을 만들지 않았다.**
+  CG 가 안 켜진 상태의 `#CG끝` 은 **배경 문도 안 내는 완전 no-op** 이다.
+- **복원값**(전부 기존 계약 승계):
+  - **hide** — `hideSprites` 는 **per-character 가 아니라 장면 전체 표시 상태 boolean** 이다. 종료
+    시점에 `false` 면 기존 visible 스프라이트를 복원하고, `true` 면 **아무도 복원하지 않는다**(뒤에
+    `#인물표시` 로 풀릴 때 같은 helper 가 복원). ⚠️ **per-character hide 모델을 만들지 않았다.**
+  - **outfit** — `outfitAt(character, endMarkerIndex)`. CG 구간 중 대본에서 바뀐 **현재 fold 의상**이 반영된다.
+  - **expression** — CG 진입 전 마지막으로 **실제 표시됐던** `lastShown.attr`. CG 중 대사만 발생해
+    실제로 표시되지 않은 표정은 복원값이 **아니다**(post-CG 재발화 시 그 줄 표정으로 정상 갱신).
+  - **position** — 기존 `currentPos`/`revealedOrder`. **CG 중 처음 등장한 화자는 종료 순간 복원되지
+    않고** post-CG 첫 발화에서 정상 등장한다.
+- **Preview 는 `cgActiveFlags` 하나만 본다**(별도 fold 를 만들지 않는다) — CG 구간엔 스프라이트 표시를
+  억제하고 `#CG끝` 부터 일반 배경 + 기존 visible 상태를 복원한다. ⚠️ CG 구간에서 **logical 표정 fold ·
+  carried 표시 attr · 위치 누적** 셋 다 건너뛰어야 한다 — 하나라도 빠지면 **CG 중에만 등장한 화자가
+  복귀 순간 튀어나온다**(생성기는 안 세운다). 목표는 **`#CG끝` 처리 후 effective scene state 일치**다.
+- ⚠️ **의상 경계는 이제 두 정책이 의도적으로 다르다 — 다시 "공유 경계"로 합치지 말 것.**
+  ```
+  SceneCard 수동 👗 = cgActiveFlags[index] < 0   → CG 이전 허용 · CG 구간 차단 · #CG끝 이후 다시 허용
+  Outfit AI         = getFirstEffectiveCgIndex   → 최초 CG 앞까지(기존 그대로)
+  ```
+  즉 **AI 는 이번 Phase 에서 post-CG 구간을 새 제안 대상으로 삼지 않는다.**
+  `planOutfitWindows`·chunking·lead-in·CG sentinel·`apply.ts` **전부 무수정**이다.
+- **merge identity 무변경** — 기존 일반 CG 의 키 `cg||<desc>` 는 **byte-for-byte 유지**되고 종료 마커만
+  `cg|end|` 로 갈린다. 그래서 설명 없는 `#CG`(`cg||`)와 `#CG끝` 을 구별하면서 기존 CG 줄의 identity 는
+  전혀 바뀌지 않는다.
+- **persistence(정확한 표현)** — 이번 변경은 **`Line` serialized shape 에 backward-compatible optional
+  field `end?: true` 를 추가**한 것이다. 즉 **serialized object shape 는 확장됐지만**
+  schema version bump 없음 · migration 없음 · save/load container format 무변경 ·
+  `.npproj.zip` container format 무변경이다. 기존 프로젝트엔 `end` 가 없어 그대로 읽히고, 신규
+  프로젝트의 `end:true` 는 `.npproj.zip` 왕복에서 보존됨을 테스트로 고정했다.
+  ⚠️ **구버전 앱은 `end` 를 이해하지 못하므로 CG 종료 semantics 가 보장되지 않는다** — 크래시 없는
+  graceful degradation 만 기대한다(*"항상 orphan no-op"* 이라고 단정하지 말 것: 기존 프로젝트에 설명
+  없는 CG 가 있으면 빈 desc 가 그 CG 와 매칭될 수 있다).
+- **SceneCard UX** — 종료 마커를 기존 control chip 스타일로 **`🖼 CG 종료`** 로 표시한다(CG 에셋 목록
+  `🎴 CG:` 에는 안 들어간다). control line 이라 **줄 삭제 `🗑` 대상도 아니다**. ⚠️ **CG 종료 삽입 버튼·
+  삭제 버튼·CG 관리 모달을 만들지 않았다.**
+- **검증**: `typecheck` PASS · `vitest` **63파일/1040 tests passed · failed 0**(신규·확장 **+58**).
+  고정한 것 = `#CG끝` 텍스트·엑셀 파싱 · `cgActiveFlags` 레거시/orphan/end/다중구간 ·
+  `getFirstEffectiveCgIndex` 기존 cutoff 보존 · **레거시 폴백 + 첫 줄 `#CG끝` edge** ·
+  생성기 즉시 배경+스프라이트 복원 · **post-CG textual 줄이 없어도 복원** · **`#CG끝` → menu 전에 복원 완료** ·
+  hide=true 복원 차단 · CG 중 의상 변화 복원 반영 · inactive `#CG끝` no-op · 다중 CG 구간 ·
+  **기존 hide→show 복원 회귀** · 수동 range ↔ AI first-cutoff divergence ·
+  **Preview↔Export final effective state parity** · merge identity · `end:true` 왕복.
+  `dump:rpy` **23구성 256파일**(신규 `cg-end` 구성 추가) — **기존 22구성 recursive diff 0**
+  (`restoreShownSprites` 추출이 기존 출력을 1바이트도 바꾸지 않음을 중간 단계에서 먼저 증명).
+  **Ren'Py 8.5.3 lint error 0 · warning 0**(복원 `show` 포함 경로까지).
+  실기: **CG 이전 frame == CG 종료 후 frame 이 픽셀 동일(md5 일치)** · **선택지 화면 전에 일반 배경 +
+  스프라이트 복원 확인** · traceback/errors.txt 미생성 · 다중 CG 구간.
+  실브라우저: 종료 chip · CG 에셋 목록에 종료 마커 미포함 · control line 삭제 버튼 미노출 ·
+  **post-CG 수동 `👗` 재활성** · 새로고침 유지 · `.npproj.zip` 실왕복 · **재분석 후 `#CG끝` 생존**.
+- ⚠️ **미검증(환경)**: Ren'Py **ZIP 탭 다운로드 전체 경로**는 오프라인이라 폰트 카탈로그(GCS) 대기에서
+  확인하지 못했다. `script.rpy` 생성과 실기 실행은 위처럼 확인했고, 이 기능은 `buildZip`·폰트 경로를
+  **건드리지 않는다**.
+- **알려진 의도된 한계**
+  1. Outfit **AI** 는 여전히 첫 CG 이후를 제안 대상으로 쓰지 않는다.
+  2. `#CG끝` 뒤에서 다시 가능한 것은 **수동 `👗`** 뿐이다.
+  3. `#CG끝` 직후 화자가 말하면 **복원 show + 화자 show 가 연달아** 나갈 수 있다 — 두 문 사이에
+     interaction 이 없어 **user-visible 차이는 0**이다(없애려면 look-ahead 가 필요해 채택하지 않았다).
+  4. CG 복귀 transition 은 **`dissolve` 고정**이다(설정 노출 없음).
+  5. CG 구간에 남은 `Line.outfits` 를 **자동 정리하지 않는다**(기존 정책 승계 — 복원 fold 에는 반영된다).
+  6. 구버전 앱에서는 CG 종료 semantics 가 보장되지 않는다.
 
 ## 📌 post-v1 대본 한 줄 삭제 UX 가 확정한 것 (수동 line delete — 깨지 말 것)
 > ⚠️ 이 절은 **줄 삭제 축**이다(번역 로드맵·의상 UX·v1 Phase 번호와 같은 축이 아니다).
