@@ -17,6 +17,7 @@
   - adjacent/backlog(위 계약과 섞지 말 것): LeftPanel 키 안내문의 모델 표기 불일치(`gpt-4o-mini` vs 고품질 `gpt-4o`) · "누락만 보기"류 누락 위치 탐색 UX(QA 쪽 의심 위치 탐색은 Phase 3 에서 해결됐고 **이건 별개**다).
   - **deferred / adjacent(Phase 3 조사 중 확인, 이번엔 손대지 않음)**: `baseLocale='en'` 프로젝트가 실제로 지원되는데(`#설정_글언어` 첫 항목 = base, `sceneBuilder.setTextLocales`) 기존 `translate/index.ts` 의 `systemPrompt()` 은 source 를 **"Korean" 으로 하드코딩**한다. Phase 3 QA 는 `sourceLocale` 을 명시적으로 보내 이 문제를 **상속하지 않는다**. generation prompt 수정은 Phase 3 범위 밖이라 보류했고, 실사용에서 문제가 확인되면 **별도 post-v1 correction** 으로 처리한다.
 - **post-v1 의상 전환 UX 개선** — ⚠️ 번역 로드맵·v1 Phase 번호와 **다른 축**이다. **Phase 1(구현)·Phase 2(검증·문서) 완료**, 남은 필수 작업 없음. 계약은 아래 📌 절이 정본이고 `CLAUDE.md` 의상 절에도 durable contract 한 줄이 있다.
+- **post-v1 대본 한 줄 삭제 UX 개선** — ⚠️ 위 두 축(번역 로드맵·의상 UX)과도 **다른 축**이고 v1 Phase 번호와 섞지 말 것. **Phase 1(구현·검증)·Phase 2(문서) 완료**, 남은 필수 작업 없음. 계약은 아래 📌 절이 정본이고 `CLAUDE.md` 에도 durable contract 가 있다. ⚠️ `item`/`cg`/`bgm` control line 삭제는 **이번 scope 밖**이다(별도 Phase — 사용자 지시가 있을 때만).
   **구현 = `258c637`(장면 카드 수동 의상 전환 UI) · 문서 = `95ba76e`** — 이 둘은 **post-v1 번역 Phase 5 를 시작하기 전에 이미 main 에 있었고** Phase 5 는 이 축을 건드리지 않았다(`SceneCard.tsx` 무수정 · `👗` 패널 실브라우저 smoke 확인). ⚠️ 번역 Phase 5 baseline 을 `76612eb` 로 착각하지 말 것 — 실제 baseline 은 **`95ba76e`** 다.
 - **Expression AI 계약 matrix·evidence 등급의 정본은 [`PHASES.md`](./PHASES.md) "Phase 18 확정" 절**, Outfit 은 "Phase 14 확정" 절이다(둘 다 Phase 19 에서 다시 열지 않았다).
 - **v1 비차단 backlog** — 사라진 게 아니라 **v1 production baseline 을 막지 않는 항목**이다. **Phase 19 의 자동 구현 범위가 아니며, 사용자 별도 지시가 있을 때만 다시 연다.**
@@ -24,6 +25,57 @@
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 post-v1 대본 한 줄 삭제 UX 가 확정한 것 (수동 line delete — 깨지 말 것)
+> ⚠️ 이 절은 **줄 삭제 축**이다(번역 로드맵·의상 UX·v1 Phase 번호와 같은 축이 아니다).
+
+- **기능**: 장면 카드의 줄 액션 맨 끝 `🗑` 로 **대사(dialogue)·지문(narration) 한 줄**을 지운다.
+  삭제 전 `window.confirm` 1회(기존 파괴적 UX 관용구 재사용 — 새 모달/ConfirmDialog 를 만들지 않았다).
+  ⚠️ **`item`·`cg`·`bgm` 은 버튼 자체가 안 보인다** — 이들은 대사와 달리 **장면 상태 전이 semantics**
+  (CG cutoff·`play music` 시작점·`#아이템끝` 짝)를 가져 별도 Phase 대상이다.
+- **canonical path 는 새 store 액션 `deleteLine(sceneId, lineIndex)` 하나**다. 계약:
+  dialogue/narration 만 허용 · 없는 장면·범위 밖·마커 kind 는 **완전 no-op** ·
+  **guard 를 통과한 뒤에만** `invalidateOutfitSuggestions()` · 유효 삭제는 `Scene.lines` 에서 **객체를 실제로 제거** ·
+  뒤쪽 index 는 배열 semantics 그대로 당겨진다.
+  ⚠️ **UUID·tombstone·soft-delete·undo·index remapping 시스템을 만들지 않았다.**
+- **Line-local 데이터는 객체와 함께 자연 소멸**한다 — `i18n`·`emotion`/`emotionAuto`·`outfits`·`hideSprites`·
+  `voiceAssetIds` 전부. **필드별 cleanup 시스템을 추가하지 않았다.** 음성 blob 자체는 `deleteLine` 이 지우지 않고
+  **기존 고아 에셋 처리**에 맡긴다.
+- **line-index state 처리(이번 작업의 핵심 결론)** — "index dependency 가 없다"가 아니라 **축마다 다르다**:
+  - **Outfit AI**: 외부 `lineIndex` 기반 제안 state 가 있으므로 **기존 `invalidateOutfitSuggestions()` 정책 재사용**
+    (유효 삭제 → 제안 전체 clear + revision 증가). **새 index shift algorithm 없음.**
+  - **Expression AI**: `emotion`/`emotionAuto` 가 Line-local 이고 in-flight 결과는 **기존 commit-time validation**
+    을 그대로 타므로 **새 invalidation 없음**.
+  - **Translation QA**: 캐시를 **직접 clear 하지 않는다**. 기존 content-anchor 검증(`activeQaIssues`)에 맡기고,
+    밀린 stale 결과는 현재 줄 내용과 anchor 가 어긋나 활성 결과에서 빠진다.
+  - **Voice**: per-line 외부 index state 를 새로 정리하지 않는다 — Line 의 음성 **연결**만 함께 사라지고
+    파일 회수는 기존 고아 경로가 담당한다.
+- **transient UI positional state 2건을 발견·수정**했다(이번 Phase 의 실제 작업량 대부분):
+  - **SceneCard `LineRow`**: 기존 `key={i}` 로는 앞줄 삭제 후 뒤 row 의 `editing`·`voiceOpen`·`outfitOpen` 이
+    **다른 줄로 이월**됐다. 지금은 **줄 수가 바뀌는 구조 변경에서 remount** 되도록 key 를 구성해 패널이 닫힌다.
+    ⚠️ **text/content 기반 key 가 아니다**(타이핑마다 remount·포커스 손실) · **일반 텍스트·표정·의상 변경에선 remount 되지 않는다**.
+  - **`ScenePlayer`**: 기존 step reset 이 `scene.id` 만 봐서 **같은 장면 안의** 앞줄 삭제 때 같은 step 이 다른 줄을
+    가리켰다(렌더 clamp 는 범위만 막는다). 지금은 `scene.lines.length` 변화도 reset 조건에 포함한다.
+    ⚠️ **index remapping 은 하지 않는다**(구조가 바뀌면 처음으로 돌린다).
+- **rawInput / 재분석 계약(헷갈리기 쉬운 지점)**: `deleteLine` 은 **`Scene.lines` 만** 고치고 **`project.rawInput` 은
+  건드리지 않는다**. 그래서 앱에서 지우면 save/load·`.npproj.zip`·Ren'Py 출력엔 반영되지만, **같은 원본으로 다시 분석하면
+  원본에 남아 있는 줄은 되살아난다**. 이건 결함이 아니라 기존 줄 편집(`setLineText` 등)과 **같은 source/parsed-data 계약**을
+  승계한 것이다 — tombstone·파서 역방향 writer 를 만들지 않았다(실브라우저에서 `rawInput` 보존을 실측).
+- **무변경 축**: Ren'Py generator · parser · Project schema/migration · save/load format · `.npproj.zip` format ·
+  협업 format **전부 변경 없음**. Ren'Py 는 canonical `Scene.lines` 를 기존대로 소비해 삭제된 줄만 출력에서 빠진다.
+  Preview 도 core architecture 는 그대로고 **`ScenePlayer.step` reset dependency 만** 최소 수정했다.
+- **검증**: `typecheck` PASS · `vitest` **58파일/982 tests passed · failed 0**(신규 `tests/line-delete.test.ts` 16 tests).
+  신규 테스트가 고정하는 것 = 가운데 대사·지문 삭제와 index shift · Line-local 자연 제거 + 이웃 보존 ·
+  Outfit 제안 invalidate 정책 · **QA 캐시 무조치 + stale 배제** · 첫/마지막/유일 줄 경계 · **`rawInput` unchanged** ·
+  **무효 삭제(없는 장면·범위 밖·item·cg·bgm)가 제안·revision 까지 완전 no-op**(= guard 가 invalidate 보다 먼저).
+  실브라우저 smoke(스크래치 outDir 빌드 + preview, 번들에 변경 반영됐는지 grep 선확인): confirm 취소/삭제 ·
+  새로고침 유지 · Ren'Py 탭 출력 반영 · **LineRow 패널 이월 없음** · **Preview step reset(`3/3` → 삭제 → `1/2`)** ·
+  일반 타이핑에서 remount·포커스 회귀 없음(`sameNode` 확인) · control line 에 버튼 미노출 · `rawInput` 에 삭제 줄 유지.
+- **알려진 의도된 한계**: ① 원본에 줄이 남아 있으면 재분석 때 되살아난다 ② `item`/`cg`/`bgm` 삭제는 이번 scope 밖
+  ③ 길이가 같은 복합 구조 변경(삭제+추가 동시)에서는 length 기반 LineRow reset 이 안 걸릴 수 있다 — **단일 줄 삭제 경로엔
+  해당 없음**(기존 동작과 동일이라 회귀 아님) ④ Preview 는 줄 수가 바뀌면 현재 위치를 보정하지 않고 **처음으로** 돌린다.
+  ⑤ (기존 QA architecture 의 일반 한계) 인접한 두 줄의 화자·원문·번역이 **완전히 동일**하면 QA anchor 가 여전히 맞아
+  경고가 옆 줄에 붙을 수 있다.
 
 ## 📌 post-v1 의상 전환 UX 개선이 확정한 것 (수동 line outfit — 깨지 말 것)
 > ⚠️ 이 절은 **의상 UX 축**이다(번역 로드맵·v1 Phase 번호와 같은 축이 아니다).
@@ -406,7 +458,7 @@
 - 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **post-v1 번역 Phase 5 — QA Excel unchanged → manual OK 왕복**(⚠️ 아직 커밋 전): 외부 검수에서 **안 고치고
-  돌아온** flagged 칸을 사용자 확인(confirm #2) 뒤 `문제 없음` 으로 일괄 처리한다. 계약·검증은 위 📌 절이 정본.
-  production 변경 4개(`qaWorkbook.ts` 분류 1축 + store 액션 1개 + `CenterPanel` 확인창 분기) ·
-  workbook v1·Project schema·persistence·협업·Ren'Py 생성기 변경 0(`dump:rpy` 22구성 245파일 diff 0).
+- **post-v1 대본 한 줄 삭제 UX — Phase 1(구현·검증)**(⚠️ 아직 커밋 전): 장면 카드 `🗑` 로 대사·지문 한 줄을
+  `window.confirm` 뒤 삭제한다. canonical 은 새 store 액션 `deleteLine` 하나이고 계약·검증은 위 📌 절이 정본.
+  production 변경 4개(`types.ts` 선언 + `scriptSlice.ts` 구현 + `SceneCard.tsx` 버튼·key + `ScenePlayer.tsx` reset deps 1줄) ·
+  신규 테스트 1파일(16 tests) · parser·Ren'Py 생성기·Project schema·persistence·협업 변경 0.
