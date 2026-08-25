@@ -43,6 +43,7 @@ export const createScriptSlice: SliceCreator<
     | 'setLineHideSprites'
     | 'setLineText'
     | 'setLineTranslation'
+    | 'deleteLine'
     | 'applyQaWorkbook'
     | 'applyQaWorkbookManualOk'
     | 'setLineOutfit'
@@ -247,6 +248,30 @@ export const createScriptSlice: SliceCreator<
           });
           return { ...sc, lines };
         }),
+      );
+    },
+
+    /**
+     * 대사/지문 한 줄을 `Scene.lines` 에서 제거한다 — post-v1 줄 삭제 UX Phase 1.
+     * 계약 전문(삭제 가능 kind·rawInput 불변·QA/표정/음성 무조치)은 types.ts 의 선언부 JSDoc 이 정본.
+     *
+     * ⚠️ **guard 가 invalidateOutfitSuggestions 보다 먼저**다 — 무효한 요청(없는 장면·범위 밖·마커
+     * 라인)이 검수 중인 의상 제안을 날려버리면 안 된다. 순서를 뒤집으면 no-op 이어야 할 호출이
+     * 유료로 받은 제안을 지운다(tests/line-delete.test.ts 의 Case 7 이 이 순서를 고정한다).
+     * ⚠️ 삭제 줄의 Line-local 값(i18n·emotionAuto·voiceAssetIds·outfits·hideSprites)은 객체가
+     * 통째로 빠지며 함께 사라진다 — 필드별 cleanup 을 여기서 하지 말 것.
+     */
+    deleteLine: (sceneId, lineIndex) => {
+      const scene = sceneById(get().project.scenes, sceneId);
+      const line = scene?.lines[lineIndex];
+      if (!scene || !line || (line.kind !== 'dialogue' && line.kind !== 'narration')) return;
+      // 줄 배열은 Outfit AI 의 입력이다(OUTFIT_AI_SCENE_KEYS 의 'lines') — 기존 정책·기존 helper 를
+      // 그대로 재사용한다(setLineText·setLineHideSprites 와 같은 관용구. 새 무효화 경로를 만들지 않는다).
+      get().invalidateOutfitSuggestions();
+      setScenes(
+        get().project.scenes.map((sc) =>
+          sc.id === sceneId ? { ...sc, lines: sc.lines.filter((_, i) => i !== lineIndex) } : sc,
+        ),
       );
     },
 

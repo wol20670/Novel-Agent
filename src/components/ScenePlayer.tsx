@@ -300,7 +300,12 @@ export default function ScenePlayer({ scene, bgUrl }: { scene: Scene; bgUrl?: st
   }, [gradientOn, theme, guiOverrides, gradientOpacity]);
   const textboxHeightPct = gradientOn ? gradientHeightRatio * 100 : 25;
   const [step, setStep] = useState(0);
-  useEffect(() => setStep(0), [scene.id]);
+  // 장면 전환뿐 아니라 **줄 배열 구조가 바뀔 때**도 처음으로 되돌린다. 이 패널은 장면 카드와 항상
+  // 동시에 살아 있어서(App 우측 aside 상시 마운트), 앞쪽 줄이 삭제되면 같은 step 이 한 칸 밀린
+  // 다른 줄을 조용히 가리킨다 — 아래 렌더의 clamp 는 범위를 벗어난 접근만 막지 이 stale 은 못 막는다.
+  // ⚠️ "지워진 index 보다 뒤면 step-1" 류 보정을 만들지 말 것(index remapping 금지 — 삭제 위치를
+  //    추적하는 새 state 가 필요해지고, 그게 곧 두 번째 판정 소스가 된다).
+  useEffect(() => setStep(0), [scene.id, scene.lines.length]);
 
   const charByName = useMemo(() => new Map(characters.map((c) => [c.name, c])), [characters]);
   const isNarrOnly = (name: string) => !!charByName.get(name)?.isProtagonist;

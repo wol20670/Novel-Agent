@@ -328,9 +328,14 @@ function SceneCard({ sceneId, index }: { sceneId: string; index: number }) {
       {/* 대사/지문 미리보기 */}
       <div className="bg-ink/70 rounded-lg border border-edge p-3 max-h-44 overflow-y-auto text-sm mb-3 space-y-0.5">
         {scene.lines.length === 0 && <span className="text-gray-600 text-xs">대사 없음</span>}
+        {/* key 에 줄 수를 섞는 이유: 삭제·재분석으로 줄 배열 **구조**가 바뀌면 LineRow 의 positional
+            로컬 state(✏️ 편집·🎙 VoiceLab·👗 패널)를 버려야 한다. index 만 key 로 쓰면 앞줄 삭제 후
+            React 가 같은 key 의 컴포넌트를 재사용해 그 state 가 **한 칸 밀린 다른 줄에 붙는다**.
+            ⚠️ 내용(text) 을 key 에 넣지 말 것 — 타이핑마다 remount 돼 textarea 포커스가 날아간다.
+            줄 수가 그대로인 편집(텍스트·표정·의상·숨김)에서는 remount 되지 않는다. */}
         {scene.lines.map((l, i) => (
           <LineRow
-            key={i}
+            key={`${scene.lines.length}:${i}`}
             sceneId={sceneId}
             index={i}
             line={l}
@@ -464,6 +469,7 @@ function LineRow({
   const setTr = useStore((s) => s.setLineTranslation);
   const dismissQa = useStore((s) => s.dismissQaIssue);
   const setLineOutfit = useStore((s) => s.setLineOutfit);
+  const deleteLine = useStore((s) => s.deleteLine);
   const applySuggestion = useStore((s) => s.applyOutfitSuggestion);
   const ignoreSuggestion = useStore((s) => s.ignoreOutfitSuggestion);
   const base = useStore((s) => baseLocaleOf(s.project));
@@ -697,6 +703,29 @@ function LineRow({
         {isDlg && (
           <LineEmotion sceneId={sceneId} index={index} line={line as DialogueLine} scene={scene} charMap={charMap} />
         )}
+
+        {/* 줄 삭제 — 이 지점에 오면 line 은 dialogue/narration 뿐이다(item·cg·bgm 은 위에서 early
+            return). 확인창은 기존 파괴적 UX 관용구(window.confirm)를 그대로 쓴다 — 새 모달을 만들지
+            않는다. ⚠️ 문구는 "음성 **연결** 제거"다: 이 액션은 Line 객체를 지울 뿐이고 업로드된
+            음성 파일 자체는 기존 고아 에셋 정리가 회수한다(즉시 삭제로 읽히면 안 된다). */}
+        <button
+          className="text-[11px] rounded px-1 py-0.5 shrink-0 border border-edge text-gray-500 bg-panel2 hover:text-rose-500 hover:border-rose-500 outline-none"
+          onClick={(e) => {
+            e.stopPropagation();
+            const preview = line.text.length > 40 ? `${line.text.slice(0, 40)}…` : line.text;
+            const head = isDlg ? `${(line as DialogueLine).speaker}: ${preview}` : preview;
+            const ok = window.confirm(
+              `이 줄을 삭제할까요?\n\n${head}\n\n` +
+                `이 줄에 설정된 번역·표정·의상·숨김·음성 연결도 함께 제거됩니다(되돌릴 수 없음).\n` +
+                `원본 대본에 이 줄이 남아 있으면 재분석 때 다시 생깁니다.`,
+            );
+            if (!ok) return; // 취소 — canonical·저장 모두 무변경
+            deleteLine(sceneId, index);
+          }}
+          title="이 줄을 삭제합니다 — 번역·표정·의상·음성 연결도 함께 제거되고 되돌릴 수 없습니다(원본 대본에 남아 있으면 재분석 때 다시 생깁니다)."
+        >
+          🗑
+        </button>
       </div>
 
       {voiceOpen && speakerChar && (

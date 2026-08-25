@@ -70,6 +70,24 @@ export interface State {
   /** 대사/지문 한 줄의 로케일 번역(i18n)을 수정한다. 빈 값이면 그 로케일을 제거(원문 폴백). */
   setLineTranslation: (sceneId: string, lineIndex: number, locale: Locale, text: string) => void;
   /**
+   * 대사/지문 한 줄을 **`Scene.lines` 에서 제거**한다(장면 카드 🗑). 삭제되는 Line 객체가 통째로
+   * 사라지므로 그 줄의 `i18n`·`emotion`/`emotionAuto`·`voiceAssetIds`·`outfits`·`hideSprites` 는
+   * **자연 소멸**한다 — 필드별 cleanup 을 따로 하지 않는다. 뒤쪽 줄은 배열 semantics 그대로 index 가
+   * 하나씩 당겨진다(index remapping/보정 로직을 만들지 않는다).
+   *
+   * ⚠️ 삭제 가능한 kind 는 **dialogue/narration 뿐**이다. item·cg·bgm 은 **상태 전이 마커**라 지우면
+   * 의미가 조용히 뒤집힌다 — cg 마커가 사라지면 생성기·미리보기가 "첫 CG 를 장면 시작부터" 폴백을
+   * 타고 `getFirstEffectiveCgIndex` cutoff 까지 움직이며, bgm 은 `play music` 이 장면 시작으로
+   * 폴백하고, item 은 `#아이템끝` 과 쌍이라 한쪽만 지우면 팝업이 안 닫힌다.
+   * ⚠️ **guard(장면 존재·index 범위·kind)가 `invalidateOutfitSuggestions()` 보다 먼저**다 — 무효한
+   * 요청이 검수 중인 의상 제안을 날려선 안 된다(회귀 테스트로 고정된 계약).
+   * ⚠️ `rawInput` 은 건드리지 않는다 — 원본 대본에 그 줄이 남아 있으면 **재분석 때 다시 생긴다**
+   * (`setLineText` 등 기존 줄 편집과 같은 계약이다. tombstone·soft-delete·undo 를 만들지 않는다).
+   * ⚠️ `translationQa` 캐시·`emotionAuto`·음성 blob 을 **직접 지우지 않는다** — QA 는 `activeQaIssues`
+   * 의 render-time 판정이, 음성 파일 회수는 기존 고아 에셋 스윕이 담당한다.
+   */
+  deleteLine: (sceneId: string, lineIndex: number) => void;
+  /**
    * QA 검수 Excel(외부에서 고쳐 온 번역)을 canonical `Line.i18n` 에 반영한다.
    *
    * ⚠️ **호출 시점의 현재 project 로 다시 분석한다** — 화면이 확인창 전에 계산한 preview 결과를
