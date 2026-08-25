@@ -473,6 +473,7 @@ function LineRow({
   const dismissQa = useStore((s) => s.dismissQaIssue);
   const setLineOutfit = useStore((s) => s.setLineOutfit);
   const deleteLine = useStore((s) => s.deleteLine);
+  const insertCgEnd = useStore((s) => s.insertCgEndAfterLine);
   const applySuggestion = useStore((s) => s.applyOutfitSuggestion);
   const ignoreSuggestion = useStore((s) => s.ignoreOutfitSuggestion);
   const base = useStore((s) => baseLocaleOf(s.project));
@@ -490,6 +491,15 @@ function LineRow({
   // ⚠️ 기존 Line.outfits 칩과 ✕(해제)는 이 조건과 무관하게 계속 보이고 동작해야 한다 — CG 구간에
   // 남은 값을 정리할 유일한 경로다(자동 정리는 하지 않는다).
   const manualOutfitWritable = (cgFlags[index] ?? -1) < 0;
+  // 이 줄에서 CG 를 끝낼 수 있는가 — 위와 **정반대 조건**(지금 CG 구간)이다.
+  // dialogue/narration 은 CG 상태를 바꾸지 않아 cgFlags[index] 가 곧 "이 줄이 CG 구간"이고,
+  // 마커는 index + 1 에 들어간다("이 줄까지 CG, 다음 줄부터 일반 장면").
+  // ⚠️ 조건 불충족이면 disabled 가 아니라 **아예 렌더하지 않는다** — CG 가 아닌 줄에 "CG 종료"는
+  // 의미가 없어서 회색 버튼이 남으면 노이즈만 된다(👗 는 반대로 이유를 알려야 해서 disabled 다).
+  // duplicate 는 **바로 다음 줄** 하나만 본다(store guard 와 같은 범위 — UI 만 믿지도 않는다).
+  const nextLine = scene.lines[index + 1];
+  const canInsertCgEnd =
+    (cgFlags[index] ?? -1) >= 0 && !(nextLine?.kind === 'cg' && nextLine.end);
 
   // CG 배경 전환 라인 — 이 지점부터 배경이 CG 로 바뀌고 등장인물이 사라진다(`#CG끝` 전까지).
   // `end` 는 그 반대 마커(`#CG끝`): 배경을 장면의 일반 배경으로 되돌리고 인물을 그 자리에 복원한다.
@@ -711,6 +721,21 @@ function LineRow({
               👗
             </button>
           </span>
+        )}
+
+        {/* 이 줄까지만 CG — 기존 canonical 마커(#CG끝)를 바로 다음 위치에 꽂는다. 삭제/undo 는 없다.
+            ⚠️ 안내는 "재분석 시 사라질 수 있다"까지다 — 재분석을 복구 수단으로 안내하지 않는다. */}
+        {canInsertCgEnd && (
+          <button
+            className="text-[11px] rounded px-1 py-0.5 shrink-0 border border-edge text-gray-400 bg-panel2 hover:text-emerald-400 hover:border-emerald-500 outline-none"
+            onClick={(e) => {
+              e.stopPropagation();
+              insertCgEnd(sceneId, index);
+            }}
+            title="이 줄까지 CG로 보여주고 다음 줄부터 일반 배경·인물로 돌아갑니다. 원본 대본에 #CG끝을 추가하지 않으면 재분석 시 이 설정이 사라질 수 있습니다."
+          >
+            🖼끝
+          </button>
         )}
 
         {isDlg && (

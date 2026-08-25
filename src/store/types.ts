@@ -89,6 +89,28 @@ export interface State {
    */
   deleteLine: (sceneId: string, lineIndex: number) => void;
   /**
+   * 이 대사/지문 **바로 뒤에** CG 종료 마커(`#CG끝`)를 꽂는다(장면 카드 🖼끝) — post-v1 CG 종료
+   * 수동 삽입 UX. 넣는 값은 파서(`addCgEnd`)가 만드는 것과 **같은 canonical shape** 이다:
+   * `{ kind: 'cg', desc: '', end: true }`. CG semantics(생성기 복원·Preview·merge)는 이미
+   * 구현돼 있고 이 액션은 그 마커를 놓기만 한다 — 새 CG 상태·새 kind 를 만들지 않는다.
+   *
+   * 의미는 **"이 줄까지 CG, 다음 줄부터 일반 장면"** 이다. dialogue/narration 은 CG 상태를 바꾸지
+   * 않아 `cgActiveFlags[i-1] === cgActiveFlags[i]` 라, 그 두 kind 에서는 `cgFlags[index] >= 0` 이
+   * 곧 "이 줄이 CG 구간"이고 마커는 `index + 1` 에 들어간다(off-by-one 이 생기지 않는다).
+   *
+   * ⚠️ 판정은 **`cgActiveFlags`(per-line 상태)** 다 — `getFirstEffectiveCgIndex`(최초 경계, Outfit AI
+   * cutoff)를 쓰면 `#CG끝` 이후 구간까지 열려 두 helper 를 합치지 않기로 한 계약이 깨진다.
+   * ⚠️ guard 는 **장면 존재 · index 범위 · kind · CG active · 바로 다음 줄이 이미 종료 마커가 아님**
+   * 전부이고, 하나라도 실패하면 `invalidateOutfitSuggestions`·`setScenes`·`flash` 를 **한 번도 부르지
+   * 않는 완전 no-op** 이다(deleteLine 과 같은 순서 계약 — 무효 요청이 검수 중인 의상 제안을 날려선
+   * 안 된다). duplicate 판정 범위는 **바로 다음 줄** 하나뿐이다(뒤쪽 마커를 탐색하지 않는다).
+   * ⚠️ 종료 마커는 에셋이 아니므로 `Scene.cg`·`cgAssetIds` 에 넣지 않는다.
+   * ⚠️ `rawInput` 은 건드리지 않는다 — 원본 대본에 `#CG끝` 이 없으면 **재분석 때 이 마커가 사라진다**
+   * (`deleteLine`·`setLineText` 와 같은 source/parsed-data 계약이다. 이건 persistence 계약 설명이지
+   * undo 기능이 아니다 — source map·reverse writer·tombstone 을 만들지 않는다).
+   */
+  insertCgEndAfterLine: (sceneId: string, lineIndex: number) => void;
+  /**
    * QA 검수 Excel(외부에서 고쳐 온 번역)을 canonical `Line.i18n` 에 반영한다.
    *
    * ⚠️ **호출 시점의 현재 project 로 다시 분석한다** — 화면이 확인창 전에 계산한 preview 결과를

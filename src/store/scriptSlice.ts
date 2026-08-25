@@ -9,7 +9,8 @@ import {
 import { upsertQaResults } from '../generators/translate/qa';
 import type { TranslationQaResult } from '../generators/translate/qa';
 import { analyzeQaWorkbook, QA_COLUMN_LOCALES } from '../generators/translate/qaWorkbook';
-import type { Locale, Scene } from '../types';
+import { cgActiveFlags } from '../types';
+import type { Line, Locale, Scene } from '../types';
 import type { State } from './types';
 import type { SliceCreator } from './context';
 import { applyTranslationUpdates, localeMeta, unionChars, mergeChars, sceneById } from './helpers';
@@ -44,6 +45,7 @@ export const createScriptSlice: SliceCreator<
     | 'setLineText'
     | 'setLineTranslation'
     | 'deleteLine'
+    | 'insertCgEndAfterLine'
     | 'applyQaWorkbook'
     | 'applyQaWorkbookManualOk'
     | 'setLineOutfit'
@@ -272,6 +274,53 @@ export const createScriptSlice: SliceCreator<
         get().project.scenes.map((sc) =>
           sc.id === sceneId ? { ...sc, lines: sc.lines.filter((_, i) => i !== lineIndex) } : sc,
         ),
+      );
+    },
+
+    /**
+     * 이 대사/지문 **바로 뒤**(index + 1)에 CG 종료 마커를 꽂는다 — post-v1 CG 종료 수동 삽입 UX.
+     * 계약 전문(guard·cgActiveFlags 사용 이유·rawInput 불변)은 types.ts 의 선언부 JSDoc 이 정본.
+     *
+     * ⚠️ **guard 전부가 invalidateOutfitSuggestions/setScenes/flash 보다 먼저**다(deleteLine 과 같은
+     * 순서 계약) — 무효·중복 요청은 observable state 를 하나도 건드리면 안 된다.
+     * ⚠️ 기존 Line 객체는 **참조 그대로** 옮긴다(복제·정규화 금지 — 그 줄의 번역·표정·의상·숨김·음성이
+     * 객체째 따라간다).
+     */
+    insertCgEndAfterLine: (sceneId, lineIndex) => {
+      const scene = sceneById(get().project.scenes, sceneId);
+      const line = scene?.lines[lineIndex];
+      if (!scene || !line || (line.kind !== 'dialogue' && line.kind !== 'narration')) return;
+      // "지금 이 줄이 CG 구간인가" — per-line 상태(cgActiveFlags)다. dialogue/narration 은 CG 상태를
+      // 바꾸지 않으므로 이 줄 처리 전/후 값이 같아 off-by-one 이 없다.
+      // ⚠️ getFirstEffectiveCgIndex(최초 경계 · Outfit AI cutoff)를 쓰지 말 것 — semantic 이 다르다.
+      if (cgActiveFlags(scene)[lineIndex] < 0) return;
+      // duplicate 는 **바로 다음 줄** 하나만 본다(뒤쪽 마커를 탐색하거나 CG 편집 정책을 만들지 않는다).
+      // 다음 줄이 새 #CG 시작 마커인 경우 등은 막지 않는다 — 표현 가능한 의도다.
+      const next = scene.lines[lineIndex + 1];
+      if (next?.kind === 'cg' && next.end) return;
+
+      // ── 여기서부터가 유효 경로 ─────────────────────────────────────────────
+      // 안내는 사용자에게 **1회**만 보여야 한다. invalidateOutfitSuggestions 는 pending 이 있으면
+      // 자체 flash 를 내는데 flash 가 단일 state 라 뒤 메시지가 그걸 덮는다. 그래서 공유 액션을
+      // 고치는 대신(다른 12개 호출 경로가 그대로여야 한다) **여기서 먼저 세어** 마지막 합성
+      // 메시지에 그 정보를 담는다. ⚠️ 새 toast 큐·silent 플래그를 만들지 말 것.
+      const pending = Object.values(get().outfitSuggestions).reduce((n, list) => n + list.length, 0);
+      // 줄 배열은 Outfit AI 의 입력이라 기존 정책을 그대로 탄다(deleteLine 과 같은 관용구).
+      get().invalidateOutfitSuggestions();
+      // 종료 마커는 파서가 만드는 것과 **같은 shape** 다(추가 필드 금지). Scene.cg·cgAssetIds 는
+      // 건드리지 않는다 — 종료는 에셋이 아니라 control marker 다.
+      const marker: Line = { kind: 'cg', desc: '', end: true };
+      setScenes(
+        get().project.scenes.map((sc) =>
+          sc.id === sceneId
+            ? { ...sc, lines: [...sc.lines.slice(0, lineIndex + 1), marker, ...sc.lines.slice(lineIndex + 1)] }
+            : sc,
+        ),
+      );
+      flash(
+        `CG 종료를 넣었습니다` +
+          (pending ? ` · 대본 구조가 바뀌어 의상 제안 ${pending}건을 취소했습니다` : '') +
+          ` — 원본 대본에 #CG끝을 추가하지 않으면 재분석 시 이 설정이 사라질 수 있습니다.`,
       );
     },
 
