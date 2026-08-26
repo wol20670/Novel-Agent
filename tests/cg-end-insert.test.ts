@@ -185,7 +185,7 @@ describe('T7 — 기존 Line 객체 보존', () => {
 
 describe('T8 — 원본·에셋 축 불변', () => {
   it('rawInput 은 문자 단위로, Scene.cg·cgAssetIds 는 참조까지 그대로다', () => {
-    seed(cgLines(), { cgAssetIds: { 0: 'asset-cg0' } });
+    seed(cgLines(), { cgAssetIds: ['asset-cg0'] });
     const cgRef = scenesRef()[0].cg;
     const cgAssetsRef = scenesRef()[0].cgAssetIds;
     useStore.getState().insertCgEndAfterLine(S1, 2);

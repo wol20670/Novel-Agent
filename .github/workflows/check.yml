@@ -1,0 +1,31 @@
+# 로컬 Regression Gate 를 그대로 재실행하는 최소 CI.
+#
+# ⚠️ 로컬과 CI 가 서로 다른 검증 경로를 갖지 않게 한다 — 여기서 부르는 것은 `npm run check` 와
+#    `npm run build` 뿐이고, 둘 다 개발자가 로컬에서 쓰는 그 명령이다.
+# ⚠️ e2e(`npm run check:full`)는 이 최소 CI 에서 제외한다(브라우저 설치 + 실행시간).
+# ⚠️ `gen:lint` 도 제외한다 — 실제 lint 는 로컬 Ren'Py SDK 가 필요하고, 생성 텍스트의 byte 회귀는
+#    golden 테스트(`npm run test` 안)가 이미 잡는다.
+# ⚠️ `npm run build` 는 여기(Ubuntu)에서만 게이트로 쓴다 — 로컬 Windows/OneDrive 에서는 vite build 가
+#    에러 없이 exit 127 로 죽는 알려진 함정이 있어 fast gate 에 넣지 않았다(CLAUDE.md).
+name: check
+
+on: [push, pull_request]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ⚠️ node-version 24 는 **R0 CI baseline** 일 뿐, 프로젝트의 공식 engines 지원범위를 새로
+      #    선언하는 것이 아니다(package.json 에 engines 는 없다).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # ⚠️ 의존성 중 `xlsx` 는 npm 레지스트리가 아니라 cdn.sheetjs.com tarball 을 직접 받는다.
+      #    이 CDN 이 막히면 여기서 실패한다(알려진 위험 — dependency 구조는 R0 에서 바꾸지 않는다).
+      - run: npm ci
+
+      - run: npm run check
+      - run: npm run build

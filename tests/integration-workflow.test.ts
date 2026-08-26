@@ -17,7 +17,6 @@ import { exportProjectFile, importProjectFile } from '../src/project/transfer';
 import { generateRenpyFiles, outfitAttrFor } from '../src/renpy/generate';
 import { saveProject, loadProject } from '../src/storage/projectStore';
 import {
-  emptyProject,
   outfitFlags,
   spriteHiddenFlags,
   type Character,
@@ -179,7 +178,6 @@ describe('W1 — Outfit 수락 → outfitFlags → 표정 AI 후보, 그리고 �
       },
     });
     // 그 줄에 사람이 정한 표정과 AI 배정이 이미 있다고 하자.
-    const sc = sceneOf(S2);
     useStore.setState({
       project: {
         ...useStore.getState().project,

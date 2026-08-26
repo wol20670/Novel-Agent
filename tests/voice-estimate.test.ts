@@ -7,9 +7,9 @@ describe('findOverLimitTargets', () => {
   it('2000자를 넘는 줄만 장면 제목·화자와 함께 뽑는다', () => {
     const p = projectWith([scene({ id: 's1', title: 's1', lines: [] })]);
     const targets = [
-      { sceneId: 's1', lineIndex: 0, text: 'a'.repeat(2001) },
-      { sceneId: 's1', lineIndex: 1, text: 'a'.repeat(2000) }, // 정확히 2000자는 포함 안 됨(제한은 초과부터)
-      { sceneId: 's1', lineIndex: 2, text: '짧은 대사' },
+      { sceneId: 's1', lineIndex: 0, text: 'a'.repeat(2001), anchorSpeaker: '한지수', anchorText: 'a'.repeat(2001) },
+      { sceneId: 's1', lineIndex: 1, text: 'a'.repeat(2000), anchorSpeaker: '한지수', anchorText: 'a'.repeat(2000) }, // 정확히 2000자는 포함 안 됨(제한은 초과부터)
+      { sceneId: 's1', lineIndex: 2, text: '짧은 대사', anchorSpeaker: '한지수', anchorText: '짧은 대사' },
     ];
     const over = findOverLimitTargets(p, targets, '한지수');
     expect(over).toEqual([{ scene: 's1', speaker: '한지수', chars: 2001 }]);
@@ -17,7 +17,7 @@ describe('findOverLimitTargets', () => {
 
   it('장면 제목이 있으면 sceneId 대신 title 을 쓴다', () => {
     const p = projectWith([scene({ id: 's1', title: '1화 - 등굣길', lines: [] })]);
-    const targets = [{ sceneId: 's1', lineIndex: 0, text: 'a'.repeat(2100) }];
+    const targets = [{ sceneId: 's1', lineIndex: 0, text: 'a'.repeat(2100), anchorSpeaker: '강민주', anchorText: 'a'.repeat(2100) }];
     const over = findOverLimitTargets(p, targets, '강민주');
     expect(over).toEqual([{ scene: '1화 - 등굣길', speaker: '강민주', chars: 2100 }]);
   });

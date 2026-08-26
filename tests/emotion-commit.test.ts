@@ -281,13 +281,13 @@ describe('S12 — AI 커밋이 실행 중 사용자 편집을 되감지 않는�
   it('요청과 무관한 편집은 emotionAuto 커밋 뒤에도 그대로 남는다', async () => {
     const { run, release } = startRun();
     useStore.getState().setLineTranslation(SCENE_ID, T_MINJU, 'en', "I'm back.");
-    useStore.getState().setSceneStatus(SCENE_ID, 'draft');
+    useStore.getState().setSceneStatus(SCENE_ID, 'needs_fix');
     release();
     await run;
 
     // ⚠️ 쓰기 base 가 run 시작 시점 스냅샷이면 이 둘이 옛 값으로 되감긴다.
     expect(lineAt(T_MINJU).i18n?.en).toBe("I'm back.");
-    expect(useStore.getState().project.scenes[0].status).toBe('draft');
+    expect(useStore.getState().project.scenes[0].status).toBe('needs_fix');
     expect(autoOf(T_MINJU)).toBe('기쁨'); // 그러면서도 AI 값은 정상 커밋
   });
 });

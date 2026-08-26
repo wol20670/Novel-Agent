@@ -94,7 +94,7 @@ beforeEach(() => {
 
 describe('O26 — 개별 적용/무시 vs 수동 편집의 semantics 차이', () => {
   it('개별 적용은 그 항목만 빼고 나머지는 유지하며 revision 을 올린다', () => {
-    const { sc } = seed();
+    seed();
     useStore.getState().applyOutfitSuggestion(SCENE_ID, 1, '민주');
 
     expect(lineOutfits(1)).toEqual({ 민주: '사복' });

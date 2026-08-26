@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useStore } from '../src/store';
 import { collectEmotionTargets } from '../src/generators/emotion/aiSelect';
-import { emptyProject, type Character, type Line, type Project } from '../src/types';
+import { type Character, type Line, type Project } from '../src/types';
 import { dialogue, projectWith, scene } from './fixtures';
 
 class MemoryStorage implements Storage {

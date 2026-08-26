@@ -2,7 +2,7 @@
 // 여기서 검증하지 않고, 훅이 실제로 호출하는 순수 함수(acquireAssetUrl/releaseAssetUrl/
 // invalidateAssetUrl/invalidateAllAssetUrls)만 직접 구동한다 — 훅의 effect cleanup→재실행이
 // release→acquire 순서로 이 함수들을 부르므로 그 시나리오를 그대로 흉내낸다.
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import {
   acquireAssetUrl,
   releaseAssetUrl,
@@ -14,8 +14,8 @@ function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-let createSpy: ReturnType<typeof vi.spyOn>;
-let revokeSpy: ReturnType<typeof vi.spyOn>;
+let createSpy: MockInstance<(obj: Blob | MediaSource) => string>;
+let revokeSpy: MockInstance<(url: string) => void>;
 
 beforeEach(() => {
   let n = 0;
@@ -91,7 +91,7 @@ describe('acquireAssetUrl / releaseAssetUrl', () => {
 
   it('loader 가 undefined(실패)를 반환하면 캐시에 남기지 않아 다음 acquire 가 재시도한다', async () => {
     const id = 'fail-1';
-    const loader = vi.fn<[string], Promise<Blob | undefined>>();
+    const loader = vi.fn<(id: string) => Promise<Blob | undefined>>();
     loader.mockResolvedValueOnce(undefined).mockResolvedValueOnce(blobA);
 
     const first = await acquireAssetUrl(id, loader);

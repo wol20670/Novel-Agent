@@ -1,0 +1,10 @@
+{
+  // tests 전용 타입검사 — root tsconfig.json 은 건드리지 않는다(기존 `typecheck`/`build` 의미 보존).
+  //
+  // ⚠️ `files` 의 src/vite-env.d.ts 를 빼면 안 된다: include 가 tests 뿐이면 transitive 로 끌려온
+  // src 파일들이 `/// <reference types="vite/client" />` 를 못 봐서 `import.meta.env` 오류가 5건
+  // (supabaseClient×2 · fontCache · fontCatalog · buildZip) 새로 뜬다. 실제로 확인한 값이다.
+  "extends": "./tsconfig.json",
+  "include": ["tests"],
+  "files": ["src/vite-env.d.ts"]
+}

@@ -1,0 +1,170 @@
+// Ren'Py 생성기 회귀 대조용 구성 모음 — `dump:rpy`(scripts/dump-rpy.ts)와 golden 게이트
+// (scripts/renpyGolden.ts → tests/renpy-golden.test.ts)가 **같은 구성 목록**을 쓰도록 하는 단일 소스다.
+// 예전엔 이 목록이 dump-rpy.ts 안에만 있어서, golden 을 따로 만들면 두 목록이 조용히 어긋날 수 있었다.
+//
+// ⚠️ **node 내장 모듈(node:fs 등)을 import 하지 말 것** — 이 파일은 tests 에서 import 되어
+// `tsconfig.tests.json` 의 타입검사 대상에 transitive 로 들어온다(@types/node 는 설치돼 있지 않다).
+// ⚠️ 새 출력 경로·새 opt-in 기능을 만들면 **여기 구성 목록에도 추가**할 것(안 그러면 그 경로가
+// 회귀 대조와 golden 양쪽에서 빠진다 — 실제로 의상 구성이 plain 과 똑같은 덤프를 내던 걸 잡았다).
+import { parseText } from '../src/parser/parseText';
+import {
+  emptyProject,
+  MAIN_MENU_PRESETS,
+  MAIN_MENU_SLOTS,
+  QUICK_MENU_SLOTS,
+  ESC_IMAGES,
+  type MainMenuPresetId,
+  type Project,
+} from '../src/types';
+import { SAMPLE_STORY } from '../src/sample';
+
+const { scenes, characters } = parseText(SAMPLE_STORY);
+// 에셋 id 를 채워두는 이유: assetId 가 없으면 생성기가 BGM `play music` 이나 스프라이트 선언 자체를
+// 내지 않아(업로드 게이팅) 정작 대조하고 싶은 출력 경로가 덤프에서 빠진다.
+const base = (): Project => ({
+  ...emptyProject(),
+  scenes: scenes.map((s) => ({
+    ...s,
+    status: 'approved' as const,
+    bgmAssetId: s.bgm ? 'a-bgm' : undefined,
+  })),
+  characters: characters.map((c) => ({ ...c, expressions: { ...c.expressions, 기본: 'a-sp' } })),
+});
+
+const allMenuButtons = Object.fromEntries(
+  MAIN_MENU_SLOTS.map((s) => [s.id, { idle: `a-btn-${s.id}`, hover: `a-btn-${s.id}-h` }]),
+) as NonNullable<Project['mainMenuUi']>['buttons'];
+const allQuickButtons = Object.fromEntries(
+  QUICK_MENU_SLOTS.map((s) => [s.id, { idle: `a-q-${s.id}` }]),
+) as NonNullable<Project['quickMenuUi']>['buttons'];
+const allEscImages = Object.fromEntries(ESC_IMAGES.map((i) => [i.id, `a-esc-${i.id}`])) as NonNullable<
+  NonNullable<Project['escMenuUi']>['images']
+>;
+
+// 의상 구성 — 장면 단위 의상(#복장)과 배경 키워드 규칙 두 경로가 실제 `show` 문에 반영되는지
+// 대조하기 위한 구성. ⚠️ 아무 캐릭터나 고르면 안 된다 — 주인공(isProtagonist)이나 스프라이트가
+// 없는 화자를 고르면 생성기가 애초에 show 를 안 내서 plain 과 똑같은 덤프가 나온다(실제로 겪음).
+// 그래서 "실제로 대사를 하는 비주인공 화자"를 대본에서 찾아 쓴다.
+function withOutfits(): Project {
+  const p = base();
+  const spriteOwner = p.scenes
+    .flatMap((s) => s.lines.map((l) => ({ scene: s, line: l })))
+    .find(
+      ({ line }) =>
+        line.kind === 'dialogue' &&
+        !line.members?.length &&
+        p.characters.some((c) => c.name === line.speaker && !c.isProtagonist),
+    );
+  if (!spriteOwner || spriteOwner.line.kind !== 'dialogue') return p;
+  const name = spriteOwner.line.speaker;
+  const target = p.characters.find((c) => c.name === name)!;
+  // 의상 세트는 기본 의상과 같은 표정 키를 채운다 — 비면 생성기가 기본 의상으로 폴백해버려
+  // 역시 의상 경로가 덤프에 안 남는다.
+  const outfitExprs = Object.fromEntries(
+    Object.keys(target.expressions).map((e) => [e, `a-sp-uniform-${e}`]),
+  );
+  const bg = spriteOwner.scene.background ?? '';
+  return {
+    ...p,
+    characters: p.characters.map((c) =>
+      c.name === name ? { ...c, outfits: [{ name: '교복', expressions: outfitExprs }] } : c,
+    ),
+    // 규칙(배경 키워드)과 장면 직접 지정을 둘 다 켜 우선순위 경로까지 함께 굳힌다.
+    outfitRules: bg ? [{ charName: name, outfit: '교복', keyword: bg.slice(0, 2) }] : [],
+    scenes: p.scenes.map((s) => (s.id === spriteOwner.scene.id ? { ...s, outfits: { [name]: '교복' } } : s)),
+  };
+}
+
+// 줄 단위 의상 전환(Line.outfits) 구성 — 장면 단위 의상만 쓰는 위 withOutfits() 와 달리, 같은
+// 캐릭터가 장면 도중 두 번 갈아입는 경로(생성기의 화자 show·비화자 동기화·숨김 복원)를 굳힌다.
+// 이 구성만 줄 override 를 쓰므로, 나머지 구성이 전부 동일해야 "안 켠 프로젝트 회귀 0"이 증명된다.
+function withLineOutfits(): Project {
+  const p = withOutfits();
+  const target = p.characters.find((c) => c.outfits?.length);
+  if (!target) return p;
+  const scIdx = p.scenes.findIndex((s) => s.lines.filter((l) => l.kind === 'dialogue').length >= 2);
+  if (scIdx < 0) return p;
+  let seen = 0;
+  const lines = p.scenes[scIdx].lines.map((l) => {
+    if (l.kind !== 'dialogue' && l.kind !== 'narration') return l;
+    seen += 1;
+    // 2번째 줄에서 기본으로, 3번째 줄에서 다시 교복으로 — 한 장면 안 2회 전환.
+    // (시작 의상이 규칙·장면 지정으로 이미 교복이라, 먼저 기본으로 갈아입어야 두 번 다 emit 된다 —
+    //  같은 의상을 재지정하면 생성기가 일부러 show 를 안 낸다. CLAUDE.md "덤프가 plain 과 같아지는" 함정.)
+    if (seen === 2) return { ...l, outfits: { [target.name]: '기본' } };
+    if (seen === 3) return { ...l, outfits: { [target.name]: '교복' } };
+    return l;
+  });
+  return { ...p, scenes: p.scenes.map((s, i) => (i === scIdx ? { ...s, lines } : s)) };
+}
+
+// CG 종료(#CG끝) 구성 — `일반 → CG → 일반` 복귀 경로(배경 되돌리기 + **즉시** 스프라이트 복원)를
+// 굳힌다. withOutfits() 위에 얹어 **CG 구간 안에서 바뀐 의상이 복원 show 에 반영되는지**까지 한
+// 구성에서 본다. 이 구성만 `#CG끝` 을 쓰므로, 나머지 구성이 전부 동일해야 "안 켠 프로젝트 회귀 0"이
+// 증명된다.
+// ⚠️ 스프라이트 보유 화자가 CG **이전에** 한 번은 서 있어야(revealedOrder/lastShown 이 채워져야)
+// 복원할 대상이 생긴다 — 안 그러면 덤프가 CG 없는 구성과 똑같아져 이 경로가 대조에서 빠진다
+// (CLAUDE.md "덤프가 plain 과 같아지는" 함정. 실제로 첫 시도가 여기 걸렸다).
+function withCgEnd(): Project {
+  const p = withOutfits();
+  const target = p.characters.find((c) => c.outfits?.length);
+  if (!target) return p;
+  const isTarget = (l: Project['scenes'][number]['lines'][number]) =>
+    l.kind === 'dialogue' && l.speaker === target.name;
+  const scIdx = p.scenes.findIndex((s) => s.lines.some(isTarget));
+  if (scIdx < 0) return p;
+  const sc = p.scenes[scIdx];
+  const stood = sc.lines.findIndex(isTarget); // 이 줄에서 스프라이트가 선다 = 복원 대상 확보
+  const cgDesc = 'CG 종료 검증용 컷';
+  const lines: Project['scenes'][number]['lines'] = [
+    ...sc.lines.slice(0, stood + 1),
+    { kind: 'cg', desc: cgDesc },
+    // CG 중 의상 변경 — 복원 show 는 "내려가기 직전 값"이 아니라 이 fold 값을 써야 한다.
+    { kind: 'dialogue', speaker: target.name, text: 'CG 위에서 이어지는 대사.', outfits: { [target.name]: '기본' } },
+    { kind: 'cg', desc: '', end: true }, // ← 배경 복귀 + 복원 show 가 여기서 즉시 나가야 한다
+    { kind: 'narration', text: '다시 일반 배경으로 돌아왔다.' },
+    { kind: 'dialogue', speaker: target.name, text: '일반 장면에서 계속.' },
+    ...sc.lines.slice(stood + 1),
+  ];
+  const next = {
+    ...sc,
+    cg: [...sc.cg, cgDesc],
+    cgAssetIds: [...(sc.cgAssetIds ?? []), 'a-cg'],
+    lines,
+  };
+  return { ...p, scenes: p.scenes.map((x, i) => (i === scIdx ? next : x)) };
+}
+
+const configs: Record<string, Project> = {
+  plain: base(),
+  'genre-thriller': { ...base(), genre: 'thriller' },
+  'gradient-on': { ...base(), guiOverrides: { dialogueGradient: true } },
+  'gradient-off': { ...base(), guiOverrides: { dialogueGradient: false } },
+  i18n: { ...base(), textLocales: ['ko', 'en', 'ja'], voiceLocales: ['ko', 'ja'] },
+  'menu-images': { ...base(), mainMenuUi: { buttons: allMenuButtons, logo: 'a-logo' } },
+  'quick-images': { ...base(), quickMenuUi: { buttons: allQuickButtons, panel: 'a-qpanel' } },
+  'esc-images': { ...base(), escMenuUi: { images: allEscImages } },
+  'esc+menu+quick': {
+    ...base(),
+    mainMenuUi: { buttons: allMenuButtons, logo: 'a-logo' },
+    quickMenuUi: { buttons: allQuickButtons, panel: 'a-qpanel' },
+    escMenuUi: { images: allEscImages, fontId: 'nanum-gothic' },
+  },
+  'bgm-restart': { ...base(), bgmPlayback: { restartSameBgm: true } },
+  'bgm-stop-unset': { ...base(), bgmPlayback: { stopWhenUnset: true } },
+  'title-bgm': { ...base(), titleBgm: { assetId: 'a-title', ext: 'mp3' } },
+  'player-name': { ...base(), playerName: { character: characters[0]?.name ?? '' } },
+  'game-icon': { ...base(), gameIcon: { ico: 'a-ico', window: 'a-win' } },
+  'menu-art': { ...base(), menuArt: { main: 'a-main' } },
+  outfits: withOutfits(),
+  'outfits-line': withLineOutfits(),
+  'cg-end': withCgEnd(),
+};
+for (const id of Object.keys(MAIN_MENU_PRESETS) as MainMenuPresetId[]) {
+  configs[`preset-${id}`] = { ...base(), mainMenuUi: { preset: id } };
+}
+
+/** 회귀 대조용 전체 구성(구성 이름 → Project). dump:rpy·golden 이 공유한다. */
+export function renpyConfigs(): Record<string, Project> {
+  return configs;
+}

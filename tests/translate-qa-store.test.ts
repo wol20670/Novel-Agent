@@ -156,7 +156,7 @@ describe('규칙 결과는 AI 가용성과 독립이다', () => {
 
 describe('정상 실행 + wire contract', () => {
   it('실제 요청 body 가 계약대로 나가고 응답이 origin:ai 결과로 커밋된다', async () => {
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
       okResponse([{ i: 0, v: 'review', c: 'meaning', r: '원문은 긍정, 번역은 부정.' }]),
     );
     vi.stubGlobal('fetch', fetchMock);
@@ -206,7 +206,7 @@ describe('정상 실행 + wire contract', () => {
   });
 
   it('응답에 없는 항목은 unreviewed 로 남아 다음 실행에서 다시 대상이 된다(부분 응답)', async () => {
-    const fetchMock = vi.fn(async () => okResponse([{ i: 0, v: 'ok' }])); // i:1 은 빠뜨림
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => okResponse([{ i: 0, v: 'ok' }])); // i:1 은 빠뜨림
     vi.stubGlobal('fetch', fetchMock);
     seed([normalLine(), dialogue('민주', '또 봐', { i18n: { en: 'See you.' } })], { key: 'test-key' });
 
@@ -519,7 +519,7 @@ describe('증분 캐시 — 실행이 현재 모델을 그대로 넘긴다', () 
   });
 
   it('번역 모드를 quality 로 바꾸면 mini 결과를 재사용하지 않고 다시 검수한다', async () => {
-    const fetchMock = vi.fn(async () => okResponse([{ i: 0, v: 'ok' }]));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => okResponse([{ i: 0, v: 'ok' }]));
     vi.stubGlobal('fetch', fetchMock);
     seed([normalLine()], { key: 'test-key', translateMode: 'quality' });
     useStore.setState({ translationQa: { [S1]: [cachedAi(MINI)] } });

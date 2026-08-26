@@ -63,6 +63,9 @@ describe('parseWorkbook: 콜론형(장면:/배경: ...) 필드 태그 인식', (
     const { scenes } = await parseWorkbook(buf);
     const line = scenes[0].lines[0];
     expect(line.kind).toBe('dialogue');
+    // 위 expect 는 런타임 확인일 뿐 union 을 좁히지 않는다(i18n 은 item/cg/bgm 에 없다) — 타입검사를
+    // 통과시키려 optional 접근으로 흐리지 않고, 좁히지 못하면 여기서 실패시킨다.
+    if (line.kind !== 'dialogue') throw new Error('dialogue 가 아니다');
     expect(line.i18n).toEqual({ en: 'Hello', ja: 'こんにちは' });
   });
 });

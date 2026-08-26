@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { resolveEmotion, resolveEmotionDetailed, availableExpressions } from '../src/generators/emotion/resolve';
-import type { Character, Line } from '../src/types';
+import type { Character } from '../src/types';
 import { scene, projectWith, dialogue } from './fixtures';
 
 function char(name: string, patch: Partial<Character> = {}): Character {
