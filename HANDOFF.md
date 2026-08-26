@@ -27,7 +27,40 @@
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
+- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 구현 및 로컬 자체검증 완료 · GPT implementation + docs/final diff review PASS · commit/push 진행**(브랜치 `chore/r0-regression-gate` — `main` 반영은 별도 지시). 계약·실측은 아래 📌 절이 정본이다. ⚠️ **R1 이후는 아직 열지 않았다** — 사용자 지시가 있을 때만 연다.
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
+
+## 📌 안정화 리팩토링 R 축 — R0(Regression Gate)이 확정한 것
+> ⚠️ 이 절은 **안정화 R 축**이다(v1 Phase 번호·번역 로드맵·의상 UX·줄 삭제·CG 종료와 **다른 축**).
+> **상태: 구현 + 로컬 자체검증 완료 · GPT implementation + docs/final diff review PASS · commit/push 진행.**
+> 브랜치는 `chore/r0-regression-gate` 이고 **`main` 반영은 아직 하지 않았다**(별도 지시).
+
+- **목적**: 이후의 **behavior-preserving refactor**(R1+: 컴포넌트·store·생성기 구조 정리)를 "구조만 바뀌고 observable behavior 는 그대로"임을 **기계적으로** 증명하며 진행할 수 있게 하는 **Regression Gate 구축**. 제품 기능은 하나도 추가하지 않는다.
+- **`src/**` production 코드 변경 0** — 변경은 설정·테스트·스크립트·문서뿐이다(`git diff --exit-code -- src/` 로 고정 확인).
+- **구현 결과**
+  - **tests 전용 typecheck 도입** — `tsconfig.tests.json`(`extends` + `include:["tests"]` + `files:["src/vite-env.d.ts"]`) + `npm run typecheck:tests`. ⚠️ **root `tsconfig.json` 은 무수정**이라 기존 `typecheck`/`build` 의미가 보존된다. ⚠️ `files` 의 `vite-env.d.ts` 를 빼면 transitive 로 끌려온 src 에서 `import.meta.env` 오류가 **5건** 뜬다(실측).
+  - **기존 tests 타입 오류 20건 정리** — 그중 2건은 **잠복 결함**이었다: `emotion-commit` 이 존재하지 않는 `SceneStatus` `'draft'` 를 썼고, `cg-end-insert` 가 `string[]` 자리에 `{0:…}` 객체를 넣고 있었다. ⚠️ `@ts-ignore`/`as any`/assertion 완화 **없이** 데이터만 교정했다.
+  - **Ren'Py SHA-256 golden gate** — `scripts/renpyGolden.ts`(빌더·비교기) + `scripts/update-golden.ts` + `tests/renpy-golden.test.ts` + `tests/golden/renpy-files.json`. 구성 목록은 `scripts/dump-rpy.ts` 에서 **`scripts/renpyConfigs.ts`** 로 추출해 `dump:rpy` 와 공유한다(계약 상세는 CLAUDE.md 「명령」).
+  - **`.npproj.zip` asset round-trip gate** — `tests/transfer-assets-roundtrip.test.ts`. 기존 왕복 테스트 둘이 주석대로 **"참조 0" 픽스처**로 IndexedDB 를 피해서 **에셋 경로 커버리지가 0** 이던 구멍을 닫았다. ⚠️ `src/project/transfer.ts` 와 기존 `transfer-roundtrip.test.ts` 는 **무수정**, fake-indexeddb 도 **안 들였다**(기존 `vi.mock('../src/storage/assetStore')` 관용구 재사용).
+  - **self-hosting e2e runner** — `scripts/e2e-run.mjs` + `npm run check:full`. ⚠️ **`scripts/e2e.mjs` 는 한 줄도 안 고쳤다**(assertion·의미 무변경, `BASE_URL` 만 넘긴다).
+  - **최소 GitHub Actions workflow** — `.github/workflows/check.yml`(`npm ci` → `npm run check` → `npm run build`).
+- **검증 실측**
+  - `npm run typecheck` **PASS** · `npm run typecheck:tests` **PASS**(20건 → 0)
+  - `npm run test` **67파일 / 1072 tests / 실패 0** · `npm run check` **PASS**(≈20초)
+  - `npm run check:full` **PASS**(≈1분) · **e2e 전체 통과**(어서션 40 / 실패 0), preview 정상 종료·LISTENING 잔존 0
+  - golden **23구성 / 256파일**, scratch 사본 2회 byte 비교로 **멱등성 확인**
+  - **최초 pre-R0 dump vs 최종 post-R0 dump `diff -r` = 0**(baseline 은 작업 시작 시점에 한 번만 뜨고 이후 재생성하지 않았다)
+  - `src/**` diff **0** · `git diff --check` **clean**
+  - mutation probe 2건이 실제로 탐지함 — 생성 문자열 1byte 변경 → golden 이 `changed: <구성>/game/characters.rpy` 23줄로 실패 / `zip.file('assets/…')` 제거 → round-trip 실패. **각각 즉시 원복하고 path-scoped `git diff --exit-code` 로 확인**했다.
+- **중요한 테스트 계약(깨지 말 것)**
+  - `.npproj.zip` export 는 **`Object.keys(assets) ∪ collectReferencedAssetIds(project)`** 다 — **두 축을 각각** 고정한다: ⓐ **assets map 에만 있고 프로젝트가 참조하지 않는 에셋**(`a-unused`)도 반드시 실린다 ⓑ **참조에만 있고 메타가 없는 에셋**(`a-cg`/`a-sprite`)은 **synthetic meta** 와 함께 실린다.
+  - **참조는 있는데 blob 이 없는 id**(`a-missing`)는 기존 계약대로 **예외 없이 skip**(메타에도 안 실린다).
+  - project 동등성은 **JSON-canonical 픽스처에 한해** `toEqual` 로 고정한다(explicit `undefined`·`NaN`·`Date`·`Map` 을 픽스처에 넣지 말 것 — JSON 직렬화가 보존하지 못한다). 합성 meta 의 `createdAt` 만 비결정 필드다.
+  - golden 은 **같은 구성의 duplicate path 를 fail-fast** 한다.
+  - ⚠️ **테스트는 golden 을 읽기만 한다** — 갱신은 `npm run golden:update` 뿐이다.
+- **CI 상태(정확히)**: **workflow 파일 작성 완료 · 아직 push 하지 않아 원격 Actions 실행은 미검증**이다. ⚠️ "CI PASS" 라고 쓰지 말 것. `xlsx` 가 `cdn.sheetjs.com` tarball 을 직접 받으므로 **CI `npm ci` 의 알려진 리스크**이고, R0 에서 dependency 구조를 바꾸지 않았다. workflow 의 Node 24 는 **R0 CI baseline 일 뿐 공식 engines 선언이 아니다**.
+- **환경 함정 2건(이번에 실측)** — ① node 에는 **`FileReader` 가 없어** JSZip 이 Blob 입력을 못 읽는다(브라우저에선 정상) → 해당 테스트 파일 안에서만 shim ② `vite preview` 기본 host `localhost` 가 Windows 에서 **::1 에만** 바인딩된다 → runner 는 `--host 127.0.0.1` 로 고정. 상세는 CLAUDE.md 「명령」.
+- **후속 후보(R0 범위 밖 — 지시가 있을 때만)**: `scripts/` 타입검사(`@types/node` 필요, `lib.dom` 전역 충돌 위험) · eslint/prettier 부재 · **e2e 의 CI 편입** · Node/TypeScript 버전 고정 정책(설치본 TS 5.9.3 vs `^5.6.3`) · `xlsx` CDN 의존 · `.npproj.zip` `manifest.version` 미사용(migration) · `collectProjectFiles`(zip 계층) golden · localStorage 왕복 golden · **R1 구조 리팩토링**(`screensRpy.ts` 3484 · `generate.ts` 1510 · `AssetsTab.tsx` 1388 · `SceneCard.tsx` 964).
 
 ## 📌 post-v1 CG 종료 / 일반 장면 복귀가 확정한 것 (`#CG끝` — 깨지 말 것)
 > ⚠️ 이 절은 **CG 종료 축**이다(번역 로드맵·의상 UX·줄 삭제·v1 Phase 번호와 같은 축이 아니다).

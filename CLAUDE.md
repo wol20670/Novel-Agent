@@ -10,12 +10,25 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 
 ## 명령
 - `npm run dev`(5173) · `npm run build` · `npm run typecheck`(**코드 변경 후 항상**) · `npm run test`(vitest)
+- **`npm run check` — 평상시 게이트(≈20초).** `typecheck`(production) → `typecheck:tests` → `test`(vitest 전체 = golden·`.npproj.zip` 왕복 포함). ⚠️ root `tsconfig.json` 은 `include: ["src"]` 그대로라 **tests 는 `tsconfig.tests.json` 으로만 검사된다** — `typecheck` 만 돌려놓고 "타입 통과"라고 하지 말 것.
+- **`npm run check:full` — 전체 게이트(≈1분).** `check` → **OneDrive 밖 임시 디렉터리**에 Vite build → self-hosted preview → 기존 e2e. **서버를 미리 띄워둘 필요가 없다.**
+- `npm run typecheck:tests` — tests 만 타입검사(`tsc -p tsconfig.tests.json`). `check` 가 이미 부른다.
+- `npm run golden:update` — Ren'Py golden 갱신. **평소엔 부르지 않는다**(아래 golden 계약).
 - `npm run gen:lint` — 샘플 대본으로 `.lint-tmp/`에 실제 `.rpy` 생성(+참조 이미지 스텁). 이후 `renpy.exe .lint-tmp lint`. ⚠️ OneDrive에선 산출물은 정상인데 **exit 127로 죽는다**(위 함정) — 파일이 생겼으면 성공이다.
-- `npm run dump:rpy -- <OneDrive 밖 폴더>` — 22구성으로 `.rpy` 덤프(회귀 0 증명용). 작업 전 커밋에서 한 번, 작업 후 한 번 돌려 `diff -r`. 결정론적이라 같은 코드면 항상 같은 출력이다. 새 출력 경로·새 opt-in 기능을 만들면 **이 스크립트의 구성 목록에도 추가**할 것(안 그러면 그 경로는 회귀 대조에서 빠진다 — 실제로 의상 구성이 plain 과 똑같은 덤프를 내던 걸 잡았다).
-- `npm run test:e2e` — Playwright 풀 파이프라인(분석→업로드→ZIP 내용 검증). 빌드+프리뷰(4173)가 먼저 떠 있어야 한다. ⚠️ `npm run build` 는 위 OneDrive 함정으로 **조용히 죽고 옛 dist 가 남는다** — 그러면 e2e 가 몇 달 전 코드를 검사하고 통과한다. `npx vite build --outDir <스크래치>/dist --emptyOutDir` → `npx vite preview --outDir <스크래치>/dist --port 4173` 로 띄울 것(store/UI 리팩터의 유일한 실동작 안전망이라 여기서 속으면 안 된다).
+  - ⚠️ **`gen:lint` 는 `check`·`check:full` 어디에도 들어가지 않는다(의도적 제외)** — ① 실제 `renpy.exe lint` 가 아니라 `.lint-tmp` **산출 단계**이고 ② 실제 lint 는 로컬 Ren'Py SDK 에 의존하며 ③ 생성 텍스트의 byte 회귀는 golden 이 담당한다. 화면·lint 검증이 필요할 때 **수동으로** 부른다.
+- `npm run dump:rpy -- <OneDrive 밖 폴더>` — 23구성으로 `.rpy` 덤프(회귀 0 증명용). 작업 전 커밋에서 한 번, 작업 후 한 번 돌려 `diff -r`. 결정론적이라 같은 코드면 항상 같은 출력이다. 구성 목록은 **`scripts/renpyConfigs.ts`**(golden 과 공유하는 단일 소스)에 있다.
+- **Ren'Py golden 회귀 계약** — `npm run test` 안의 `tests/renpy-golden.test.ts` 가 생성 결과를 **경로 → SHA-256** 매니페스트(`tests/golden/renpy-files.json`)와 대조해 **byte 단위 변경**을 잡는다. 현재 baseline = **23구성 / 256파일**.
+  - 구성의 단일 소스는 **`scripts/renpyConfigs.ts`** 다(`dump:rpy` 와 golden 이 같은 목록을 쓴다). **새 Ren'Py 출력 경로·새 opt-in 출력 기능을 만들면 이 파일의 coverage 를 반드시 함께 검토**할 것 — 구성에 없으면 golden 도 `dump:rpy` 도 그 경로를 보지 못한다(실제로 의상 구성이 plain 과 똑같은 덤프를 내던 걸 잡았다).
+  - **테스트는 golden 을 읽기만 하고 갱신·쓰기하지 않는다.** 갱신 경로는 **`npm run golden:update` 하나뿐**이다(자동 갱신을 만들면 게이트가 스스로를 통과시킨다).
+  - golden 은 **어떤 구성의 어떤 경로가 달라졌는지(added/removed/changed)까지만** 알려준다. **실제 내용 차이는 기존대로 `dump:rpy` 두 벌 + `diff -r`** 로 본다.
+  - 같은 구성에서 같은 path 가 두 번 나오면 **즉시 실패**한다(Record 로 접으면 앞 값이 조용히 덮여 생성기의 중복 방출을 놓친다).
+  - ⚠️ `golden:update` 뒤 결정론 확인은 **scratch 사본 2회 byte 비교**로 한다 — `cp tests/golden/renpy-files.json "$SCRATCH/first.json"` → 다시 `golden:update` → `diff -u "$SCRATCH/first.json" tests/golden/renpy-files.json`. **최초 golden 은 untracked 라 `git diff` 로는 멱등성이 증명되지 않는다**(내용을 비교하지 않고 통과한다).
+- `npm run test:e2e` — Playwright 풀 파이프라인(분석→업로드→ZIP 내용 검증). **이미 서버가 떠 있을 때** 쓰는 기존 명령이다(`BASE_URL` 로 대상 지정). 서버 준비까지 자동으로 하려면 **`npm run check:full`** 을 쓸 것.
+  - `check:full` 의 러너(`scripts/e2e-run.mjs`)는 매 실행 **`mkdtemp` 새 폴더**에 빌드해 위 OneDrive 함정의 **스테일 dist 를 구조적으로 불가능**하게 만들고, **free port + `--strictPort`** 로 preview 를 띄운 뒤 **응답 본문이 방금 빌드한 `index.html` 과 같은지**까지 확인해 "옛 서버가 200 을 주는" 오탐을 막는다. 끝나면 kill → close 확인 → 임시 폴더 제거 순으로 정리한다(SIGINT/SIGTERM 포함).
+  - ⚠️ preview 는 **`--host 127.0.0.1`** 로 바인딩한다 — 기본값 `localhost` 는 Windows 에서 **::1(IPv6)에만** 붙어 127.0.0.1 폴링이 60초 내내 실패한다(실제로 겪음). 수동으로 띄울 때도 같은 함정이 있다.
 
 ## 환경 함정 (중요)
-- **Windows node 종료는 PowerShell**: `Get-Process node | Stop-Process -Force`. bash `pkill`/`taskkill`은 자주 실패(좀비 `vite preview`가 옛 빌드를 계속 서빙).
+- **Windows 좀비 프로세스 종료는 PID 단위로**: 잔존 `vite preview`(옛 빌드를 계속 서빙)는 runner 가 출력한 PID 를 확인해 PowerShell `Stop-Process -Id <PID> -Force` 로 **그 프로세스만** 죽인다. bash `pkill`/`taskkill`은 자주 실패한다. ⚠️ **`Get-Process node | Stop-Process -Force` 는 쓰지 말 것** — 무관한 다른 Node 작업까지 함께 종료된다.
 - **OneDrive dist 빌드 함정**: `vite build`가 `dist/`에 쓸 때 간헐적으로 에러 없이 exit 127로 죽음 — 코드 문제 아님. 검증만이면 `npx vite build --outDir <OneDrive 밖> --emptyOutDir`(tsc는 무관하게 통과).
   - ⚠️ **검증 산출물도 같은 함정 — 이쪽이 더 위험하다**: `.lint-tmp` 처럼 리포 안에 수십 개 파일을 쓰는 생성 스크립트가 조용히 죽으면(출력 한 줄도 없이 exit 127) **옛 산출물이 그대로 남아** lint·스크린샷이 "고치기 전 코드"를 통과시킨다(실제로 겪음 — 완료 로그가 안 찍혔으면 실패다). 생성 폴더는 **OneDrive 밖**(스크래치패드)으로 주고, 검증 전에 gui.rpy 등에서 이번 변경이 실제로 들어갔는지 한 줄 확인할 것.
 
@@ -110,7 +123,7 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 
 ## 워크플로우 (YOU MUST)
 - **커밋·푸시는 사용자 명시 허락 전까지 절대 금지.** 코드 수정·검증은 자유. `main`에서 작업하면 새 브랜치부터.
-- 변경 후 `npm run typecheck`(가능하면 OneDrive 밖 빌드로 한 번 더). 커밋 메시지는 한국어 + conventional prefix(`feat`/`fix`/`perf`/`chore`/`ux`).
+- 변경 후 **`npm run check`**(= typecheck + typecheck:tests + test). UI·store 를 건드렸으면 **`npm run check:full`** 까지. 커밋 메시지는 한국어 + conventional prefix(`feat`/`fix`/`perf`/`chore`/`ux`).
 - **병합·브랜치 정리는 자동**(사용자 명시 요청, 2026-07-11): 커밋·푸시가 이미 승인된 브랜치는 typecheck(+가능하면 test) 통과 상태면 다시 묻지 않고 `main` fast-forward 병합 → push → 로컬·원격 브랜치 삭제. **ff 불가(충돌)·검증 실패면** 자동 진행하지 말고 확인. 끝나면 요약 보고.
 - **live API 키를 리포 안 평문 파일로 두지 말 것**(`key.txt` 류) — 실측 audit 이 필요하면 **환경변수로만** 주입하고(`OPENAI_API_KEY`), 값은 로그·리포트·artifact 어디에도 남기지 않는다(harness 는 `Authorization` 헤더를 기록하지 않는다). 부득이 파일을 쓴다면 리포 **밖**에 두고 실행 직후 삭제.
 - **HANDOFF.md 인수인계**(삭제 금지·짧게 유지): 세션 시작 시 `✅ 방금 반영됨`이 git log에 실제 있는지 확인 후 그 줄 삭제. 작업 끝엔 완료분 1줄을 `✅`에, 남은·새 일을 `🎯`에 갱신(서술 금지 — 이력은 git log).
