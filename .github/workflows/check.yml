@@ -15,11 +15,11 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ⚠️ node-version 24 는 **R0 CI baseline** 일 뿐, 프로젝트의 공식 engines 지원범위를 새로
       #    선언하는 것이 아니다(package.json 에 engines 는 없다).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
 
