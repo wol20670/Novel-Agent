@@ -27,13 +27,13 @@
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
-- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 구현 및 로컬 자체검증 완료 · GPT implementation + docs/final diff review PASS · commit/push 진행**(브랜치 `chore/r0-regression-gate` — `main` 반영은 별도 지시). 계약·실측은 아래 📌 절이 정본이다. ⚠️ **R1 이후는 아직 열지 않았다** — 사용자 지시가 있을 때만 연다.
+- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 완료 · GPT implementation/docs final review PASS · 원격 GitHub Actions PASS · main 반영 진행**(브랜치 `chore/r0-regression-gate`). 계약·실측은 아래 📌 절이 정본이다. ⚠️ **R1 이후는 아직 열지 않았다** — 사용자 지시가 있을 때만 연다.
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
 
 ## 📌 안정화 리팩토링 R 축 — R0(Regression Gate)이 확정한 것
 > ⚠️ 이 절은 **안정화 R 축**이다(v1 Phase 번호·번역 로드맵·의상 UX·줄 삭제·CG 종료와 **다른 축**).
-> **상태: 구현 + 로컬 자체검증 완료 · GPT implementation + docs/final diff review PASS · commit/push 진행.**
-> 브랜치는 `chore/r0-regression-gate` 이고 **`main` 반영은 아직 하지 않았다**(별도 지시).
+> **상태: 구현 + 로컬 자체검증 완료 · GPT implementation/docs final review PASS · 원격 GitHub Actions PASS.**
+> 브랜치는 `chore/r0-regression-gate` 이고 **`main` 반영 진행 중**이다.
 
 - **목적**: 이후의 **behavior-preserving refactor**(R1+: 컴포넌트·store·생성기 구조 정리)를 "구조만 바뀌고 observable behavior 는 그대로"임을 **기계적으로** 증명하며 진행할 수 있게 하는 **Regression Gate 구축**. 제품 기능은 하나도 추가하지 않는다.
 - **`src/**` production 코드 변경 0** — 변경은 설정·테스트·스크립트·문서뿐이다(`git diff --exit-code -- src/` 로 고정 확인).
@@ -58,7 +58,7 @@
   - project 동등성은 **JSON-canonical 픽스처에 한해** `toEqual` 로 고정한다(explicit `undefined`·`NaN`·`Date`·`Map` 을 픽스처에 넣지 말 것 — JSON 직렬화가 보존하지 못한다). 합성 meta 의 `createdAt` 만 비결정 필드다.
   - golden 은 **같은 구성의 duplicate path 를 fail-fast** 한다.
   - ⚠️ **테스트는 golden 을 읽기만 한다** — 갱신은 `npm run golden:update` 뿐이다.
-- **CI 상태(정확히)**: **workflow 파일 작성 완료 · 아직 push 하지 않아 원격 Actions 실행은 미검증**이다. ⚠️ "CI PASS" 라고 쓰지 말 것. `xlsx` 가 `cdn.sheetjs.com` tarball 을 직접 받으므로 **CI `npm ci` 의 알려진 리스크**이고, R0 에서 dependency 구조를 바꾸지 않았다. workflow 의 Node 24 는 **R0 CI baseline 일 뿐 공식 engines 선언이 아니다**.
+- **CI 상태(정확히)**: **원격 GitHub Actions 실행 PASS**(`check` job — `actions/checkout@v7`·`actions/setup-node@v7`, `node-version: '24'` 유지 — `npm ci` → `npm run check` → `npm run build` 전부 성공, 기존 Node.js 20 deprecated annotation 도 제거 확인). `xlsx` 가 `cdn.sheetjs.com` tarball 을 직접 받으므로 **CI `npm ci` 의 알려진 리스크**이고, R0 에서 dependency 구조를 바꾸지 않았다. workflow 의 Node 24 는 **R0 CI baseline 일 뿐 공식 engines 선언이 아니다**.
 - **환경 함정 2건(이번에 실측)** — ① node 에는 **`FileReader` 가 없어** JSZip 이 Blob 입력을 못 읽는다(브라우저에선 정상) → 해당 테스트 파일 안에서만 shim ② `vite preview` 기본 host `localhost` 가 Windows 에서 **::1 에만** 바인딩된다 → runner 는 `--host 127.0.0.1` 로 고정. 상세는 CLAUDE.md 「명령」.
 - **후속 후보(R0 범위 밖 — 지시가 있을 때만)**: `scripts/` 타입검사(`@types/node` 필요, `lib.dom` 전역 충돌 위험) · eslint/prettier 부재 · **e2e 의 CI 편입** · Node/TypeScript 버전 고정 정책(설치본 TS 5.9.3 vs `^5.6.3`) · `xlsx` CDN 의존 · `.npproj.zip` `manifest.version` 미사용(migration) · `collectProjectFiles`(zip 계층) golden · localStorage 왕복 golden · **R1 구조 리팩토링**(`screensRpy.ts` 3484 · `generate.ts` 1510 · `AssetsTab.tsx` 1388 · `SceneCard.tsx` 964).
 
