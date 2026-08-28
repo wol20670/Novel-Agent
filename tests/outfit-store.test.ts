@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useStore } from '../src/store';
-import { backgroundKey } from '../src/renpy/generate';
+import { backgroundKey } from '../src/types';
 import { outfitLineKey, type OutfitSuggestion } from '../src/generators/outfit';
 import { emptyProject, type Character, type Line, type Project, type Scene } from '../src/types';
 import { dialogue, projectWith, scene } from './fixtures';

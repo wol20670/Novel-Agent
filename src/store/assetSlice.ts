@@ -1,6 +1,5 @@
-import { effectiveExpressions, matchExpressionFile } from '../types';
+import { effectiveExpressions, matchExpressionFile, backgroundKey, bgmKey } from '../types';
 import type { Expression, OrphanAsset } from '../types';
-import { backgroundKey, bgmKey } from '../renpy/generate';
 import { applyAssetToGroup, clearAssetFromGroup } from '../project/sceneAssets';
 import { deleteAssets, getAllAssetKeys, getAssetInfos } from '../storage/assetStore';
 import { collectReferencedAssetIds, diffOrphanIds, diffRemoteOrphans, DEFAULT_REMOTE_GRACE_MS } from '../assetRefs';

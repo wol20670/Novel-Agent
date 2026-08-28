@@ -6,7 +6,7 @@ import { typecastTTS, getSubscription } from '../generators/voice/typecastProvid
 import { estimateVoiceCostForProject } from '../generators/voice/estimate';
 import { aiConfig } from '../config/aiConfig';
 import { deleteAsset } from '../storage/assetStore';
-import { extFromMime } from '../renpy/generate';
+import { extFromMime } from '../assetMime';
 import type { State } from './types';
 import type { SliceCreator } from './context';
 import {

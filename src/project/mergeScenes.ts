@@ -2,7 +2,7 @@
 // store.ts 의 analyzeText/analyzeExcel 이 이 모듈로 병합 로직을 위임한다(부수효과 없음 — 단위테스트 대상).
 
 import type { Scene, Line, I18nText } from '../types';
-import { backgroundKey, bgmKey } from '../renpy/generate';
+import { backgroundKey, bgmKey } from '../types';
 
 /** 재분석 결과 적용 방식 — merge(스마트 병합)/append(뒤에 추가)/replace(전체 교체). */
 export type AnalyzeMode = 'merge' | 'append' | 'replace';

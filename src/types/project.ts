@@ -646,6 +646,35 @@ export function outfitFlags(scene: Scene, rules: OutfitRule[] | undefined, charN
 }
 
 /**
+ * 배경/BGM 에셋 공유 키 — 같은 키를 가진 장면들은 같은 배경/BGM 파일을 공유한다.
+ * (CG 는 이 helper 의 책임이 아니다 — 컷 설명 문자열을 호출측이 직접 키로 쓴다.)
+ *
+ * `backgroundKey = (s.background || s.title).trim()`
+ * ⚠️ 같은 파일의 `resolveOutfit` 이 보는 `scene.background ?? ''` 와 **다른 규칙**이다 — 저쪽은
+ *    title 폴백도 `.trim()` 도 없다. 통합하면 의상 규칙 매칭 대상이 바뀌어 게임 출력이 달라진다.
+ *    **합치지 말 것.**
+ */
+export function backgroundKey(s: Scene): string {
+  return (s.background || s.title).trim();
+}
+
+/** `bgmKey = (s.bgm || s.title).trim()` — 배경과 같은 "이름(의미)" 기준 BGM 공유 키. */
+export function bgmKey(s: Scene): string {
+  return (s.bgm || s.title).trim();
+}
+
+/**
+ * `hasBgm = !!(s.bgm || s.bgmAssetId)` — "BGM 이름 또는 BGM assetId 가 truthy 한가"라는 술어다.
+ * ⚠️ "`#BGM` 을 적었는가"로만 읽지 말 것 — 이름 없이 `bgmAssetId` 만 있어도 true 다.
+ * ⚠️ whitespace-only `bgm` · legacy/inconsistent state 정리는 이 helper 의 책임이 아니다(기존 계약 그대로).
+ * `bgmPlayback.stopWhenUnset` 으로 `stop music fadeout 1.0` 을 낼지의 **정책**은 renpy/generate.ts
+ * 소유다 — 여기 있는 건 술어뿐이다.
+ */
+export function hasBgm(s: Scene): boolean {
+  return !!(s.bgm || s.bgmAssetId);
+}
+
+/**
  * 프로젝트의 base 로케일(대본 원문 언어). 미지정이면 'ko'.
  * 파라미터를 Pick 으로 좁혀둔 이유: 컴포넌트가 project 전체가 아니라 baseLocale 필드만 구독하고
  * (whole-project 셀렉터는 매 저장마다 새 객체라 무관한 필드 변경에도 리렌더를 유발) 그 값만

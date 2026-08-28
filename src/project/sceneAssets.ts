@@ -1,7 +1,7 @@
 // 배경/BGM/CG "그룹 단위 에셋 적용·해제" 순수 함수 — store.ts 하단의 applyBackgroundToGroup/
 // applyCgToGroup 을 이관·일반화했다(부수효과 없음 — 단위테스트 대상). 같은 이름(키)을 쓰는 모든
 // 장면에 한 번의 업로드를 일괄 적용/해제하는 6개 경로(배경 적용·해제, BGM 적용·해제, CG 그룹
-// 적용·해제)가 이 두 함수를 공유한다. 배경/BGM 키는 renpy/generate.ts 의 backgroundKey/bgmKey 를
+// 적용·해제)가 이 두 함수를 공유한다. 배경/BGM 키는 types/project.ts 의 backgroundKey/bgmKey 를
 // 그대로 재사용하고, CG 는 컷 설명 문자열을 키로 쓴다(호출측 store.ts 에서 구성).
 
 import type { Scene } from '../types';

@@ -22,7 +22,8 @@ import {
   ESC_SAVE_THUMB_MASK_FILE,
   ESC_CG_THUMB_MASK_FILE,
 } from '../types';
-import { generateRenpyFiles, resolveItems, resolveCgs, charIdMap, voiceBaseName, extFromMime } from '../renpy/generate';
+import { generateRenpyFiles, resolveItems, resolveCgs, charIdMap, voiceBaseName } from '../renpy/generate';
+import { extFromMime } from '../assetMime';
 import { getAsset } from '../storage/assetStore';
 import { sanitizeAscii } from '../project/safeName';
 import { canvasImage } from '../generators/image/canvasProvider';

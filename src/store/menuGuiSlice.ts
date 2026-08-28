@@ -15,7 +15,7 @@ import {
   ESC_IMAGES,
 } from '../types';
 import type { MenuButtonSlot, MenuButtonState, QuickButtonSlot, QuickButtonState, EscImageId } from '../types';
-import { extFromMime } from '../renpy/generate';
+import { extFromMime } from '../assetMime';
 import type { State } from './types';
 import type { SliceCreator } from './context';
 import { describeNames } from './helpers';

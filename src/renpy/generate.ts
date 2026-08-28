@@ -21,6 +21,9 @@ import {
   outfitFlags,
   spriteHiddenFlags,
   hasCgStartMarker,
+  backgroundKey,
+  bgmKey,
+  hasBgm,
   MAIN_MENU_SLOTS,
   MENU_BUTTON_STATES,
   mainMenuLayout,
@@ -62,16 +65,6 @@ export interface RenpyFile {
  */
 export function voiceBaseName(charId: string, sceneLabel: string, lineIdx: number): string {
   return `${charId}_${sceneLabel}_${String(lineIdx).padStart(3, '0')}`;
-}
-
-/**
- * 오디오 blob 의 실제 MIME → 확장자. 성우 음성은 TTS 생성(Typecast, mp3 요청)뿐 아니라 사용자가
- * "📁 파일로 적용"으로 임의 포맷(wav 등)을 올릴 수도 있어, BGM 처럼 확장자를 mp3 로 무조건 고정하면
- * 안 됨(고정하면 Ren'Py 가 다른 포맷 바이트를 mp3 로 잘못 디코드 시도해 무음/오류가 날 수 있음).
- * 알 수 없는 타입은 mp3 로 폴백(기존 동작 유지, TTS 기본 요청 포맷).
- */
-export function extFromMime(mime: string | undefined): 'mp3' | 'wav' {
-  return mime?.includes('wav') ? 'wav' : 'mp3';
 }
 
 /** 한글 표정 → Ren'Py 이미지 속성(ASCII). 이미지 attribute 는 ASCII 가 안전. */
@@ -348,17 +341,6 @@ interface SceneAssetRef {
   bgmFile?: string; // bgm_1.mp3 (업로드본이 있을 때만, 같은 BGM 이름이면 동일)
   cgTags: string[]; // 같은 CG 설명이면 동일
   cgFiles: string[];
-}
-
-/** 에셋 공유 키 — 같은 키를 가진 장면들은 같은 배경/BGM/CG 파일을 공유한다. */
-export function backgroundKey(s: Scene): string {
-  return (s.background || s.title).trim();
-}
-export function bgmKey(s: Scene): string {
-  return (s.bgm || s.title).trim();
-}
-export function hasBgm(s: Scene): boolean {
-  return !!(s.bgm || s.bgmAssetId);
 }
 
 /** 아이템(소품) 팝업 참조 — 이름 기준 공유(같은 이름 = 같은 이미지 1장). */

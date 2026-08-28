@@ -7,12 +7,14 @@ import {
   LOCALE_LABEL,
   characterOutfits,
   isTypecastVoiceId,
+  backgroundKey,
+  bgmKey,
+  hasBgm,
   type Expression,
   type Locale,
   type Scene,
   type OrphanAsset,
 } from '../types';
-import { backgroundKey, bgmKey, hasBgm } from '../renpy/generate';
 import { useAssetUrl } from './useAssetUrl';
 import UploadButton from './UploadButton';
 import Spinner from './Spinner';

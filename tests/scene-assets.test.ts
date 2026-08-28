@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyAssetToGroup, clearAssetFromGroup } from '../src/project/sceneAssets';
-import { backgroundKey, bgmKey } from '../src/renpy/generate';
+import { backgroundKey, bgmKey } from '../src/types';
 import type { Scene } from '../src/types';
 import { scene } from './fixtures';
 

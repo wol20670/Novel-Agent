@@ -5,7 +5,7 @@
 import type { Project, AssetMeta } from '../types';
 import { getAsset, putAsset } from '../storage/assetStore';
 import { collectReferencedAssetIds, collectReferencedAssetKinds } from '../assetRefs';
-import { extFromMime } from '../renpy/generate';
+import { extFromMime } from '../assetMime';
 import { sanitizeAscii } from './safeName';
 
 const PROJECT_FILE_VERSION = 1;
@@ -21,7 +21,7 @@ interface ProjectManifest {
 
 // 예전엔 audio/wav 를 제외한 전부(오디오 mp3·jpg 이미지 포함)를 .png 로 저장 — 앱 내 왕복(import
 // 가 manifest 의 mime 을 그대로 써서 복원)은 무사했지만, zip 을 밖에서 열면 오라벨이었다.
-// 오디오는 buildZip.ts 가 쓰는 extFromMime(generate.ts) 과 동일 규칙(mp3/wav)으로 통일하고,
+// 오디오는 buildZip.ts 가 쓰는 extFromMime(src/assetMime.ts) 과 동일 규칙(mp3/wav)으로 통일하고,
 // 이미지는 jpg/webp/gif 를 추가 인식한다(그 외엔 기존처럼 png 로 폴백).
 /** 내보내기/가져오기 양쪽이 쓰는 확장자 규칙(export 는 단위 테스트용 — tests/game-icon.test.ts). */
 export function extFor(mime: string): string {
