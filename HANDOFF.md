@@ -27,7 +27,7 @@
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
-- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 완료 · GPT implementation/docs final review PASS · 원격 GitHub Actions PASS · main 반영 진행**(브랜치 `chore/r0-regression-gate`). 계약·실측은 아래 📌 절이 정본이다. ⚠️ **R1 이후는 아직 열지 않았다** — 사용자 지시가 있을 때만 연다.
+- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 완료 · main 반영 완료**(`b452c1a`, 원격 GitHub Actions PASS). **R1(Domain Dependency 정리) 구현·검증 완료 · GPT implementation review PASS**(`chore/r1-domain-dependency`). 계약·실측은 아래 📌 R0·R1 절이 각각 정본이다. ⚠️ **R2 이후는 아직 열지 않았다** — 사용자 지시가 있을 때만 연다.
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
 
 ## 📌 안정화 리팩토링 R 축 — R0(Regression Gate)이 확정한 것
@@ -61,6 +61,71 @@
 - **CI 상태(정확히)**: **원격 GitHub Actions 실행 PASS**(`check` job — `actions/checkout@v7`·`actions/setup-node@v7`, `node-version: '24'` 유지 — `npm ci` → `npm run check` → `npm run build` 전부 성공, 기존 Node.js 20 deprecated annotation 도 제거 확인). `xlsx` 가 `cdn.sheetjs.com` tarball 을 직접 받으므로 **CI `npm ci` 의 알려진 리스크**이고, R0 에서 dependency 구조를 바꾸지 않았다. workflow 의 Node 24 는 **R0 CI baseline 일 뿐 공식 engines 선언이 아니다**.
 - **환경 함정 2건(이번에 실측)** — ① node 에는 **`FileReader` 가 없어** JSZip 이 Blob 입력을 못 읽는다(브라우저에선 정상) → 해당 테스트 파일 안에서만 shim ② `vite preview` 기본 host `localhost` 가 Windows 에서 **::1 에만** 바인딩된다 → runner 는 `--host 127.0.0.1` 로 고정. 상세는 CLAUDE.md 「명령」.
 - **후속 후보(R0 범위 밖 — 지시가 있을 때만)**: `scripts/` 타입검사(`@types/node` 필요, `lib.dom` 전역 충돌 위험) · eslint/prettier 부재 · **e2e 의 CI 편입** · Node/TypeScript 버전 고정 정책(설치본 TS 5.9.3 vs `^5.6.3`) · `xlsx` CDN 의존 · `.npproj.zip` `manifest.version` 미사용(migration) · `collectProjectFiles`(zip 계층) golden · localStorage 왕복 golden · **R1 구조 리팩토링**(`screensRpy.ts` 3484 · `generate.ts` 1510 · `AssetsTab.tsx` 1388 · `SceneCard.tsx` 964).
+
+## 📌 안정화 리팩토링 R 축 — R1(Domain Dependency 정리)이 확정한 것
+> ⚠️ 이 절은 **안정화 R 축**이다(v1 Phase 번호·번역 로드맵·의상 UX·줄 삭제·CG 종료와 **다른 축**).
+> **상태: 구현 + 로컬 자체검증 완료 · GPT implementation review PASS.** 브랜치는 `chore/r1-domain-dependency`.
+
+- **목적**: 기능·observable behavior 를 하나도 바꾸지 않고, project/store/UI 계층이 Ren'Py generator 구현
+  세부사항에 의존하던 부분을 **최소 범위에서** 끊는다. 제품 기능 추가 0 · generator 출력 변경 0.
+- **R1 이 확정한 규칙(딱 이 한 줄 — 넓히지 말 것)**
+  > **project / store / UI 계층은 shared domain rule 또는 shared file rule 을 얻기 위해
+  > `src/renpy/generate.ts` 를 import 하지 않는다.**
+  ⚠️ **"domain ↔ renpy 완전 단방향"처럼 전체 architecture 를 포괄하는 표현을 쓰지 말 것** —
+  `types/project.ts → renpy/gui/theme`(type-only)가 여전히 있고, 아래 의도적 잔류도 남는다.
+- **canonical 위치(이동한 것)**
+  ```
+  backgroundKey · bgmKey · hasBgm  →  src/types/project.ts   (cgActiveFlags·outfitFlags 옆)
+  extFromMime                      →  src/assetMime.ts       (import 0 잎 모듈, 신규)
+  ```
+  `hasCgStartMarker`/`cgActiveFlags` 를 `types/project.ts` 에 둔 CG 종료 Phase 선례를 그대로 계승한다.
+  ⚠️ `src/assetMime.ts` 는 **import 가 0줄**이어야 한다(어느 계층에서 써도 결합이 늘지 않는 것이 존재 이유).
+  ⚠️ `src/assetRefs.ts`(reference collection·GC)와 **다른 책임**이라 합치지 말 것.
+- **함수 body 는 한 글자도 바꾸지 않았다**(정확한 기존 계약 — 이 값이 정본):
+  ```
+  backgroundKey(s) = (s.background || s.title).trim()
+  bgmKey(s)        = (s.bgm || s.title).trim()
+  hasBgm(s)        = !!(s.bgm || s.bgmAssetId)
+  ```
+  ⚠️ **`hasBgm` 을 "`#BGM` 을 적었는가"로만 읽지 말 것** — 이름 없이 `bgmAssetId` 만 있어도 `true` 다.
+  whitespace-only `bgm`·legacy/inconsistent state 정리는 이 helper 의 책임이 **아니고** R1 에서 바꾸지 않았다.
+  `stopWhenUnset` 으로 `stop music fadeout 1.0` 을 낼지의 **정책**은 여전히 `renpy/generate.ts` 소유다.
+- ⚠️ **`backgroundKey` 와 `resolveOutfit` 의 `scene.background ?? ''` 는 다른 규칙 — 합치지 말 것.**
+  저쪽은 **title 폴백도 `.trim()` 도 없다**. 통합하면 의상 규칙 매칭 대상이 바뀌어 게임 출력이 달라진다
+  (`cgActiveFlags` ↔ `getFirstEffectiveCgIndex` 와 같은 등급의 의도된 divergence 다).
+- **의도적으로 남긴 generator dependency(정확히 3개 — 정리 대상이 아니다)**
+  ```
+  ScenePlayer → arrangePositions·attrFor·selectSprite·spriteSlots : Preview/Export parity(기존 durable contract)
+  RenpyTab    → generateRenpyFiles
+  buildZip    → generateRenpyFiles·resolveItems·resolveCgs·charIdMap·voiceBaseName (Ren'Py 산출물/파일명 API)
+  ```
+- **변경 규모**: `12 modified + 1 new`(`src/assetMime.ts`). 새 abstraction·barrel·service·class **0** ·
+  compatibility re-export **0**(옛 경로를 남기면 새 코드가 계속 그쪽을 쓴다) · rename/generalization **0** ·
+  `Project` schema 변경 **0** · 새 test **0**(기존 gate 가 이미 네 함수를 고정한다).
+  `src/project/sceneAssets.ts`·`src/project/transfer.ts` 의 **옛 위치를 명시하던 주석 2줄만** 함께 고쳤다.
+- **검증 실측(전 게이트 PASS)**
+  - 환경 **Node v24.19.0 · npm 11.17.0**
+  - `npm run typecheck` **PASS** · `npm run typecheck:tests` **PASS**
+  - `npm run test` **67파일 / 1072 tests / 실패 0**(R0 baseline 과 동일 — assertion·fixture 완화 0, 테스트 증감 0)
+  - **Ren'Py golden PASS** · **`.npproj.zip` asset round-trip PASS**
+  - `npm run check` **PASS** · `npm run check:full` **PASS**(scratch Vite build → self-hosted preview → e2e 전체 통과)
+  - **pre/post `dump:rpy`**: baseline(`b452c1a`) **23구성 / 256파일** · R1 **23구성 / 256파일** ·
+    **recursive diff 0** · 독립 교차검증으로 **SHA-256 manifest 256파일 전부 identical**
+    (baseline 은 R1 working tree 를 건드리지 않으려고 **repo 밖 scratch 의 임시 git worktree**에서 떴고,
+    검증 후 `git worktree remove` 로 정리했다 — tracked content 오염 0)
+  - `git diff --check` **clean**
+  - `git grep` definition 검증: 네 helper 정의가 `src/renpy` 에 **0건** · `extFromMime` canonical **1건**(`src/assetMime.ts`) ·
+    key3 canonical **3건**(`src/types/project.ts`) · `src/project`·`src/store`·`AssetsTab.tsx` → `renpy/generate` **0건** ·
+    남은 importer **정확히 3개**(위 의도적 잔류)
+  - ⚠️ **`golden:update` 는 실행하지 않았다**(golden 이 깨지면 그건 회귀다).
+- ⚠️ **생성되는 `.rpy` 안의 소스 경로 표기는 일부러 stale 하게 남겼다** — `generate.ts` 가 `voices.rpy` 주석으로
+  `(extFromMime, generate.ts)` 를 **출력 텍스트로** 방출하는데, 이건 golden 이 고정하는 **출력 byte 의 일부**라
+  고치면 golden 이 깨진다(`i18n` 구성이 `voiceLocales` 를 가져 실제로 실려 있다). 후속 후보로만 둔다.
+- **후속 후보(R1 범위 밖 — 지시가 있을 때만)**: 생성 `.rpy` 안의 stale source-location 주석(위) ·
+  GUI 테마 규격 dependency(`types/project.ts`(type-only)·`generators/theme/*`·`ProjectMeta`·`ThemeStudio` → `renpy/gui/theme`) ·
+  CG 키 `desc.trim()` 인라인 중복(`mergeScenes`·`AssetsTab`·`assetSlice` — R1 에서 `cgKey()` 를 만들지 **않았다**) ·
+  generator export surface 전수 조사(`extFromMime` 처럼 generator 안에서 안 쓰이는 export 가 더 있는지 — R7 과 함께) ·
+  `backgroundKey`/`bgmKey` 의 `.trim()` 을 직접 pin 하는 test.
 
 ## 📌 post-v1 CG 종료 / 일반 장면 복귀가 확정한 것 (`#CG끝` — 깨지 말 것)
 > ⚠️ 이 절은 **CG 종료 축**이다(번역 로드맵·의상 UX·줄 삭제·v1 Phase 번호와 같은 축이 아니다).
