@@ -27,7 +27,7 @@
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
-- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 완료 · main 반영 완료**(`b452c1a`, 원격 GitHub Actions PASS). **R1(Domain Dependency 정리) 구현·검증 완료 · GPT implementation review PASS**(`chore/r1-domain-dependency`). 계약·실측은 아래 📌 R0·R1 절이 각각 정본이다. ⚠️ **R2 이후는 아직 열지 않았다** — 사용자 지시가 있을 때만 연다.
+- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 완료 · main 반영 완료**(`b452c1a`, 원격 GitHub Actions PASS). **R1(Domain Dependency 정리) 구현·검증 완료 · GPT implementation review PASS**(`chore/r1-domain-dependency`). **R2(`.npproj.zip` Compatibility Layer) 구현·검증 완료 · GPT implementation review PASS**(구현 `a282154`, `chore/r2-zip-compat`). 계약·실측은 아래 📌 R0·R1·R2 절이 각각 정본이다. ⚠️ **R3 이후는 아직 열지 않았다** — 사용자 지시가 있을 때만 연다.
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
 
 ## 📌 안정화 리팩토링 R 축 — R0(Regression Gate)이 확정한 것
@@ -126,6 +126,92 @@
   CG 키 `desc.trim()` 인라인 중복(`mergeScenes`·`AssetsTab`·`assetSlice` — R1 에서 `cgKey()` 를 만들지 **않았다**) ·
   generator export surface 전수 조사(`extFromMime` 처럼 generator 안에서 안 쓰이는 export 가 더 있는지 — R7 과 함께) ·
   `backgroundKey`/`bgmKey` 의 `.trim()` 을 직접 pin 하는 test.
+
+## 📌 안정화 리팩토링 R 축 — R2(`.npproj.zip` Compatibility Layer)가 확정한 것
+> ⚠️ 이 절은 **안정화 R 축**이다(v1 Phase 번호·번역 로드맵·의상 UX·줄 삭제·CG 종료와 **다른 축**).
+> 구현 = **`a282154`**(`src/project/transfer.ts` + 신규 `tests/transfer-compat.test.ts` **딱 2파일**).
+> store·UI·localStorage·협업·Ren'Py 생성기 **전부 무수정**.
+
+- **목적**: `.npproj.zip` 이 **기기 간 이동의 유일한 경로**인데 import 가 `manifest.version` 을 **한 줄도
+  읽지 않아서**, ① 앱이 이해 못 하는 미래 schema 를 조용히 current 로 해석했고 ② 실재했던 과거
+  컨테이너 차이는 판별조차 못 했다. 그 경계를 **한 곳**으로 만든다.
+- **canonical compatibility boundary 는 `importProjectFile`(`src/project/transfer.ts`) 한 곳뿐이다.**
+  `project.json` 을 읽는 앱 코드가 여기밖에 없어(다른 하나는 `scripts/e2e.mjs`) 우회로가 없다.
+  ⚠️ 이 boundary 는 **Project payload 를 normalize·migrate 하지 않는다** — compatibility validation 과
+  **에셋 파일명** adaptation 을 거쳐 payload 를 **손대지 않은 채** 기존 load path 로 **admit** 할 뿐이다.
+- **validation ordering 은 그 자체가 계약이다 — 세 조건을 다시 한 줄로 합치지 말 것:**
+  ```
+  ① archive identity(app) → ② version compatibility → ③ current-schema minimum guard(project.scenes) → ④ asset restoration
+  ```
+  - ⚠️ **②를 ③ 뒤로 옮기지 말 것** — 미래 schema 는 `project.scenes` 자체가 다를 수 있어서, 순서가
+    뒤집히면 정상 future archive 가 *"Novel-Agent 프로젝트 파일이 아닙니다"* 라는 **틀린 진단**을 받고
+    future-rejection 계약이 약해진다.
+  - ⚠️ **①을 ② 뒤로 옮기지 말 것** — foreign app 의 숫자를 우리 version 축으로 해석하면 안 된다.
+  - ⚠️ **어떤 검증도 ④ 뒤로 옮기지 말 것.** 테스트가 *같은 `project:{}` payload 인데 `version` 만
+    다르면 메시지가 갈린다* 는 것과 `putAsset` 0회로 이 순서를 고정한다.
+- **`PROJECT_FILE_VERSION` 은 도입(`781f42a`, 2026-06-09) 이래 계속 `1` 이고 R2 도 bump 하지 않았다** —
+  R2 가 write schema/컨테이너 layout 을 바꾸지 않기 때문이다(read compatibility 개선만으로는 올리지
+  않는다). `exportProjectFile` 은 완전 무수정이다.
+- **version 판정(전부)** — 판정 단일 소스는 `assertSupportedVersion` 하나다:
+  ```
+  1                              → accept (current)
+  safe integer 이고 > 1          → future reject
+  present + non-number / non-integer / <= 0 → invalid reject   (⚠️ coercion 금지 — '1' 을 1 로 읽지 않는다)
+  부재(undefined)                → accept  (아래 단서)
+  ```
+  **supported older numeric version 은 존재하지 않는다**(도입 이래 늘 1이었다). ⚠️ 그래서 에러 문구에
+  *"vN 까지 지원"* 처럼 `≤ CUR` 전체를 지원한다는 뉘앙스를 쓰지 말 것(*"이 앱의 지원 형식 vN"* 으로 표기).
+- ⚠️ **부재를 "v1" 이나 "legacy generation" 으로 설명하지 말 것.** 공식 version-less generation 은
+  **존재한 적이 없다**(최초 커밋부터 무조건 `version` 을 썼다). 부재를 accept 하는 **유일한 근거는
+  기존 main loader 가 그 입력을 받아 왔다는 behavior preservation** 이다 — unversioned / noncanonical
+  input 을 current parser 에 그대로 통과시킬 뿐, 어떤 generation 으로도 분류하지 않는다.
+- ⚠️ **version 은 migration generation selector 가 아니다** — current 판별 + future 거부에만 쓴다.
+  **실제 historical 호환성 차이는 `8a90eeb`(2026-07-14)의 에셋 파일명 규칙 교체 하나뿐이고, 그 세대도
+  `version: 1` 이다**(Generation A = `audio/wav` 만 `.wav`, 그 외 전부 `.png`). 즉 version 으로는
+  세대가 구분되지 않는다 → **version 키 migration 테이블·registry 를 만들지 말 것.**
+- **Generation A 복원은 version migration 이 아니라 import 전용 이름 폴백**이다:
+  ```
+  현재 이름 extFor(mime) 우선  →  없을 때만 legacyExtFor(mime) = (mime === 'audio/wav' ? 'wav' : 'png')
+  ```
+  현재 세대 zip 은 id 당 파일이 정확히 하나(`extFor` 이름)라 **첫 조회가 항상 적중하고 폴백은 도달조차
+  하지 않는다**(false positive 구조적 불가). ⚠️ **`extFor` body 와 export path 는 무수정**이고 절대
+  레거시 규칙으로 되돌리지 말 것 — 현재 컨테이너 레이아웃 계약(`transfer-assets-roundtrip` 의 엔트리
+  이름 목록)이 깨진다. ⚠️ 조회 **순서**를 뒤집지 말 것(테스트가 dual-entry 를 **바이트로** 고정한다 —
+  current-only 아카이브에는 legacy 엔트리가 없어 기존 왕복 테스트만으로는 순서가 증명되지 않는다).
+- **mutation-zero 보장의 범위(정확히)** — 아래 **세 rejection 경로에 한해서만** `putAsset` 0회이고
+  store 교체·`deleteAssets`·`saveProject`·협업 push 가 시작조차 되지 않는다:
+  ```
+  future version · invalid version · invalid project.scenes
+  ```
+  ⚠️ **`.npproj.zip` import 전체가 atomic 하다고 쓰지 말 것.** `putAsset` 은 **에셋별 IndexedDB write**
+  라, 압축 해제나 IDB write 가 루프 **중간**에 실패하면 앞쪽 write 가 rollback 된다는 보장이 없다.
+  full transactional import 는 R2 범위 밖이고 **새 asset-store abstraction·transaction 시스템을 만들지
+  않았다.**
+- **error surface 는 기존 것을 그대로 쓴다** — `throw → persistenceSlice 의 catch →
+  flash('가져오기 실패: …')`. 새 error class·`code` 필드·Result 타입·모달·토스트 **0**, store·UI 무수정.
+  **malformed JSON 은 기존 SyntaxError 전달 behavior 그대로** 두었다(R2 에서 문구를 바꾸지 않았다).
+  테스트는 **전체 문자열이 아니라 의미 정규식**으로 고정하되 future/invalid 를 구별한다.
+- ⚠️ **localStorage·협업의 version 과 archive format version 을 연결하지 말 것** — `projectStore.ts` 는
+  version 필드 자체가 없고, Supabase `projects.version` 은 **LWW 순서 카운터**다(`src/collab/sync.ts`).
+  협업 pull 페이로드에는 format version 이 아예 없어 R2 범위 밖이다.
+- **의도된 behavior change 3건**
+  1. **Generation A 의 mp3/jpg/webp/gif blob 이 이제 복원된다** — 그 전엔 `if (!f) continue` 로 조용히
+     유실됐고(메타는 남고 blob 만 없어 그림·소리가 안 났다) `assetCount` 가 늘어난다.
+  2. **future / invalid version 은 이제 명시적 실패**다(그 전엔 조용히 current 로 해석).
+  3. **`project.scenes` 가 배열이 아닌 손상 파일이 이전 프로젝트 에셋을 지우기 전에 실패한다** —
+     그 전엔 `deleteAssets` 뒤 `set({… project.scenes[0] …})` 에서 TypeError 라 partial mutation 이 났다.
+     ⚠️ 이건 **최소 조건 하나**이지 full Project schema validator 가 아니다(만들지 말 것).
+- **검증 실측**: `typecheck`·`typecheck:tests` **PASS** · vitest **68파일 / 1095 tests**(신규
+  `tests/transfer-compat.test.ts` **23**) · **Ren'Py golden 23구성 256파일 무변경**(⚠️ `golden:update`
+  **미실행**) · `git diff --check` clean · **mutation probe 8건 전부 의도한 테스트 실패를 확인했고
+  원복 상태도 검증했다**(future 경계 · 검증을 에셋 루프 뒤로 · 검증을 scenes 가드 뒤로 · 검증을 app
+  앞으로 · scenes 가드 제거 · 폴백 제거 · 조회 순서 반전 · `isSafeInteger` 제거).
+- **Phase I 로컬 검증 caveat(역사적 기록)**: 전체 스위트 실행 중
+  `tests/integration-workflow.test.ts` 의 5초 timeout flake 가 발생했고 **baseline `b42228b` 에서도
+  재현**됐다 — 그래서 R2 변경에 기인한 것으로 보지 않았다. `node scripts/e2e-run.mjs` 는 **별도로
+  PASS** 했다. ⚠️ 이 별도 e2e PASS 를 **`npm run check:full` PASS 와 동일시하지 않는다.**
+- **후속 후보(R2 범위 밖 — 지시가 있을 때만)**: `collectProjectFiles`(zip 계층) golden ·
+  localStorage 왕복 golden · full transactional asset import.
 
 ## 📌 post-v1 CG 종료 / 일반 장면 복귀가 확정한 것 (`#CG끝` — 깨지 말 것)
 > ⚠️ 이 절은 **CG 종료 축**이다(번역 로드맵·의상 UX·줄 삭제·v1 Phase 번호와 같은 축이 아니다).
