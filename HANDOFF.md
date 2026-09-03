@@ -27,7 +27,7 @@
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
-- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 완료 · main 반영 완료**(`b452c1a`, 원격 GitHub Actions PASS). **R1(Domain Dependency 정리) 구현·검증 완료 · GPT implementation review PASS**(`chore/r1-domain-dependency`). **R2(`.npproj.zip` Compatibility Layer) 구현·검증 완료 · GPT implementation review PASS**(구현 `a282154`, `chore/r2-zip-compat`). 계약·실측은 아래 📌 R0·R1·R2 절이 각각 정본이다. ⚠️ **R3 이후는 아직 열지 않았다** — 사용자 지시가 있을 때만 연다.
+- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 완료 · main 반영 완료**(`b452c1a`, 원격 GitHub Actions PASS). **R1(Domain Dependency 정리) 구현·검증 완료 · GPT implementation review PASS**(`chore/r1-domain-dependency`). **R2(`.npproj.zip` Compatibility Layer) 구현·검증 완료 · GPT implementation review PASS**(구현 `a282154`, `chore/r2-zip-compat`). **R3(AssetsTab 구조 분리 + Background/BGM 장면 이동) 구현·검증 완료 · GPT implementation review PASS**. 계약·실측은 아래 📌 R0·R1·R2·R3 절이 각각 정본이다. ⚠️ **R4 이후는 아직 열지 않았다** — 사용자 지시가 있을 때만 연다.
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
 
 ## 📌 안정화 리팩토링 R 축 — R0(Regression Gate)이 확정한 것
@@ -212,6 +212,95 @@
   PASS** 했다. ⚠️ 이 별도 e2e PASS 를 **`npm run check:full` PASS 와 동일시하지 않는다.**
 - **후속 후보(R2 범위 밖 — 지시가 있을 때만)**: `collectProjectFiles`(zip 계층) golden ·
   localStorage 왕복 golden · full transactional asset import.
+
+## 📌 안정화 리팩토링 R 축 — R3(AssetsTab 구조 분리 + Background/BGM 장면 이동)이 확정한 것
+> ⚠️ 이 절은 **안정화 R 축**이다(v1 Phase 번호·번역 로드맵·의상 UX·줄 삭제·CG 종료와 **다른 축**).
+> **implementation 변경은 8파일**이다 — MODIFY `src/components/AssetsTab.tsx`·`scripts/e2e.mjs`, NEW
+> `src/components/{assetGroups.ts,AssetGroupRows.tsx,CharacterCard.tsx,VoiceSection.tsx,AssetCleanupSections.tsx}`
+> + `tests/asset-groups.test.ts`. **store·parser·Preview·persistence·Ren'Py 생성기 전부 무수정.**
+
+- ⚠️ **목표 두 개는 성격이 다르다 — 둘 다 behavior-preserving 이라고 쓰지 말 것.**
+  ① **구조 분리 = behavior-preserving refactor** — navigation 을 위해 **의도적으로 바꾼 두 곳**
+  (`groupBy` 의 `sceneLabels`/global-index 파생 · `BgGroupRow`/`BgmGroupRow` 의 `SceneUsageBadge` 배선)을
+  **제외한** 추출 대상 기존 로직은 그대로 보존했다. `CharacterCard`/`VoiceSection`/cleanup 두 섹션 ·
+  CG · Item 은 **의미 변경 없이 이동**만 했다. ② **Background/BGM 장면 이동 = 의도적인 신규 UX
+  behavior**(그래서 "회귀 0" 이 검증 기준이 될 수 없어 unit + E2E regression 을 새로 붙였다).
+- **책임 경계(확정 — 새 범용 버킷을 만들지 말 것)**
+  ```
+  AssetsTab.tsx            top-level orchestration + 작은 순서 결합 row 유지
+                           (TitleBgm·BgmPlaybackToggles·GameIcon·MenuArt·NarrationOnly·
+                            PlayerName·AssignEmotions·SuggestOutfits — 배치 순서에 결합된
+                            주석이 있어 묶으면 인위적 카테고리가 생긴다)
+  assetGroups.ts           AssetsTab 전용 순수 group derived data (JSX 0 · import 는 Scene 타입뿐인 leaf)
+  AssetGroupRows.tsx       Background/CG/Item/BGM group rendering + Background/BGM usage navigation
+  CharacterCard.tsx        CharacterCard + 전용 sprite helpers(SpriteBatchUploadRow·ExpressionThumb)
+  VoiceSection.tsx         project-wide TTS cost/batch/review
+  AssetCleanupSections.tsx local/remote orphan cleanup pair
+  ```
+  ⚠️ `assetGroups.ts` 는 **leaf 로 유지**한다(다른 컴포넌트를 import 하면 순환). `AssetsTab.tsx` 가
+  나머지를 **단방향으로** import 하는 트리를 깨지 말 것.
+- **Background/BGM navigation UX 계약**
+  ```
+  single usage   → <button type="button">  누르면 즉시 그 장면으로
+  multiple usage → native <select>         사용자가 장면을 고르면 그 장면으로 (고르지 않으면 no-op)
+  ```
+  ⚠️ **CG/Item navigation 은 R3 non-goal 이고 추가하지 않았다** — `CgGroupRow` 는 기존 `CountBadge`
+  그대로이고 `CgGroup` 에 `sceneIds`/`sceneLabels` 를 넣지 않았다. `ItemGroupRow` 는 장면 귀속 구조
+  자체가 없다.
+  접근성은 **native button/select semantic 을 그대로 쓴다**(role·tabIndex·키 핸들러 자작 0) —
+  이름은 `aria-label` 이 정본이고 `title` 은 마우스 툴팁 전용이다(⚠️ `title` 만을 accessible name 으로
+  의존하지 말 것). 새 component library·CSS framework·modal·dropdown 라이브러리 **0**.
+- **canonical navigation transition — 기존 `jumpToScene(id)`(`src/components/sceneJump.ts`) 재사용**
+  ```
+  selectScene(id) → setActiveTab('scenes') → 기존 requestAnimationFrame 스크롤
+  ```
+  `sceneJump.ts` 는 **한 줄도 고치지 않았다**. **새 navigation store/action/framework/router 0.**
+  ⚠️ **AssetsTab 에서 클릭하는 순간에는 scene target DOM 이 아직 없다**(에셋 탭이라 장면 트리가
+  언마운트돼 있다). 그래서 순서가 중요하다 — `selectScene` → `setActiveTab('scenes')` 를 **먼저** 하고,
+  **그 다음 기존 rAF callback 에서** `scene-${id}` 를 조회한다. **그 시점에 target 이 렌더돼 있으면 기존
+  스크롤이 그대로 수행되고**, rAF 조회에서도 target 이 없을 때에만 **상태 전이는 유지된 채 스크롤만
+  생략**된다. ⚠️ **"클릭 순간 DOM 없음 = 스크롤 생략"으로 단정하지 말 것.** 그 위에 재시도·복구·
+  타임아웃·stale-reference recovery 를 얹지 말 것.
+- **usage derived-data 규칙(`Group`, `assetGroups.ts`)**
+  ```
+  sceneIds    = 실제 navigation identity (이동 대상)
+  sceneLabels = UI-only 표시 데이터      (picker 에 보이는 글자)
+  ```
+  둘은 **같은 `groupBy` pass 의 같은 Scene 에서 같은 index 로** 생성된다(그래서 정상 derived data
+  안에서 짝이 어긋난 pair 가 나오지 않는다). 라벨 = **global scene ordinal + title**(`#3 밤, 상가거리`),
+  **빈 title 은 `#N` fallback**.
+  ⚠️ **제목만으로는 안 된다** — 파서(`sceneBuilder.startScene`)가 `장면:` 마다 무조건 새 Scene 을 만들어
+  **같은 제목의 장면이 여럿 존재한다**(샘플에도 "밤, 상가거리" 가 둘). **duplicate title 은 ordinal 로
+  구별**한다.
+  ⚠️ **ordinal 은 `include()`/filter 후 순번이 아니라 project `scenes` 배열의 global index** 다 — BGM
+  그룹은 `hasBgm` 으로 걸러지므로 필터 후 번호를 쓰면 장면 카드의 번호와 어긋난다(unit test 가 이
+  회귀를 전용으로 잡는다).
+  ⚠️ 이 데이터는 **Project/Scene/store/archive schema 어디에도 저장되지 않는다**(기존 `bgs`/`bgms`
+  `useMemo` 와 같은 렌더 파생값). `zero-usage` 그룹은 `include(s)` 를 통과한 장면에서만 그룹이 만들어져
+  **구조적으로 생기지 않는다**.
+- ⚠️ **`src/assetRefs.ts`(에셋 참조/GC canonical)와 이 UI-derived usage data 를 혼동하지 말 것** —
+  전자는 프로젝트 전체 **flat 참조 집합**(고아 정리·원격 스윕용, 장면 귀속 없음)이고 후자는 그룹 카드
+  렌더 전용이다. 목적이 달라 서로 대체하지 않는다. `assetRefs.ts`·`collab/assetsGc.ts` **무수정**.
+- **store 변경 0** — 새 액션·새 State 필드·새 슬라이스 없음. `selectedSceneId`/`activeTab` 은 원래부터
+  최상위 State 필드라 persistence 와 무관하고, `selectScene`/`setActiveTab` 이 **기존대로 각각
+  `updatePresence` 를 호출**한다(새 종류의 presence behavior 는 없고, 이동 1회당 기존 두 액션의 presence
+  update 호출이 발생할 뿐이다 — 장면 리모컨·번역 QA 점프에서 이미 일어나던 것과 같다).
+- **Preview architecture / persistence / save-load / `.npproj.zip` / Ren'Py export 에 schema·path 변경 0.**
+  navigation 이 `selectedSceneId` 를 바꿔 기존 selection-driven UI/Preview 가 그 장면을 반영하는 것은
+  **의도된 기존 behavior 재사용**이다(새 Preview 경로가 아니다).
+- **R1/R2 frozen contract 유지** — R1 의 canonical helper 위치와 "project/store/UI 는 shared domain·file
+  rule 을 얻으려고 `renpy/generate.ts` 를 import 하지 않는다" 규칙, R2 의 `importProjectFile` 단일
+  compatibility boundary·`PROJECT_FILE_VERSION = 1` 전부 그대로다.
+- **검증 실측**: `typecheck`·`typecheck:tests`·`test`·`check`·`check:full` **전부 PASS**
+  (vitest **69파일 / 1105 tests** — 신규 `tests/asset-groups.test.ts` **10**) ·
+  e2e 에 **Background single / duplicate-title multiple / BGM single** 이동 regression 추가(장면 탭 전환 +
+  대상 SceneCard `border-accent` + 직전 대상 해제 + 같은 제목 오선택 없음) ·
+  **expected Ren'Py golden diff 0 · golden 파일 변경 0**(⚠️ `golden:update` **미실행**) ·
+  `git diff --check` clean.
+- **R4+ 에 영향을 주는 실제 발견**: `SceneCard` 의 제목 `input` 은 `onClick` 에서 `stopPropagation` 한다 —
+  따라서 **그 제목 input 을 클릭하면 root 의 `select(sceneId)` 가 호출되지 않는다**. automation 에서 root
+  selection 을 재현할 땐 input 이 아니라 **root/패딩 영역**을 클릭해야 한다. `SceneCard.tsx` 를 다루는
+  R4 가 이 계약을 알고 있어야 한다.
 
 ## 📌 post-v1 CG 종료 / 일반 장면 복귀가 확정한 것 (`#CG끝` — 깨지 말 것)
 > ⚠️ 이 절은 **CG 종료 축**이다(번역 로드맵·의상 UX·줄 삭제·v1 Phase 번호와 같은 축이 아니다).
@@ -892,10 +981,10 @@
 - **TTS(Typecast)는 최후순위로 연기**(2026-08-09) — 실키 검증·Vercel Edge 배포 확인 모두 당분간 안 한다. 코드는 이미 들어와 있으니 재개할 땐 `src/config/aiConfig.ts`·`api/typecast.ts` 부터.
 - **메뉴 아트는 언어별로 만들지 않는다**(2026-08-09) — 글자가 구워진 버튼이 영어·일본어에서도 한글로 남지만 감수. 다국어는 **텍스트 번역 + 폰트 교체**로만 간다(Ren'Py `tl/<언어>/` 이미지 치환은 CLAUDE.md에 방법만 남겨둔다).
 - **store 액션엔 단위 테스트가 없다** — 안전망은 typecheck+e2e뿐이라 협업 push·자동저장 디바운스 같은 경로는 실사용 확인이 필요하다.
-- 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄)·`AssetsTab.tsx`(1338줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기.
+- 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기. ⚠️ **`AssetsTab.tsx` 분리는 R3 에서 완료**됐다(위 📌 R3 절) — 이 목록으로 되돌리지 말 것.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **post-v1 대본 한 줄 삭제 UX — Phase 1(구현·검증)**(⚠️ 아직 커밋 전): 장면 카드 `🗑` 로 대사·지문 한 줄을
-  `window.confirm` 뒤 삭제한다. canonical 은 새 store 액션 `deleteLine` 하나이고 계약·검증은 위 📌 절이 정본.
-  production 변경 4개(`types.ts` 선언 + `scriptSlice.ts` 구현 + `SceneCard.tsx` 버튼·key + `ScenePlayer.tsx` reset deps 1줄) ·
-  신규 테스트 1파일(16 tests) · parser·Ren'Py 생성기·Project schema·persistence·협업 변경 0.
+- **안정화 R 축 — R3(AssetsTab 구조 분리 + Background/BGM 장면 이동)**(⚠️ 아직 커밋 전): `AssetsTab.tsx`
+  1390 → 516줄, 책임별 5파일로 분리 + 배경/BGM 그룹 배지에서 그 에셋을 쓰는 장면으로 이동. 계약·검증은
+  위 📌 R3 절이 정본. **implementation 변경 8파일**(MODIFY 2 · NEW 6) ·
+  store·parser·Preview·persistence·Ren'Py 생성기 변경 0.
