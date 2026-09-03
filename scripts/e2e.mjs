@@ -86,6 +86,74 @@ try {
   assert(true, '캐릭터 스프라이트(업로드) 표시');
   await page.screenshot({ path: join(shotDir, '4-sprites.png'), fullPage: true });
 
+  // 4.6) 배경/BGM 그룹 → 장면 이동(navigation UX 계약)
+  //
+  // ⚠️ production 에 test-only hook 을 넣지 않는다 — 타겟은 실제 UI 의 aria-label 로 지목한다.
+  // ⚠️ 장면 식별을 "제목 → id" 맵으로 만들면 안 된다: 샘플에 **같은 제목의 장면이 둘**("밤,
+  //    상가거리" #2·#5)이라 뒤 항목이 앞을 덮어써 #2 를 잃는다. 순서 있는 레코드로 들고 다닌다.
+  // ⚠️ selected 판정은 visibility 가 아니라 class 다 — 장면 카드는 content-visibility: auto 라
+  //    화면 밖이면 보이지 않지만 DOM·class 는 그대로다. 전체 class 스냅샷은 쓰지 않고
+  //    SceneCard 의 최소 계약(선택 시 border-accent)만 본다.
+  {
+    const onScenesTab = () => page.waitForSelector('div[id^="scene-"]', { timeout: 10000 });
+    const sceneClass = (rec) => page.locator(`[id="${rec.domId}"]`).getAttribute('class');
+    const isSelected = async (rec) => /border-accent/.test((await sceneClass(rec)) ?? '');
+
+    await page.getByRole('button', { name: /^🎬 장면$/ }).click();
+    await onScenesTab();
+    const sceneRecords = await page.$$eval('div[id^="scene-"]', (els) =>
+      els.map((el, i) => ({
+        domId: el.id,
+        ordinal: i + 1,
+        title: el.querySelector('input.field.font-semibold')?.value ?? '',
+      })),
+    );
+    const at = (ordinal) => sceneRecords.find((r) => r.ordinal === ordinal);
+    assert(sceneRecords.length === 5, `navigation: 장면 레코드 5건 수집 (실제 ${sceneRecords.length})`);
+    assert(
+      at(2)?.title === at(5)?.title && at(2)?.domId !== at(5)?.domId,
+      `navigation fixture 전제: #2·#5 가 같은 제목의 다른 장면 (${at(2)?.title} / ${at(5)?.title})`,
+    );
+
+    // setup — 분석 직후엔 1번 장면이 이미 선택돼 있다(scriptSlice: selectedSceneId = scenes[0].id).
+    // 그대로 두면 아래 A(1번 장면 대상)가 "아무 일도 안 해도" 통과한다. 선택을 4번으로 옮겨 둔다.
+    // ⚠️ 카드 가운데를 누르면 안 된다 — 제목 input 이 onClick 에서 stopPropagation 하므로 root 의
+    //    select(sceneId) 가 안 걸린다. p-4 패딩(좌상단)을 눌러 root 가 직접 받게 한다.
+    await page.locator(`[id="${at(4).domId}"]`).click({ position: { x: 5, y: 5 } });
+    await page.waitForTimeout(200);
+    assert(await isSelected(at(4)), 'navigation setup: 선택을 #4 로 옮김(전제 성립)');
+
+    // A) 배경 single-usage — "학교 운동장" 은 #1 한 장면에서만 쓰인다.
+    await page.getByRole('button', { name: /^🎨 에셋$/ }).click();
+    await page.waitForTimeout(300);
+    await page.getByRole('button', { name: /학교 운동장/ }).click();
+    await onScenesTab();
+    assert(true, 'A) 배경 single: 장면 탭으로 전환됨');
+    assert(await isSelected(at(1)), 'A) 배경 single: 대상 #1 SceneCard 가 selected');
+
+    // B) 배경 multiple-usage + 같은 제목 구별 — "네온이 빛나는 상가 거리" 는 #2·#5 가 공유한다.
+    await page.getByRole('button', { name: /^🎨 에셋$/ }).click();
+    await page.waitForTimeout(300);
+    await page
+      .getByRole('combobox', { name: /네온이 빛나는 상가 거리/ })
+      .selectOption({ label: `#5 ${at(5).title}` });
+    await onScenesTab();
+    assert(true, 'B) 배경 multiple: 장면 탭으로 전환됨');
+    assert(await isSelected(at(5)), 'B) 배경 multiple: 고른 #5 SceneCard 가 selected');
+    assert(!(await isSelected(at(1))), 'B) 이동이지 추가가 아님 — 직전 대상 #1 은 selected 해제');
+    assert(!(await isSelected(at(2))), 'B) 같은 제목의 #2 를 잘못 고르지 않음');
+
+    // C) BGM 행 배선 — Background 에서 검증한 matrix 를 반복하지 않고 연결 사실 1건만 고정한다.
+    //    샘플의 city_night 은 #2 한 장면에서만 쓰인다.
+    await page.getByRole('button', { name: /^🎨 에셋$/ }).click();
+    await page.waitForTimeout(300);
+    await page.getByRole('button', { name: /city_night/ }).click();
+    await onScenesTab();
+    assert(true, 'C) BGM single: 장면 탭으로 전환됨');
+    assert(await isSelected(at(2)), 'C) BGM single: 대상 #2 SceneCard 가 selected');
+    await page.screenshot({ path: join(shotDir, '4b-navigation.png'), fullPage: true });
+  }
+
   // 5) Ren'Py 탭 — 스크립트 내용 확인
   await page.getByRole('button', { name: /Ren'Py/ }).click();
   await page.waitForTimeout(300);
