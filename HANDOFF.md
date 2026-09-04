@@ -27,7 +27,7 @@
   - **Expression**: **F-2** 청크 경계를 넘는 연속성 정보 0(러너·`validateEmotionUpdates` 양쪽에 run-local 상태를 흘리는 **설계 변경**) · **F-3** target 수집의 export `optedIn` 비대칭(비용·targeting·UI 노이즈) · 후보 1개뿐인 줄의 호출 생략 · 파서 폐기 건수 미보고 · heuristic negation. **`P16-F2` 시제 denotation 은 backlog 가 아니라 accepted limitation** — ⚠️ **Phase 18/19 에서 prompt tuning 을 재개하지 말 것**(아래 📌 Phase 17).
   - **Outfit**(Phase 14 동결): `P12-59` residual FP · same-input raw emission variability · `N1`/`N4` raw 미출력 은 **accepted limitation**, read-only look-ahead · 실제 제작 대본 기반 품질 측정 · 무시한 제안의 재출현 은 backlog. ⚠️ **blanket boundary suppression**(“window 끝 행은 reject”)·**Phase 11 A 식 suppression 튜닝**·candidate 개수 sparsity prior 를 넣지 말 것.
   - **known limitations**: D3 Export `optedIn` 비대칭 · D5/D6 커스텀 표정·의상 속성 해시 충돌(상세는 PHASES.md Phase 9 절).
-- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 완료 · main 반영 완료**(`b452c1a`, 원격 GitHub Actions PASS). **R1(Domain Dependency 정리) 구현·검증 완료 · GPT implementation review PASS**(`chore/r1-domain-dependency`). **R2(`.npproj.zip` Compatibility Layer) 구현·검증 완료 · GPT implementation review PASS**(구현 `a282154`, `chore/r2-zip-compat`). **R3(AssetsTab 구조 분리 + Background/BGM 장면 이동) 구현·검증 완료 · GPT implementation review PASS**. 계약·실측은 아래 📌 R0·R1·R2·R3 절이 각각 정본이다. ⚠️ **R4 이후는 아직 열지 않았다** — 사용자 지시가 있을 때만 연다.
+- **안정화 리팩토링 R 축** — ⚠️ **v1 Phase 번호 체계·post-v1 축들과 섞지 말 것**(또 다른 별도 축이다). **R0(Regression Gate) 완료 · main 반영 완료**(`b452c1a`, 원격 GitHub Actions PASS). **R1(Domain Dependency 정리) 구현·검증 완료 · GPT implementation review PASS**(`chore/r1-domain-dependency`). **R2(`.npproj.zip` Compatibility Layer) 구현·검증 완료 · GPT implementation review PASS**(구현 `a282154`, `chore/r2-zip-compat`). **R3(AssetsTab 구조 분리 + Background/BGM 장면 이동) 구현·검증 완료 · GPT implementation review PASS**. **R4(SceneCard 구조 분리) 구현·검증 완료 · GPT implementation review PASS**(`chore/r4-scenecard-split`). 계약·실측은 아래 📌 R0·R1·R2·R3·R4 절이 각각 정본이다. ⚠️ **다음 후보는 R5(Line Identity Audit)** 이지만 **아직 열지 않았다** — 설계도 시작하지 않았고 **사용자 지시가 있을 때만** 연다(R5~R8 내용을 R4 문서로 당겨오지 말 것).
 - **live audit 운영 주의**: 리포 안에 평문 키 파일(`key.txt` 류)을 만들지 말 것 — 환경변수로만 주입한다(CLAUDE.md 워크플로우). Phase 13 live 원본은 **`audit.local/phase13/`**(gitignore)에 보존돼 있고 `audit.local/out/` 의 Phase 10 산출물은 무수정이다.
 
 ## 📌 안정화 리팩토링 R 축 — R0(Regression Gate)이 확정한 것
@@ -301,6 +301,85 @@
   따라서 **그 제목 input 을 클릭하면 root 의 `select(sceneId)` 가 호출되지 않는다**. automation 에서 root
   selection 을 재현할 땐 input 이 아니라 **root/패딩 영역**을 클릭해야 한다. `SceneCard.tsx` 를 다루는
   R4 가 이 계약을 알고 있어야 한다.
+
+## 📌 안정화 리팩토링 R 축 — R4(SceneCard 구조 분리)가 확정한 것
+> ⚠️ 이 절은 **안정화 R 축**이다(v1 Phase 번호·번역 로드맵·의상 UX·줄 삭제·CG 종료와 **다른 축**).
+> **implementation 변경은 2파일** — MODIFY `src/components/SceneCard.tsx`, NEW
+> `src/components/SceneLineRow.tsx`. **store·types·parser·project·generators·Ren'Py·tests·scripts 전부 무수정.**
+
+- **성격: behavior-preserving structure refactor 하나뿐이다.** 신규 UX·기능 추가 **0**(R3 처럼 "구조 분리 +
+  새 UX" 두 목표가 아니다 — 그래서 R4 의 검증 기준은 **회귀 0** 이 그대로 성립한다).
+  `SceneCard.tsx` 964줄을 책임 경계 하나에서 잘라 375 + 615줄로 나눴다(LOC 는 참고 수치일 뿐 계약이 아니다).
+- **최종 책임 경계(확정 — 새 범용 버킷을 만들지 말 것)**
+  ```
+  SceneCard.tsx      scene-level data acquisition · scene-level derived state ·
+                     collaboration presence · header/status/selection · background preview ·
+                     metadata editing · scene-level outfit controls ·
+                     scene-wide AI outfit suggestion controls · line-list orchestration ·
+                     scene summary(CG/choice/jumpTo) · footer upload/approve
+  SceneLineRow.tsx   special line marker rendering(CG/item/BGM) · dialogue/narration editing ·
+                     translation QA rendering/dismiss · voice UI · per-line hide state ·
+                     per-line outfit state · CG-end insertion · emotion picker · line deletion ·
+                     LineRow 전용 private helpers
+  ```
+  **public boundary 는 `SceneCard → SceneLineRow` 의 `LineRow` 단방향 import 하나뿐**이다 —
+  경계를 넘는 심볼이 그것 하나이고, **callback passthrough 0 · 새 context/framework 0**.
+  ⚠️ 두 파일을 다시 합치거나 `SceneCardSections.tsx` 류 범용 버킷으로 재분할하지 말 것.
+- **parent / child ownership (이동 0 — 이게 계약이다)**
+  ```
+  LineRow props 11개 유지(인터페이스 변경 0)
+    sceneId · index · line · scene                    = line identity / render context
+    charMap · effHidden · outfitChars ·
+    outfitFlagsByChar · cgFlags · suggestions ·
+    qaIssues                                          = parent 가 카드 단위로 계산·그룹핑해
+                                                        줄에 배분하는 **기존** derived 값
+  ```
+  ⚠️ **`SceneCard` 의 `useMemo` derived 계산은 하나도 옮기지 않았다**(줄마다 store 구독·resolver
+  재실행을 없앤 기존 성능 구조 그대로). ⚠️ **`LineRow` local state `editing`/`voiceOpen`/`outfitOpen`
+  ownership 유지** · 줄 단위 store action 은 예전처럼 **line 계층이 직접 구독**한다.
+  **새 store action / State 필드 = 0.**
+- **R3 frozen DOM/navigation contract 보존 — 5개 전부 `SceneCard` parent 영역에 남고 무수정**
+  ```
+  root id            = `scene-${sceneId}`
+  root click         → selectScene(sceneId)
+  selected card      = border-accent
+  scroll-mt-4 anchor 유지
+  제목 input onClick   stopPropagation 유지
+  ```
+  (그래서 R3 의 asset → scene navigation·e2e 계약이 그대로 성립한다.)
+- ⚠️ **R5 전달 계약 — R4 는 line identity 를 해결하지 않았다.**
+  ```
+  key={`${scene.lines.length}:${i}`}  그대로 유지 (호출 지점이 parent 라 파일 이동과 무관)
+  그 key workaround 의 semantic 도 그대로 유지
+  ```
+  **`Line.id` · UUID · stable key helper · line migration · delete/insert identity redesign 은
+  하지 않았다.** **line identity audit 은 R5 scope** 다.
+- **behavior contract — canonical store/domain semantics 변경 0.** QA · CG · outfit · hide · voice ·
+  emotion · delete 전부 그대로다(판정의 단일 소스가 store·`types/project.ts`·generators 에 있고
+  그 파일들을 **수정하지 않았다**). **`LineRow` 내부 local state 와 조건 semantic 은 "이동만" 했다** —
+  `manualOutfitWritable` · `canInsertCgEnd` · CG/item/BGM early-return 순서 ·
+  `VoiceLab` 의 `sceneId`/`lineIndex` · `LineEmotion` 의 resolve precedence 와 수동 deps 전부 무변경.
+- **compatibility — 전부 영향 없음**
+  ```
+  Project/Scene/Line schema 변경 0 · parser 영향 0 · Preview(ScenePlayer) 영향 0
+  save/load/localStorage 영향 0 · .npproj.zip / R2 import boundary 영향 0
+  asset refs 영향 0 · Ren'Py export 영향 0 · store responsibility 변경 0
+  ```
+  R1 의 "project/store/UI 는 `renpy/generate.ts` 를 import 하지 않는다" 규칙도 유지된다
+  (신규 `SceneLineRow.tsx` 역시 **`renpy/generate.ts` import 0**). ⚠️ R1 규칙은 `generators/**`
+  **전체** 금지가 아니다 — `SceneLineRow.tsx` 는 `generators/emotion/resolve`(값)와
+  `generators/outfit`·`generators/translate/qa`(타입)를 **기존 그대로** import 한다.
+- **검증 실측(전 게이트 PASS)**
+  - `npm run typecheck` **PASS** · `npm run typecheck:tests` **PASS**
+  - `npm run test` **69파일 / 1105 tests / 실패 0**(R3 baseline 과 동일 — 테스트 증감 0, 신규 test 0)
+  - `npm run check` **PASS** · `npm run check:full` **PASS**(scratch Vite build → self-hosted preview →
+    **e2e 전체 통과**)
+  - **Ren'Py dump pre/post 23구성 / 256파일 · recursive diff 0**
+  - **golden tracked 변경 0** · ⚠️ **`golden:update` 미실행**
+  - `git diff --check` **clean**
+- **이동의 성질(리뷰가 확인한 사실)**: 이동 블록을 원본과 byte 비교했을 때 **바뀐 줄은
+  `function LineRow({` → `export default function LineRow({` 하나뿐**이고, **parent 잔류 구역은
+  완전히 동일**하다. 신규 모듈 상단 docblock 만 새로 썼다.
 
 ## 📌 post-v1 CG 종료 / 일반 장면 복귀가 확정한 것 (`#CG끝` — 깨지 말 것)
 > ⚠️ 이 절은 **CG 종료 축**이다(번역 로드맵·의상 UX·줄 삭제·v1 Phase 번호와 같은 축이 아니다).
@@ -981,10 +1060,10 @@
 - **TTS(Typecast)는 최후순위로 연기**(2026-08-09) — 실키 검증·Vercel Edge 배포 확인 모두 당분간 안 한다. 코드는 이미 들어와 있으니 재개할 땐 `src/config/aiConfig.ts`·`api/typecast.ts` 부터.
 - **메뉴 아트는 언어별로 만들지 않는다**(2026-08-09) — 글자가 구워진 버튼이 영어·일본어에서도 한글로 남지만 감수. 다국어는 **텍스트 번역 + 폰트 교체**로만 간다(Ren'Py `tl/<언어>/` 이미지 치환은 CLAUDE.md에 방법만 남겨둔다).
 - **store 액션엔 단위 테스트가 없다** — 안전망은 typecheck+e2e뿐이라 협업 push·자동저장 디바운스 같은 경로는 실사용 확인이 필요하다.
-- 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기. ⚠️ **`AssetsTab.tsx` 분리는 R3 에서 완료**됐다(위 📌 R3 절) — 이 목록으로 되돌리지 말 것.
+- 미착수(계속 의도적으로 뺌): 탭 컴포넌트 코드 스플리팅, `screensRpy.ts`(3484줄) 분리(생성기 쪽은 `.rpy` 회귀 0 덤프 대조가 필요한 별개 작업), store 슬라이스 안의 긴 로직(autoTranslateAll·보이스 배치)을 services 로 빼기. ⚠️ **`AssetsTab.tsx` 분리는 R3 에서, `SceneCard.tsx` 분리는 R4 에서 완료**됐다(위 📌 R3·R4 절) — 이 목록으로 되돌리지 말 것.
 
 ## ✅ 방금 반영됨 (다음 세션에서 git log 확인 후 이 줄들 삭제)
-- **안정화 R 축 — R3(AssetsTab 구조 분리 + Background/BGM 장면 이동)**(⚠️ 아직 커밋 전): `AssetsTab.tsx`
-  1390 → 516줄, 책임별 5파일로 분리 + 배경/BGM 그룹 배지에서 그 에셋을 쓰는 장면으로 이동. 계약·검증은
-  위 📌 R3 절이 정본. **implementation 변경 8파일**(MODIFY 2 · NEW 6) ·
-  store·parser·Preview·persistence·Ren'Py 생성기 변경 0.
+- **안정화 R 축 — R4(SceneCard 구조 분리)**(⚠️ 아직 커밋 전): `SceneCard.tsx` 964 → 375줄, 줄 편집
+  서브시스템 전체를 `SceneLineRow.tsx`(615줄)로 분리. 계약·검증은 위 📌 R4 절이 정본.
+  **implementation 변경 2파일**(MODIFY 1 · NEW 1) · behavior-preserving(신규 UX 0) ·
+  store·types·parser·Preview·persistence·Ren'Py 생성기·tests·scripts 변경 0.
