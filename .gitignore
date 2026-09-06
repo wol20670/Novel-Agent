@@ -19,7 +19,11 @@ e2e-shots/
 *.iam.gserviceaccount.com.json
 
 # 로컬 참고 자료(레포에 안 올림 — 예: NovelAI API PDF). 필요하면 개별 보관.
-docs/
+# ⚠️ git 규칙상 부모 디렉터리가 제외되면 자식을 다시 포함할 수 없다 —
+#    그래서 `docs/` 가 아니라 `docs/*` 여야 아래 negation 이 동작한다.
+docs/*
+!docs/contracts/
+!docs/history/
 
 # 게임 대본 원본(창작물 — 공개 레포에 올리지 않음)
 scenario/
