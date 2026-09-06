@@ -15,7 +15,9 @@ SessionStart hook 은 **읽기만** 하고 파일을 고치지 않는다.
    (커밋 메시지·해시로). **반영된 줄만 삭제**한다.
    ⚠️ 아직 커밋 전인 항목은 **지우지 않는다** — "아직 커밋 전"이라고 쓰여 있어도
    git log 를 직접 확인해서 판단한다(문구를 믿지 않는다).
-2. **`현재 상태` 갱신** — 브랜치 · 직전 확정 작업 1줄 · 진행 중인 작업.
+2. **`현재 상태` 갱신** — 직전 확정 작업 1줄 · 진행 중인 작업.
+   **active work 중에는 브랜치를 적어도 된다.** 다만 `branch`/`HEAD` 는 **git 이 authority** 이므로
+   영구 current-state 정보처럼 중복 저장하지 않는다(지금 필요할 때만).
 3. **`🎯 다음 할 일` 갱신** — 지금 열린 작업과 다음 action 만. 없으면 **"없다"라고 명시**한다.
    ⚠️ 서술하지 말 것 — 이력은 git log 와 `docs/history/` 가 보존한다.
 4. **`🚧 Active blockers` 갱신** — 없으면 "없음".
@@ -27,6 +29,19 @@ SessionStart hook 은 **읽기만** 하고 파일을 고치지 않는다.
    있으면 **보고만 한다**: "이건 `docs/contracts/<X>.md` 로 옮겨야 한다" 라고 알리고
    ⚠️ **임의로 옮기지 않는다**(정본 이동은 사람 판단이다).
 7. **링크 유효성 확인** — `docs/contracts/` · `docs/history/` 링크가 살아 있는지.
+
+## ⚠️ phase/work close finalization 에서 추가로 할 것
+
+`/phase-workflow` 의 **8단계(docs finalization)** 에서 불릴 때는 아래를 지킨다 —
+**최종 push 뒤에 tracked HANDOFF mutation 이 남지 않게** 하는 게 목적이다.
+
+- **곧 stale 해질 transient 문구를 제거한다**: `uncommitted` · `commit pending` · `push pending` ·
+  `아직 커밋 전` · `COMMIT·PUSH GO 대기` 류. 이 시점 HANDOFF 는 **commit 대상**이라
+  그대로 두면 push 되는 순간 사실과 어긋난다.
+- 남길 것은 **최신 완료 작업 + 아직 열린 작업 + 다음 action** 중심이다.
+- 진행 중 상태를 꼭 적어야 하면 **`…review/correction 단계` 처럼 단계 이름**으로 적고,
+  commit SHA·push 여부 같은 **git 이 가진 사실을 복제하지 않는다.**
+- ⚠️ **close 단계에서는 이 skill 을 다시 돌리지 않는다**(그러면 push 뒤 dirty tree 가 된다).
 
 ## STOP conditions
 

@@ -5,20 +5,19 @@
 > 현재 지켜야 할 계약은 [`docs/contracts/`](./docs/contracts/ai-workflows.md) 가 정본이고,
 > **history 는 그것을 override 하지 못한다.** (세션 상태는 `HANDOFF.md`, 상시 규칙은 `CLAUDE.md`.)
 
-## 작업 루프 (사용자 확정, 2026-08-11)
+## 작업 루프 — 정본은 `/phase-workflow`
+
+> **이 문서는 Phase 결과 index 다.** Phase lifecycle 과 승인 게이트의 **canonical 은 `/phase-workflow`** 하나이고,
+> 여기에는 high-level pointer 만 둔다(같은 절차를 두 곳에 두면 어긋난다).
 
 ```
-Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
-  → 사용자가 GPT 에 계획 전달 → GPT 검토·수정 지시
-  → Claude 가 수정안을 "구현 가능성" 관점에서 재검토(동의 아니면 근거를 대고 반박)
-  → 승인되면 Claude 구현 + 테스트
-  → 결과(diff 요약·테스트)를 사용자가 GPT 에 전달 → GPT 검토 → Phase N 확정
-  → **확정된 코드 상태를 기준으로** Phase N+1 프롬프트를 새로 작성 → 반복
+Plan → GPT 검토 → IMPLEMENTATION GO → 구현 → actual diff review → COMMIT·PUSH GO
 ```
 
-- Phase 프롬프트는 **한 번에 하나만 유효**하다. 다음 Phase를 미리 구현하지 않는다.
-- Claude는 GPT 리뷰를 무조건 수용하지 않는다 — 이 리포의 실제 코드와 어긋나면 근거(파일·줄)를 들어 알린다.
-- Phase가 확정되면 **아래 로그에 한 줄 추가 + 커밋 해시 기록**. 새 세션은 이 파일로 문맥을 복구한다.
+- Phase 프롬프트는 **한 번에 하나만 유효**하다. 다음 Phase 를 미리 구현하지 않는다.
+- Claude 는 GPT 리뷰를 무조건 수용하지 않는다 — 리포의 실제 코드와 어긋나면 근거(파일·줄)를 들어 알린다.
+- **승인 게이트를 스스로 넘지 말 것.** 확정되면 아래 로그에 한 줄 + 커밋 해시를 남긴다.
+- 2026-08-11 확정 당시의 루프 원문 → [`v1-ai-phases.md`](./docs/history/v1-ai-phases.md#phases-planinput) 상단 P00 블록.
 
 ## Phase 로그
 
@@ -57,22 +56,22 @@ Phase N 프롬프트(사용자) → Claude Plan Mode 로 계획 작성
 - ⚠️ **동결된 것**: Expression AI(Phase 18, baseline `931a2cc`) · Outfit AI(Phase 14).
   재튜닝 금지 목록은 [ai-workflows.md](./docs/contracts/ai-workflows.md) §5 가 정본이다.
 
-## 계획 입력: 지금 코드에 이미 있는 것 (재발명 금지)
+## 계획 입력 — 현재 계약은 여기서 읽는다
 
-**표정 파이프라인은 이미 존재한다.** LLM 배정도 들어와 있다.
-- 판정 단일 소스 `resolveEmotion`(`src/generators/emotion/resolve.ts`) — **동기·순수**여야 한다(ScenePlayer·SceneCard가 렌더 중 호출). 우선순위 = 작가 태그 `Line.emotion` > AI `Line.emotionAuto` > 휴리스틱(`infer.ts`) > `기본`.
-- 그래서 AI 값은 **렌더 시점 조회가 아니라 미리 계산해 Line에 저장**하는 구조다. 새 추론도 이 계약을 따라야 한다.
-- 배치 실행 `autoAssignEmotionAll`(`src/store/aiBatchSlice.ts`) + `aiSelect.ts` + 비용 견적 `estimate.ts`. 증분(이미 채운 줄은 재호출 안 함)·busy 키·진행률·PACE·단일 커밋 구조를 공유한다.
-- 후보 집합이 **두 종류**다: AI가 고를 수 있는 건 `availableExpressions`(실제 업로드된 것만), 최종 검증은 `effectiveExpressions`(선언 목록). 같게 만들면 "업로드 전 임시 실루엣" 워크플로가 죽는다.
+> ⚠️ **"지금 코드에 이미 있는 것"을 이 문서에 다시 서술하지 않는다** — 중복 서술은 곧 stale 해진다.
+> 계획 전에 아래 정본을 직접 열 것.
 
-**복장은 규칙 기반뿐 — LLM 추론이 없다(여기가 빈자리).**
-- `resolveOutfit`(`src/types/project.ts`): 장면 직접 지정 `Scene.outfits[charName]` > `OutfitRule`(배경 이름 부분 일치, 긴 키워드 우선) > `기본`.
-- 표정처럼 "AI 값 전용 필드 + 사람 값 우선"이라는 대칭 구조가 아직 없다.
+| 알아야 할 것 | 정본 |
+|---|---|
+| Expression / Outfit / Translation 현재 계약 · 재튜닝 금지 목록 | [`docs/contracts/ai-workflows.md`](./docs/contracts/ai-workflows.md) |
+| Scene / Line identity(R5 입력) · CG · 수동 편집 | [`docs/contracts/scene-editor.md`](./docs/contracts/scene-editor.md) |
+| persistence · schema 5경로 · 협업 | [`docs/contracts/project-compat.md`](./docs/contracts/project-compat.md) |
+| Ren'Py 출력 · golden · 검증 절차 | [`docs/contracts/renpy-export.md`](./docs/contracts/renpy-export.md) |
+| 역사적 planning input(2026-08-11 시점 snapshot) | [`v1-ai-phases.md#phases-planinput`](./docs/history/v1-ai-phases.md#phases-planinput) |
 
-**⚠️ `Line` 에는 stable id 가 없다.** 원인·구조·R5 scope 선언의 정본은
-[`docs/contracts/scene-editor.md#line-identity`](./docs/contracts/scene-editor.md#line-identity) 다.
-**새 필드를 `Line`/`Scene`/`Project` 에 추가할 때 따라오는 5경로**는
-[`docs/contracts/project-compat.md`](./docs/contracts/project-compat.md) §새 필드 추가 가 정본이다.
+⚠️ 마지막 줄은 **그때의 사실**이다 — 현재 계약을 override 하지 못한다.
+(예: 그 snapshot 의 Outfit 축 서술은 Phase 7 구현 · Phase 14 동결로 이미 낡았다 —
+현재 Outfit AI 는 production 에 있다.)
 
 ## 매 Phase 체크리스트
 

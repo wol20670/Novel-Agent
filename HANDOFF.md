@@ -7,8 +7,9 @@
 
 ## 현재 상태
 
-- 브랜치 `chore/pre-r5-housekeeping` — **Pre-R5 Workflow/Docs Housekeeping** 진행 중(H1~H4, uncommitted).
+- 브랜치 `chore/pre-r5-housekeeping` — **Pre-R5 Workflow/Docs Housekeeping** 이 **final review/correction 단계**다.
   ⚠️ 이건 **안정화 R 축의 Phase 가 아니다**(R4.5 같은 번호를 붙이지 않는다).
+  `main` 병합은 아직 하지 않았다 — GPT 재리뷰 뒤 사용자 지시로만 한다.
 - 직전 확정: **안정화 R4(SceneCard 구조 분리)** — `6dffbba`(구현) · `047cc7d`(문서), main 반영 완료.
 - v1 동결값(역사적 고정): **implementation baseline `931a2cc`** · **repository checkpoint `5902dc8`**.
 
@@ -17,8 +18,8 @@
 - **정해진 다음 필수 작업은 없다.** ⚠️ **새 blocker 가 없는 한 Phase 20+ 를 만들지 말 것** —
   backlog 가 존재한다는 사실만으로 Phase 를 추가하지 않는다. "종료"의 뜻은 *영원히 완성*이 아니라
   **현재 계획된 v1 핵심 개발의 종료**다.
-- **Pre-R5 Housekeeping**: H4 + 전체 verification 완료 → `/review-artifact` → `preflight-reviewer` →
-  **GPT actual diff review 대기**. ⚠️ **COMMIT·PUSH GO 전까지 commit/push 금지**이고 commit shape 도 아직 정하지 않았다.
+- **Pre-R5 Housekeeping**: feature branch 에 반영돼 GitHub 에서 **GPT 재리뷰 대기** 중이다.
+  ⚠️ **`main` 병합·push 는 사용자 지시 전까지 금지.** 남은 것은 리뷰 결과 반영뿐이다.
 - **다음 후보는 R5(Line Identity Audit)** 이지만 **아직 열지 않았다** — 설계도 시작하지 않았고
   **사용자 지시가 있을 때만** 연다. 입력 정본은
   [scene-editor.md#line-identity](./docs/contracts/scene-editor.md#line-identity).
@@ -51,4 +52,5 @@
 
 ## ✅ 방금 반영됨 (`/handoff-maintain` 이 git log 와 대조해 반영된 줄을 지운다)
 
-- (없음 — Pre-R5 Housekeeping 은 아직 커밋 전이다.)
+- **Pre-R5 Workflow/Docs Housekeeping** — root 문서 compaction + `docs/contracts` 4 · `docs/history` 3 ·
+  `.claude` rule 4 / skill 4 / agent 2. production 변경 0.

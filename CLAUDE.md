@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 > 🔵 **세션 시작 시 [`HANDOFF.md`](./HANDOFF.md) 먼저 확인** — 짧은 살아있는 상태 문서. 정리는 `/handoff-maintain` 으로 한다.
-> 🟣 **Phase 작업 루프와 Phase 결과 index 는 [`PHASES.md`](./PHASES.md)**, 상세 이력은 [`docs/history/`](./docs/history/v1-ai-phases.md).
+> 🟣 **Phase 결과 index 는 [`PHASES.md`](./PHASES.md)**, Phase lifecycle·승인 게이트는 `/phase-workflow`, 상세 이력은 [`docs/history/`](./docs/history/v1-ai-phases.md).
 > 🟢 **확정된 계약의 정본은 [`docs/contracts/`](./docs/contracts/project-compat.md)** — 아래 §문서 인덱스 표를 보고 필요한 것만 열 것.
 
 Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite + React + TS + zustand + Tailwind). BYO 키, 한국어 코드베이스.
@@ -84,8 +84,9 @@ Novel-Agent — 오프라인 Ren'Py 비주얼노벨 제작 보조 웹앱 (Vite +
 - **병합·브랜치 정리는 자동**(사용자 명시 요청, 2026-07-11): 커밋·푸시가 이미 승인된 브랜치는 typecheck(+가능하면 test) 통과 상태면 다시 묻지 않고 `main` fast-forward 병합 → push → 로컬·원격 브랜치 삭제. **ff 불가(충돌)·검증 실패면** 자동 진행하지 말고 확인. 끝나면 요약 보고.
 - **live API 키를 리포 안 평문 파일로 두지 말 것**(`key.txt` 류) — 실측 audit 이 필요하면 **환경변수로만** 주입하고(`OPENAI_API_KEY`), 값은 로그·리포트·artifact 어디에도 남기지 않는다(harness 는 `Authorization` 헤더를 기록하지 않는다). 부득이 파일을 쓴다면 리포 **밖**에 두고 실행 직후 삭제.
 - **HANDOFF.md 인수인계**(삭제 금지·짧게 유지): 정리는 **`/handoff-maintain` 을 명시적으로 호출**해서 한다 — SessionStart 는 읽기만 하고 파일을 고치지 않는다. 작업 끝엔 완료분 1줄을 `✅`에, 남은·새 일을 `🎯`에 갱신(서술 금지 — 이력은 git log).
-- Phase 작업 루프(Plan → GPT 검토 → IMPLEMENTATION GO → 구현 → actual diff review → COMMIT·PUSH GO)는
-  [`PHASES.md`](./PHASES.md) §작업 루프와 `/phase-workflow` 가 정본이다. **승인 게이트를 스스로 넘지 말 것.**
+- Phase 작업 루프(Plan → GPT 검토 → IMPLEMENTATION GO → 구현 → actual diff review → COMMIT·PUSH GO)에서
+  **Phase 결과 index 는 [`PHASES.md`](./PHASES.md)**, **Phase lifecycle 과 승인 게이트의 정본은 `/phase-workflow`** 다
+  (절차를 두 곳에 두지 않는다). **승인 게이트를 스스로 넘지 말 것.**
 
 ## 사용 가능한 skill · agent
 

@@ -26,16 +26,27 @@ Claude 는 스스로 게이트를 통과했다고 선언하지 않는다.
         ↓  사용자가 GPT 에 전달
 7. GPT actual diff review
         ↓  ★ 사용자의 "IMPLEMENTATION PASS"
-8. docs finalization (HANDOFF · contract · history 갱신)
+8. docs finalization — **/handoff-maintain 을 여기서 돌린다** (HANDOFF · contract · history 갱신)
 9. /review-artifact 다시 (docs 포함 full working-tree diff)
         ↓  ★ 사용자의 "FINAL DIFF PASS"
         ↓  ★ 사용자의 "COMMIT · PUSH GO"
 10. commit shape 결정 → commit → push → remote CI 확인
-11. close (HANDOFF 의 ✅/🎯 갱신은 /handoff-maintain)
+11. close — **파일을 고치지 않는다.** working tree clean · branch · remote 상태만 확인
 ```
 
 ★ 표시된 **네 지점**(IMPLEMENTATION GO · IMPLEMENTATION PASS · FINAL DIFF PASS · COMMIT·PUSH GO)은
 **사용자 문장이 없으면 다음 단계로 가지 않는다.**
+
+### ⚠️ invariant — 최종 push 뒤 tracked HANDOFF mutation 을 남기지 않는다
+
+- **`/handoff-maintain` 은 8단계(docs finalization)에서 돈다.** close 에서 HANDOFF 를 고치면
+  push 뒤 dirty tree 가 되거나(A) **push 된 HANDOFF 가 stale 해진다**(B). 둘 다 금지다.
+- 9단계 final review artifact 에는 **최종 HANDOFF 도 포함**되고, 10단계 commit 대상에 그 HANDOFF 가 들어간다.
+- finalization 용 HANDOFF 에 `uncommitted` · `commit pending` · `push pending` 처럼
+  **즉시 stale 해지는 transient 표현을 남기지 않는다.**
+- **branch/HEAD 는 git 이 authority 다** — 영구 current-state 정보처럼 HANDOFF 에 중복 저장하지 않는다
+  (진행 중 작업에서 잠시 필요할 때만 적는다).
+- ⚠️ 이걸 위해 **새 git automation·hook 을 만들지 않는다.** SessionStart 는 read-only 그대로다.
 
 ## STOP conditions (하나라도 해당하면 멈추고 보고한다)
 

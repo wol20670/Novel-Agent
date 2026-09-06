@@ -17,8 +17,10 @@ paths:
   공유 액션에 `silent` 플래그·toast 큐를 만들지 않는다.
 - **CG 판정 둘을 합치지 말 것**: 수동 `👗`·`🖼끝` 은 `cgActiveFlags[index]`(per-line 상태),
   Outfit **AI** cutoff 는 `getFirstEffectiveCgIndex`(최초 경계)다.
-- **범용 `insertLine` 을 만들지 말 것.** 삭제·삽입은 `dialogue`/`narration` 만 허용하고
-  `item`/`cg`/`bgm` 은 상태 전이 semantics 라 제외다.
+- **범용 `insertLine` 을 만들지 말 것.** `deleteLine` 의 **삭제 대상 줄**과 `insertCgEndAfterLine` 의
+  **anchor 줄**은 `dialogue`/`narration` 만 허용한다(`item`/`cg`/`bgm` 은 상태 전이 semantics 라 제외).
+  ⚠️ 이건 **대상/anchor 줄의 kind 제한**이지 "`cg` kind 를 삽입할 수 없다"는 뜻이 아니다 —
+  `insertCgEndAfterLine` 이 실제로 넣는 것은 canonical CG 종료 마커 `{ kind: 'cg', desc: '', end: true }` 다.
 - 의상 값의 쓰기는 `setLineOutfit` 하나뿐 — **수동 전용 state·mutation·레코드 직접 조립 금지.**
   이미 있는 값의 해제(`✕`)는 CG 경계와 무관하게 허용한다.
 - **async 커밋은 좌표가 아니라 request-time anchor 로 한다**(음성·번역·표정).
@@ -34,7 +36,10 @@ paths:
   **새 navigation store/action/router 를 만들지 않는다.**
 - `SceneCard` ↔ `SceneLineRow` 의 public boundary 는 `LineRow` 단방향 import 하나다.
   두 파일을 다시 합치거나 범용 버킷으로 재분할하지 말 것. `LineRow` props 11개·derived 계산 위치 유지.
-- **UI/component 에서 `src/renpy/generate.ts` 를 직접 import 하지 말 것**(R1 cross-path guard).
-  canonical rationale/contract → [`docs/contracts/project-compat.md`](../../docs/contracts/project-compat.md)
+- **UI/component 가 shared domain rule·shared file rule 을 얻으려고 `src/renpy/generate.ts` 를
+  import 하지 말 것**(R1 cross-path guard). ⚠️ **R1 에서 확정된 의도적 component dependency 인
+  `ScenePlayer`(Preview/Export parity — `arrangePositions`·`attrFor`·`selectSprite`·`spriteSlots`)와
+  `RenpyTab`(`generateRenpyFiles`)은 예외이며 정리 대상이 아니다** — 걷어내거나 facade 로 감싸지 말 것.
+  정확한 rationale·잔류 목록 → [`docs/contracts/project-compat.md`](../../docs/contracts/project-compat.md)
 
 **상세·근거 → [`docs/contracts/scene-editor.md`](../../docs/contracts/scene-editor.md)**
