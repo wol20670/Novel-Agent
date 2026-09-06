@@ -35,13 +35,20 @@ SessionStart hook 은 **읽기만** 하고 파일을 고치지 않는다.
 `/phase-workflow` 의 **8단계(docs finalization)** 에서 불릴 때는 아래를 지킨다 —
 **최종 push 뒤에 tracked HANDOFF mutation 이 남지 않게** 하는 게 목적이다.
 
-- **곧 stale 해질 transient 문구를 제거한다**: `uncommitted` · `commit pending` · `push pending` ·
-  `아직 커밋 전` · `COMMIT·PUSH GO 대기` 류. 이 시점 HANDOFF 는 **commit 대상**이라
-  그대로 두면 push 되는 순간 사실과 어긋난다.
-- 남길 것은 **최신 완료 작업 + 아직 열린 작업 + 다음 action** 중심이다.
-- 진행 중 상태를 꼭 적어야 하면 **`…review/correction 단계` 처럼 단계 이름**으로 적고,
-  commit SHA·push 여부 같은 **git 이 가진 사실을 복제하지 않는다.**
+**finalization mode 의 원칙: post-close stable state 를 미리 작성한다.**
+최종 commit·push·`main` 병합이 **끝난 뒤에도 그대로 참일** project-state wording 만 남긴다.
+
+- **transport state 를 쓰지 않는다** — 브랜치 이름 · `HEAD` · commit SHA ·
+  `review 대기` · `merge 대기` · `push 대기` · `uncommitted` · `commit pending` · `아직 커밋 전` ·
+  `COMMIT·PUSH GO 대기` 류. 이 시점 HANDOFF 는 **commit 대상**이라 그대로 두면
+  push·병합 되는 순간 사실과 어긋난다.
+- 진행 단계 이름(`review/correction 단계` 같은 것)도 **finalization 에서는 쓰지 않는다** —
+  그것도 병합되면 곧 거짓이 된다.
+- 남길 것은 **완료된 작업의 결과 상태 + 아직 열린 작업 + 다음 action** 이다.
 - ⚠️ **close 단계에서는 이 skill 을 다시 돌리지 않는다**(그러면 push 뒤 dirty tree 가 된다).
+
+⚠️ 위는 **finalization mode 한정**이다 — active work 중의 일반 호출에서는
+절차 2번대로 브랜치를 일시적으로 적어도 된다.
 
 ## STOP conditions
 

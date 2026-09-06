@@ -17,7 +17,7 @@ Plan → GPT 검토 → IMPLEMENTATION GO → 구현 → actual diff review → 
 - Phase 프롬프트는 **한 번에 하나만 유효**하다. 다음 Phase 를 미리 구현하지 않는다.
 - Claude 는 GPT 리뷰를 무조건 수용하지 않는다 — 리포의 실제 코드와 어긋나면 근거(파일·줄)를 들어 알린다.
 - **승인 게이트를 스스로 넘지 말 것.** 확정되면 아래 로그에 한 줄 + 커밋 해시를 남긴다.
-- 2026-08-11 확정 당시의 루프 원문 → [`v1-ai-phases.md`](./docs/history/v1-ai-phases.md#phases-planinput) 상단 P00 블록.
+- 2026-08-11 확정 당시의 루프 원문 → [`v1-ai-phases.md#phases-head`](./docs/history/v1-ai-phases.md#phases-head) (P00 블록).
 
 ## Phase 로그
 

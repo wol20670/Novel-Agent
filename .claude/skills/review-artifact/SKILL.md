@@ -48,6 +48,32 @@ disable-model-invocation: true
 - manifest 의 changed-file list 에 있는 파일이 **어느 part 에도 없으면 artifact 는 미완성**이다 —
   그 상태로 리뷰에 넘기지 않는다.
 
+### coverage 는 "언급"이 아니라 "payload" 로 센다
+
+manifest 에 경로가 **적혀 있다는 것만으로 coverage 를 충족했다고 세지 말 것.**
+changed path 하나하나가 아래 둘 중 **하나를 실제로** 갖고 있어야 한다:
+
+1. unified diff 안의 **그 파일 patch**, 또는
+2. **신규 파일 full-content 섹션**
+
+⚠️ **manifest 의 목록 행 자체는 payload 가 아니다.**
+
+### incomplete sentinel (artifact 생성기 전용)
+
+- 정상 artifact 에는 **이 sentinel 이 절대 없어야 한다**:
+
+  ```
+  <!-- NA-ARTIFACT-INCOMPLETE -->
+  ```
+
+- 뜻은 하나뿐이다 — **"생성기가 full diff / full file payload 를 끝까지 담지 못했다."**
+- **truncation 은 여전히 금지다.** multipart 로도 완성할 수 없는 상황에서만,
+  **part1 의 manifest/헤더 영역**에 이 sentinel 을 넣고 **incomplete 라고 보고한 뒤 STOP** 한다.
+  그 artifact 를 **review-ready 라고 하지 않는다.**
+- ⚠️ **sentinel 은 part1 헤더 영역에서만 유효**하다. 이 SKILL 파일 자체가 changed file 로
+  artifact 에 실릴 수 있어서, **파일 payload 안에 문자열이 보이는 것은 신호가 아니다**
+  (NA-PROV 마커와 같은 자기참조 함정이다).
+
 ## STOP conditions
 
 - repo 안에 쓰려는 상황 → 멈춘다.
@@ -55,4 +81,5 @@ disable-model-invocation: true
   값이 아니라 "환경변수로 주입했다"는 사실만 적는다.
 - diff 가 비어 있는데 artifact 를 만들려는 상황 → 그 사실을 보고하고 만들지 않는다.
 - **전문을 다 넣을 수 없어 자르고 싶어지는 상황 → 자르지 말고 multipart 로 분할한다.**
-  분할해도 담지 못하는 파일이 남으면 그 사실을 보고하고 **완성됐다고 하지 않는다.**
+  분할해도 담지 못하는 파일이 남으면 **part1 헤더에 incomplete sentinel 을 넣고**
+  그 사실을 보고한 뒤 STOP 한다 — **완성됐다고 하지 않는다.**

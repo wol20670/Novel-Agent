@@ -25,9 +25,28 @@ artifact 경로가 없으면 "제공되지 않았다"고 보고하고 멈춘다.
 - **manifest 가 있으면 거기 적힌 part 를 전부 `Read` 한다.** 일부만 읽고 판정하지 않는다.
 - manifest 의 **changed-file list 가 모두 어느 part 엔가 실려 있는지** 대조한다.
   어느 part 에도 없는 파일이 있으면 그 자체가 `문제` 다.
-- artifact 안에 `truncated` · `payload omitted` · `생략` · `이하 생략` · `…(중략)` 처럼
-  **actual diff / 신규 파일 전문의 completeness 를 깨는 표시**가 있으면 `문제` 로 판정하고,
-  **승인성 결론("PASS"·"넘겨도 된다")을 내리지 않는다.**
+- **incomplete sentinel** — **part1 의 manifest/헤더 영역**에 아래 문자열이 **정확히** 있으면
+  `문제` 로 판정하고 **승인성 결론("PASS"·"넘겨도 된다")을 내리지 않는다**:
+
+  ```
+  <!-- NA-ARTIFACT-INCOMPLETE -->
+  ```
+
+- ⚠️ **generic 단어로 실패시키지 말 것.** `생략` · `truncated` · `payload omitted` · `이하 생략` 같은
+  일반 문자열이 **diff / 파일 payload 안에** 있다는 이유만으로 incomplete 로 판정하지 않는다 —
+  정본 문서·production 코드의 정상 내용에도 그런 단어가 있다
+  (예: `docs/contracts/scene-editor.md` 의 "스크롤만 생략된다").
+- ⚠️ sentinel 도 **파일 payload 안에 보이는 것은 신호가 아니다** — `/review-artifact` SKILL 자체가
+  changed file 로 실리면 문자열이 그대로 딸려 온다. **part1 헤더 영역**만 본다.
+
+### coverage 는 "언급"이 아니라 "payload" 로 센다
+
+- manifest 에 경로가 **적혀 있다는 것만으로 coverage 를 충족했다고 세지 않는다.**
+- changed path 하나하나가 어느 part 엔가 아래 둘 중 **하나를 실제로** 갖고 있어야 한다:
+  1. unified diff 안의 **그 파일 patch**, 또는
+  2. **신규 파일 full-content 섹션**
+- ⚠️ **manifest 의 목록 행 자체는 actual payload coverage 로 세지 않는다.**
+  payload 가 없는 경로가 있으면 `문제` 다(structural completeness 검사는 계속한다).
 - **part 를 하나라도 못 읽으면** 그 사실을 "확인 못 함" 으로 적고 **거기서 멈춘다**(STOP).
   못 읽은 part 를 추측으로 메우지 않는다.
 
@@ -45,8 +64,9 @@ docs/contracts/project-compat.md · scene-editor.md · renpy-export.md · ai-wor
 
 ## 보고 항목 (이 순서로)
 
-0. **artifact completeness** — 모든 part 를 읽었는가, changed-file 이 전부 실려 있는가,
-   truncation 표시가 없는가. ⚠️ 여기가 `문제` 면 **아래 항목의 결론을 승인성으로 쓰지 않는다.**
+0. **artifact completeness** — 모든 part 를 읽었는가, changed path 마다 **실제 payload**
+   (파일 patch 또는 신규 파일 full-content)가 있는가, **part1 헤더에 incomplete sentinel 이 없는가**.
+   ⚠️ generic 단어 탐지로 판정하지 않는다. 여기가 `문제` 면 **아래 항목의 결론을 승인성으로 쓰지 않는다.**
 1. **changed file scope** — artifact 의 변경 목록이 선언된 scope 안인가.
    금지 경로(`src/**`·`tests/**`·`scripts/**`·`package*.json` 등)에 tracked 변경이나
    **untracked 신규 파일**이 있는가.
