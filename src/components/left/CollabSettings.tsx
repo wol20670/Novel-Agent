@@ -4,9 +4,13 @@ import { hasEnvCredentials, generateRoomCode } from '../../collab';
 import Spinner from '../Spinner';
 
 /**
- * 협업(실시간 공유) 설정 — Supabase 접속 정보는 빌드에 내장돼 있어(anon key는 공개돼도 되는 값),
- * 사용자는 "방 코드"(6자리)와 이름만 다룬다. 새 방을 만들면 코드가 자동 생성되고, 친구는 그
+ * 협업(실시간 공유) 설정 — Supabase 접속 정보는 빌드에 내장돼 있어(publishable key는 공개돼도 되는
+ * 값), 사용자는 "방 코드"(6자리)와 이름만 다룬다. 새 방을 만들면 코드가 자동 생성되고, 친구는 그
  * 코드를 그대로 입력해 참가한다.
+ *
+ * S1-B: 협업은 **로그인한 상태에서만** 켤 수 있다. 다만 UI 의 disabled 는 게이트가 아니다 —
+ * 실제 게이트는 store 의 setCollabConfig(→ enableCollabIfAuthenticated)가 Auth API 로 확인한다.
+ * local-only 사용자에게는 여기서 인증 경로로 돌아가는 escape route 를 제공한다(로컬 대본은 보존).
  */
 export default function CollabSettings() {
   const enabled = useStore((s) => s.collabEnabled);
@@ -15,12 +19,19 @@ export default function CollabSettings() {
   const status = useStore((s) => s.collabStatus);
   const peers = useStore((s) => s.collabPeers);
   const setCollabConfig = useStore((s) => s.setCollabConfig);
+  const authPhase = useStore((s) => s.authPhase);
+  const authEmail = useStore((s) => s.authEmail);
+  const authError = useStore((s) => s.authError);
+  const authBusy = useStore((s) => s.authBusy);
+  const leaveLocalOnly = useStore((s) => s.leaveLocalOnly);
+  const signOut = useStore((s) => s.signOut);
 
   const [name, setName] = useState(storedName);
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const envReady = hasEnvCredentials();
+  const authed = authPhase === 'authed';
 
   // hydrate() 가 앱 시작 시 비동기로 저장된 설정을 불러오므로, 그 값이 들어오면 이름칸도 맞춘다.
   useEffect(() => {
@@ -74,6 +85,24 @@ export default function CollabSettings() {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  // ── local-only: 인증 경로로 돌아가는 유일한 진입점 ──
+  // ⚠️ 로컬 프로젝트와 IndexedDB 에셋은 그대로 보존된다(store 를 건드리지 않는다).
+  // ⚠️ persisted 협업 intent(na_collab_enabled)도 지우지 않는다 — 로그인하면 자동 재접속에 쓰인다.
+  if (authPhase === 'local-only') {
+    return (
+      <section className="flex flex-col gap-2">
+        <h2 className="section-title">🤝 협업(실시간 공유) · 선택</h2>
+        <p className="text-[11px] text-gray-500 leading-snug">
+          지금은 <b className="text-gray-400">로컬 전용</b>으로 쓰고 있습니다. 협업을 쓰려면 로그인하세요 —
+          지금까지 작업한 대본과 에셋은 그대로 남습니다.
+        </p>
+        <button className="btn-primary" onClick={() => void leaveLocalOnly()}>
+          🔐 로그인 / 협업 사용하기
+        </button>
+      </section>
+    );
+  }
+
   return (
     <section className="flex flex-col gap-2">
       <h2 className="section-title">🤝 협업(실시간 공유) · 선택</h2>
@@ -83,6 +112,16 @@ export default function CollabSettings() {
         아는 사람은 누구나 읽고 쓸 수 있으니</b> 신뢰하는 사람과만 공유하세요.
       </p>
 
+      {authed && (
+        <div className="flex items-center gap-2 text-[10px] text-gray-500">
+          <span className="chip border-emerald-500/40 text-emerald-600 truncate">🔐 {authEmail ?? '로그인됨'}</span>
+          <button className="btn-ghost text-xs shrink-0 ml-auto" disabled={authBusy} onClick={() => void signOut()}>
+            {authBusy ? <Spinner /> : '로그아웃'}
+          </button>
+        </div>
+      )}
+      {authError && <p className="text-[11px] text-rose-500 leading-snug">⚠️ {authError}</p>}
+
       {!enabled ? (
         <>
           <input
@@ -91,7 +130,7 @@ export default function CollabSettings() {
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-          <button className="btn-primary" disabled={busy || !envReady} onClick={createRoom}>
+          <button className="btn-primary" disabled={busy || !envReady || !authed} onClick={createRoom}>
             {busy ? <Spinner /> : '🆕 새 방 만들기'}
           </button>
           <div className="relative flex items-center gap-2 text-[10px] text-gray-600 my-0.5">
@@ -107,7 +146,11 @@ export default function CollabSettings() {
               onChange={(e) => setJoinCode(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && joinRoom()}
             />
-            <button className="btn-ghost" disabled={busy || !envReady || !joinCode.trim()} onClick={joinRoom}>
+            <button
+              className="btn-ghost"
+              disabled={busy || !envReady || !authed || !joinCode.trim()}
+              onClick={joinRoom}
+            >
               참가
             </button>
           </div>
@@ -115,6 +158,9 @@ export default function CollabSettings() {
             <p className="text-[11px] text-amber-600">
               ⚠️ 이 빌드엔 협업용 Supabase 접속 정보가 설정돼 있지 않습니다(배포 시 환경변수 필요).
             </p>
+          )}
+          {envReady && !authed && (
+            <p className="text-[11px] text-amber-600">⚠️ 협업을 사용하려면 먼저 로그인하세요.</p>
           )}
         </>
       ) : (

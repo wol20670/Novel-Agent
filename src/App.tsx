@@ -5,6 +5,8 @@ import CenterPanel from './components/CenterPanel';
 import RightPanel from './components/RightPanel';
 import Stepper from './components/Stepper';
 import CollabBadge from './components/CollabBadge';
+import StartGate from './components/StartGate';
+import PasswordSetup from './components/PasswordSetup';
 
 const TOAST_STYLE: Record<string, string> = {
   info: 'bg-accent2 text-white',
@@ -15,6 +17,8 @@ const TOAST_ICON: Record<string, string> = { info: 'ℹ', success: '✓', error:
 
 export default function App() {
   const hydrate = useStore((s) => s.hydrate);
+  const bootAuth = useStore((s) => s.bootAuth);
+  const authPhase = useStore((s) => s.authPhase);
   const toast = useStore((s) => s.toast);
   const toastType = useStore((s) => s.toastType);
   // 전체 project 객체 대신 실제로 쓰는 파생값(개수)만 구독 — project 안의 무관한 필드(제목·장면
@@ -24,10 +28,24 @@ export default function App() {
   const approved = useStore((s) => s.project.scenes.filter((sc) => sc.status === 'approved').length);
   const openaiKey = useStore((s) => s.openaiKey);
 
+  // ⚠️ 로컬 프로젝트 hydrate 는 **인증 상태와 무관하게 항상** 수행한다 — 오프라인 제작 툴이므로
+  //    로그인 확인 때문에 내 대본 복원이 막히면 안 된다. bootAuth 는 그와 독립적으로 부팅 라우팅만
+  //    결정하고(동시 호출은 in-flight dedupe 로 1회), StrictMode 의 이중 실행에도 안전하다.
   useEffect(() => {
     hydrate();
-  }, [hydrate]);
+    void bootAuth();
+  }, [hydrate, bootAuth]);
 
+  if (authPhase === 'booting') {
+    return (
+      <div className="h-full flex items-center justify-center text-xs text-gray-500">불러오는 중…</div>
+    );
+  }
+  // auth-unavailable(콜백을 처리할 수 없음)도 StartGate 가 사유를 표시하고 로컬 전용 선택지를 준다.
+  if (authPhase === 'login' || authPhase === 'auth-unavailable') return <StartGate />;
+  if (authPhase === 'password-setup') return <PasswordSetup />;
+
+  // 'local-only' | 'authed' — 에디터는 두 경우 모두 동일하다(협업 UI 만 좌패널에서 갈린다).
   return (
     <div className="h-full flex flex-col">
       <header className="flex items-center gap-3 px-4 h-12 border-b border-edge bg-panel shrink-0">

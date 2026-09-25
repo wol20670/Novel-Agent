@@ -27,6 +27,18 @@ import type { AnalyzeMode } from '../project/mergeScenes';
 import type { VoiceEstimate } from '../generators/voice/estimate';
 import type { CollabStatus, PeerPresence } from '../collab';
 
+/**
+ * 부팅 라우팅 상태(S1-B). callback URL 처리는 na_local_only 보다 **우선**한다.
+ *  · booting           — 아직 판정 전
+ *  · local-only        — 로그인 없이 로컬 전용(Supabase import·network 0)
+ *  · login             — StartGate(로그인 폼 + '로컬 전용으로 계속')
+ *  · password-setup    — invite 로 들어온 계정의 비밀번호 설정
+ *  · authed            — 인증 완료(에디터)
+ *  · auth-unavailable  — callback URL 인데 이 빌드에 Supabase env 가 없어 처리 불가.
+ *                        ⚠️ 조용히 local-only 로 떨어지지 않는다 — 사용자에게 보여준다.
+ */
+export type AuthPhase = 'booting' | 'local-only' | 'login' | 'password-setup' | 'authed' | 'auth-unavailable';
+
 export type StoreSet = StoreApi<State>['setState'];
 export type StoreGet = () => State;
 
@@ -423,10 +435,15 @@ export interface State {
   setTypecastKey: (key: string) => void;
 
   /**
-   * 협업(실시간 공유, 가벼운 버전) — 2인 전제. Supabase 접속 정보(URL·anon key)는 빌드에
+   * 협업(실시간 공유, 가벼운 버전) — 2인 전제. Supabase 접속 정보(URL·publishable key)는 빌드에
    * 내장되어 있어 사용자는 "방 코드"(6자리)와 이름만 다룬다. ⚠️ 보안 경계 아님: 방 코드를 아는
    * 사람은 누구나 읽고 쓸 수 있다. 저장 시점(자동저장)마다 전체 프로젝트가 동기화되고, 같은
    * 순간 서로 다른 값을 저장하면 나중 저장이 이긴다(last-write-wins) — 프레즌스로 충돌을 피한다.
+   */
+  /**
+   * ⚠️ **runtime truth 가 아니라 UI mirror 다**(S1-B). collab runtime 의 유일한 truth 는
+   * collab 모듈의 module-scope active(isCollabActive())이고, persisted na_collab_enabled 는
+   * user intent 다. 이 값은 runtime 결과를 따라가며, 부팅 시엔 항상 false 로 시작한다.
    */
   collabEnabled: boolean;
   collabRoom: string;
@@ -435,6 +452,32 @@ export interface State {
   /** 지금 같은 방에 있는 상대방들(나 자신 제외, 저장 대상 아님). */
   collabPeers: PeerPresence[];
   setCollabConfig: (patch: Partial<{ room: string; displayName: string; enabled: boolean }>) => Promise<void>;
+
+  /**
+   * Supabase Auth(email/password) 부팅 상태 — S1-B. 계정은 Dashboard invite 로만 만들어지고
+   * public signup UI 는 없다. 미인증 사용자도 'local-only' 로 앱 전체를 쓸 수 있다(오프라인 툴).
+   * ⚠️ 여기에 access/refresh token 이나 session 객체를 보관하지 않는다 — 표시용 email 뿐이다.
+   *   session 의 source of truth 는 언제나 Supabase Auth API 다.
+   */
+  authPhase: AuthPhase;
+  /** 표시용 로그인 이메일(토큰 아님). */
+  authEmail: string | null;
+  /** 사용자에게 보여줄 인증 오류(로그인 실패·만료된 invite 링크 등). */
+  authError: string | null;
+  authBusy: boolean;
+  /**
+   * 부팅 state machine 을 (재)평가한다. **동시에 실행 중인 호출만 dedupe** 하고 settle 후엔
+   * in-flight 를 비운다 — local-only 에서 빠져나올 때 다시 평가돼야 하기 때문이다.
+   */
+  bootAuth: () => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  /** invite 로 받은 계정의 비밀번호 설정 완료. */
+  completePasswordSetup: (password: string) => Promise<void>;
+  /** 로그인하지 않고 로컬 전용으로 계속한다(na_local_only 저장). */
+  enterLocalOnly: () => void;
+  /** local-only 를 벗어나 로그인/협업 경로로 돌아간다(local Project 는 보존). */
+  leaveLocalOnly: () => Promise<void>;
 
   save: () => void;
   hydrate: () => void;

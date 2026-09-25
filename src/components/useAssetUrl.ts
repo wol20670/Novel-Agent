@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getAsset, subscribeAssetChange } from '../storage/assetStore';
-import { isCollabReady } from '../collab/supabaseClient';
+import { isCollabActive } from '../collab/supabaseClient';
 import { ensureAsset } from '../collab';
 
 // assetId → object URL 공유 캐시(ref-count). 예전엔 마운트마다 getAsset+createObjectURL 을 새로
@@ -137,8 +137,10 @@ subscribeAssetChange((ids) => {
 });
 
 /**
- * 로컬(IndexedDB)을 먼저 본다 — 협업이 꺼져 있으면(기본값) 여기서 끝나고 네트워크 경로를 아예
- * 타지 않는다. isCollabReady()는 순수 동기 설정값 체크라 supabase-js 를 끌고 오지 않는다.
+ * 로컬(IndexedDB)을 먼저 본다 — 협업 runtime 이 꺼져 있으면(기본값·로그아웃·local-only) 여기서
+ * 끝나고 네트워크 경로를 아예 타지 않는다. isCollabActive()는 순수 동기 체크라 supabase-js 를 끌고
+ * 오지 않는다. ⚠️ isCollabReady() 를 쓰지 말 것 — 그건 persisted intent(config.enabled)를 포함해
+ * signed-out 상태에서도 true 일 수 있다(S1-B).
  * 무거운 supabase-js 는 getSupabaseClient() 안의 동적 import 한 곳에서만 로드된다(별도 청크) —
  * ensureAsset 자체는 여기서 정적 import 해도 초기 번들에 supabase-js 가 딸려오지 않는다.
  * (여길 동적 import 로 두면 vite 가 "collab/index.ts 는 store.ts·LeftPanel.tsx 가 이미 정적으로
@@ -147,7 +149,7 @@ subscribeAssetChange((ids) => {
 async function loadAssetBlob(id: string): Promise<Blob | undefined> {
   const local = await getAsset(id);
   if (local) return local;
-  if (!isCollabReady()) return undefined;
+  if (!isCollabActive()) return undefined;
   return ensureAsset(id);
 }
 

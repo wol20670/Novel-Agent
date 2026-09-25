@@ -11,7 +11,6 @@ import {
   syncProjectToFolder,
 } from '../project/folderSync';
 import {
-  startCollab,
   loadCollabConfig,
   pushProject as collabPushProject,
   pushAsset as collabPushAsset,
@@ -32,7 +31,7 @@ export const createPersistenceSlice: SliceCreator<
     | 'disconnectFolder'
   >
 > = (set, get, ctx) => {
-  const { flash, collabHooks } = ctx;
+  const { flash } = ctx;
   return {
     save: () => {
       const { project, assets } = get();
@@ -70,14 +69,17 @@ export const createPersistenceSlice: SliceCreator<
       getConnectedFolderName().then((name) => {
         if (name) set({ folderName: name });
       });
-      // 협업 설정 복원 — 켜져 있었다면 자동으로 재접속.
+      // 협업 설정(방·이름·intent) 복원. ⚠️ 여기서 startCollab 을 부르지 않는다 —
+      // persisted na_collab_enabled 는 runtime truth 가 아니라 **user intent** 이고, 그것만으로
+      // 네트워크를 시작하면 signed-out 상태에서 원격 접속이 나간다(S1-B). 자동 재접속은
+      // authSlice.bootAuth() 가 Auth API 로 session 을 확인한 뒤에만 수행한다.
+      // store.collabEnabled 는 runtime mirror 라 부팅 시엔 항상 false 로 시작한다.
       const collab = loadCollabConfig();
       set({
-        collabEnabled: collab.enabled,
+        collabEnabled: false,
         collabRoom: collab.room,
         collabName: collab.displayName,
       });
-      if (collab.enabled) void startCollab(collabHooks());
     },
 
     resetAll: () => {

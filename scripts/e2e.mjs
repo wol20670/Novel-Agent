@@ -46,6 +46,13 @@ page.on('pageerror', (e) => log('  [pageerror]', e.message));
 
 try {
   await page.goto(BASE, { waitUntil: 'networkidle' });
+
+  // 0) StartGate(S1-B) — 로그인하지 않고 로컬 전용으로 계속한다.
+  //
+  // ⚠️ 이 빌드에는 Supabase 환경변수가 없어(리포에 .env 가 없다) 로그인 UI 는 비활성이지만,
+  //    env 부재를 "자동 local-only 진입 조건"으로 만들지 않는 것이 S1-B 계약이라 관문은 항상 뜬다.
+  //    아래 클릭이 na_local_only 를 세우고, 이후 새로고침(7단계)에서도 그대로 유지된다.
+  await page.getByRole('button', { name: '로컬 전용으로 계속' }).click();
   assert(await page.getByText('Novel-Agent').first().isVisible(), '앱 로드(헤더 표시)');
 
   // 1) 샘플 → 분석
@@ -152,6 +159,42 @@ try {
     assert(true, 'C) BGM single: 장면 탭으로 전환됨');
     assert(await isSelected(at(2)), 'C) BGM single: 대상 #2 SceneCard 가 selected');
     await page.screenshot({ path: join(shotDir, '4b-navigation.png'), fullPage: true });
+  }
+
+  // 4.7) local-only escape route 왕복(S1-B) — 로컬 전용 ↔ StartGate 를 오가도 로컬 데이터가 남는가.
+  //
+  // ⚠️ **반드시 non-empty 상태에서 본다.** 장면 0 → 0 은 아무것도 증명하지 않는다. 이 자리는
+  //    3·4·4.5 단계에서 배경·BGM·스프라이트 blob 까지 올린 뒤라 "대본 + 에셋"이 모두 검증된다.
+  //    그래서 기존 시나리오 순서를 재배치하지 않고 이 지점에 삽입만 한다.
+  {
+    const titleOf = () => page.locator('input.field.font-semibold').first().inputValue();
+    const beforeScenes = await page.locator('input.field.font-semibold').count();
+    const beforeBlobs = await page.locator('img[src^="blob:"]').count();
+    const beforeTitle = await titleOf();
+    assert(beforeScenes === 5 && beforeBlobs > 0, `왕복 전제: 장면 ${beforeScenes} · blob 이미지 ${beforeBlobs}`);
+
+    // 로컬 전용 → "🔐 로그인 / 협업 사용하기" → StartGate 로 복귀
+    await page.getByRole('button', { name: /로그인 \/ 협업 사용하기/ }).click();
+    await page.getByRole('button', { name: '로컬 전용으로 계속' }).waitFor({ timeout: 10000 });
+    assert(true, '4.7) escape route: StartGate 로 복귀');
+
+    // 다시 로컬 전용으로 → 에디터 복귀
+    await page.getByRole('button', { name: '로컬 전용으로 계속' }).click();
+    await page.waitForSelector('div[id^="scene-"]', { timeout: 10000 });
+    const afterScenes = await page.locator('input.field.font-semibold').count();
+    // ⚠️ blob 개수를 곧바로 세면 안 된다 — 에디터가 다시 마운트되면 useAssetUrl 이 IndexedDB 를 읽어
+    //    object URL 을 **비동기로** 다시 만든다. 즉시 세면 3개 중 1개만 잡혀 거짓 실패가 난다(실제로 겪음).
+    //    4.5 단계와 같은 방식으로 기대 개수가 회복될 때까지 기다린다.
+    await page.waitForFunction(
+      (n) => document.querySelectorAll('img[src^="blob:"]').length >= n,
+      beforeBlobs,
+      { timeout: 20000 },
+    );
+    const afterBlobs = await page.locator('img[src^="blob:"]').count();
+    assert(afterScenes === beforeScenes, `4.7) 왕복 후 장면 보존 (${beforeScenes} → ${afterScenes})`);
+    assert(afterBlobs === beforeBlobs, `4.7) 왕복 후 에셋 blob 보존 (${beforeBlobs} → ${afterBlobs})`);
+    assert((await titleOf()) === beforeTitle, `4.7) 왕복 후 첫 장면 제목 보존 ("${beforeTitle}")`);
+    await page.screenshot({ path: join(shotDir, '4c-escape-route.png'), fullPage: true });
   }
 
   // 5) Ren'Py 탭 — 스크립트 내용 확인

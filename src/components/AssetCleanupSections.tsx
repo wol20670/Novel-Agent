@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useStore } from '../store';
 import Spinner from './Spinner';
 import OrphanCleanupModal from './OrphanCleanupModal';
-import { isCollabReady } from '../collab';
+import { isCollabActive } from '../collab';
 import { REMOTE_GRACE_OPTIONS } from '../assetRefs';
 import type { OrphanAsset } from '../types';
 
@@ -68,17 +68,18 @@ export function CleanupSection() {
  * 버킷에도 올리고 거기선 절대 지우지 않는다 — 그래서 버킷이 계속 자란다. 이 섹션이 그 원격 사본을
  * 쓸어내는 두 번째, 더 위험한 스윕이다: 여기 뜨는 파일은 협업 상대와 "공유"하는 서버 파일이고,
  * 지우면 상대에게도 되돌릴 수 없다. 그래서 로컬 정리와 달리 기본 선택을 비워 두고(defaultSelected
- * false) 사용자가 직접 고르게 한다. 협업이 꺼져 있으면(isCollabReady() false) 버킷 자체가 없는
- * 얘기라 섹션을 아예 렌더하지 않는다.
+ * false) 사용자가 직접 고르게 한다. 협업 runtime 이 꺼져 있으면(isCollabActive() false — 기본값·
+ * 로그아웃·local-only 포함) 버킷 자체가 없는 얘기라 섹션을 아예 렌더하지 않는다.
  */
 export function RemoteCleanupSection() {
   const findRemoteOrphanAssets = useStore((s) => s.findRemoteOrphanAssets);
   const deleteRemoteOrphanAssets = useStore((s) => s.deleteRemoteOrphanAssets);
   const setToast = useStore((s) => s.setToast);
-  // isCollabReady() 는 모듈 전역 collabConfig 를 읽는 동기 함수라 그것만 보면 협업을 켠 뒤에도
+  // isCollabActive() 는 모듈 전역 상태를 읽는 동기 함수라 그것만 보면 협업을 켠 뒤에도
   // 이 컴포넌트가 다시 그려질 이유가 없어 섹션이 안 나타난다(탭을 나갔다 와야 보인다). 스토어의
-  // collabEnabled 를 같이 구독해 리렌더 트리거를 만든다 — 판정 자체는 방 코드·환경변수까지 보는
-  // isCollabReady() 가 맡는다(collabEnabled 만으론 방 코드가 비어도 true 라 부족).
+  // collabEnabled 를 같이 구독해 리렌더 트리거를 만든다 — 판정 자체는 runtime active·방 코드·
+  // 환경변수까지 보는 isCollabActive() 가 맡는다(collabEnabled 만으론 방 코드가 비어도 true 라 부족).
+  // ⚠️ isCollabReady() 로 되돌리지 말 것 — persisted intent 를 포함해 signed-out 에서도 true 다(S1-B).
   const collabEnabled = useStore((s) => s.collabEnabled);
   const [orphans, setOrphans] = useState<OrphanAsset[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -87,7 +88,7 @@ export function RemoteCleanupSection() {
   const [graceId, setGraceId] = useState<(typeof REMOTE_GRACE_OPTIONS)[number]['id']>('7d');
   const grace = REMOTE_GRACE_OPTIONS.find((o) => o.id === graceId) ?? REMOTE_GRACE_OPTIONS[0];
 
-  if (!collabEnabled || !isCollabReady()) return null;
+  if (!collabEnabled || !isCollabActive()) return null;
 
   const openModal = async () => {
     setLoading(true);

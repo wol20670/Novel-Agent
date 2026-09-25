@@ -1,8 +1,13 @@
 // "지금 누가 뭘 보고 있는지" — Supabase Realtime Presence. 저장·푸시 대상이 아닌 휘발성 정보라
 // sync.ts(프로젝트 JSON)와 완전히 분리된 별도 채널을 쓴다.
+//
+// ── S1-B(Auth) continuation barrier ──
+// 로그아웃은 runtime active 를 동기적으로 닫지만 delayed teardown(stopCollab) 전 한 tick 동안
+// 이미 붙어 있는 채널의 콜백과 throttle 타이머가 살아 있다. 그래서 세 지점에서 active 를 다시 본다:
+// ① presence 'sync' 콜백 진입 ② subscribe status 콜백의 track ③ updatePresence 타이머의 track.
 
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { getSupabaseClient, roomKey } from './supabaseClient';
+import { getCollabClient, isCollabActive, roomKey } from './supabaseClient';
 
 export interface PeerPresence {
   clientId: string;
@@ -42,13 +47,15 @@ export async function startPresence(
   self: Omit<PeerPresence, 'clientId'>,
   onPeers: (peers: PeerPresence[]) => void,
 ): Promise<() => void> {
-  const supabase = await getSupabaseClient();
+  const supabase = await getCollabClient();
   const room = roomKey();
   if (!supabase || !room) return () => {};
   const id = ensureClientId();
   const ch = supabase.channel(`presence:${room}`, { config: { presence: { key: id } } });
   channel = ch;
   ch.on('presence', { event: 'sync' }, () => {
+    // 로그아웃 직후 큐에 남아 있던 sync 이벤트가 store 의 collabPeers 를 다시 채우지 못하게 한다.
+    if (!isCollabActive()) return;
     const state = ch.presenceState<Omit<PeerPresence, 'clientId'>>();
     const peers: PeerPresence[] = [];
     for (const key of Object.keys(state)) {
@@ -59,7 +66,8 @@ export async function startPresence(
     onPeers(peers);
   });
   ch.subscribe((status) => {
-    if (status === 'SUBSCRIBED') void ch.track(self);
+    // SUBSCRIBED 라도 이미 로그아웃됐으면 내 존재를 방송하지 않는다(signed-out 상태의 유령 접속자 방지).
+    if (status === 'SUBSCRIBED' && isCollabActive()) void ch.track(self);
   });
   return () => {
     if (trackTimer) clearTimeout(trackTimer);
@@ -74,6 +82,8 @@ export function updatePresence(self: Omit<PeerPresence, 'clientId'>): void {
   const ch = channel;
   if (trackTimer) clearTimeout(trackTimer);
   trackTimer = setTimeout(() => {
+    // 1초 뒤에 실행되므로 그 사이 로그아웃됐을 수 있다 — 발화 시점에 다시 확인한다.
+    if (!isCollabActive()) return;
     void ch.track(self);
   }, 1000);
 }

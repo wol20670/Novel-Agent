@@ -12,6 +12,7 @@ import { createAssetSlice } from './assetSlice';
 import { createMenuGuiSlice } from './menuGuiSlice';
 import { createVoiceSlice } from './voiceSlice';
 import { createCollabSlice } from './collabSlice';
+import { createAuthSlice } from './authSlice';
 import { createPersistenceSlice } from './persistenceSlice';
 
 export const useStore = create<State>((set, get) => {
@@ -27,6 +28,11 @@ export const useStore = create<State>((set, get) => {
     collabName: '',
     collabStatus: 'off',
     collabPeers: [],
+    // Auth(S1-B) — 부팅 라우팅은 App.tsx 가 authPhase 로 한다. token/session 은 여기 두지 않는다.
+    authPhase: 'booting',
+    authEmail: null,
+    authError: null,
+    authBusy: false,
     activeTab: 'scenes',
     selectedSceneId: null,
     busy: {},
@@ -56,6 +62,7 @@ export const useStore = create<State>((set, get) => {
     ...createMenuGuiSlice(set, get, ctx),
     ...createVoiceSlice(set, get, ctx),
     ...createCollabSlice(set, get, ctx),
+    ...createAuthSlice(set, get, ctx),
     ...createPersistenceSlice(set, get, ctx),
   };
 });

@@ -3,7 +3,7 @@ import type { Expression, OrphanAsset } from '../types';
 import { applyAssetToGroup, clearAssetFromGroup } from '../project/sceneAssets';
 import { deleteAssets, getAllAssetKeys, getAssetInfos } from '../storage/assetStore';
 import { collectReferencedAssetIds, diffOrphanIds, diffRemoteOrphans, DEFAULT_REMOTE_GRACE_MS } from '../assetRefs';
-import { isCollabReady, listRemoteAssets, collectRemoteReferencedIds, removeRemoteAssets } from '../collab';
+import { isCollabActive, listRemoteAssets, collectRemoteReferencedIds, removeRemoteAssets } from '../collab';
 import type { State } from './types';
 import type { SliceCreator } from './context';
 import { describeNames, safeFileName, withSpriteAsset } from './helpers';
@@ -469,7 +469,7 @@ export const createAssetSlice: SliceCreator<
     },
 
     findRemoteOrphanAssets: async (graceMs) => {
-      if (!isCollabReady()) return [];
+      if (!isCollabActive()) return [];
       const [remote, remoteReferenced] = await Promise.all([listRemoteAssets(), collectRemoteReferencedIds()]);
       // fail-closed — 목록이든 참조든 조회가 하나라도 실패하면 스윕을 아예 접는다. 특히 참조 조회가
       // 실패했는데 그냥 진행하면 참조 집합이 비어 **원격 파일 전부가 고아로 보이고**, 사용자가 상대방

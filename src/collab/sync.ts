@@ -9,9 +9,15 @@
 // 원격을 반영할 때는 withApplyingRemoteGuard 로 감싸 store 의 반영 경로가 다시
 // autoSave→pushProject 를 트리거하지 않도록 한다(무한 루프 방지, 실제 가드는 store.ts/index.ts
 // 쪽에서 이 플래그를 확인해서 건다).
+//
+// ── S1-B(Auth) continuation barrier ──
+// 클라이언트는 getCollabClient() 로만 얻는다(auth 게이트). 그리고 로그아웃은 runtime active 를
+// **동기적으로** 닫지만 이미 열린 Realtime 채널과 이미 시작된 await 는 한 tick 더 살아 있으므로,
+// ① 구독 콜백 진입 시 ② 요청 await 완료 후 부수효과 직전에 isCollabActive() 를 다시 확인한다.
+// (이미 서버로 나간 요청을 취소하는 시스템은 만들지 않는다 — 취소 대신 "후속 상태 변경을 안 한다".)
 
 import type { Project } from '../types';
-import { getSupabaseClient, getCollabConfig, roomKey } from './supabaseClient';
+import { getCollabClient, getCollabConfig, isCollabActive, roomKey } from './supabaseClient';
 
 interface RemoteProjectPayload {
   data: Project;
@@ -43,10 +49,10 @@ export function setPushStatusHandler(handler: PushStatusHandler | null): void {
   pushStatusHandler = handler;
 }
 
-/** 로컬 프로젝트를 원격에 반영(upsert). collab 미준비/원격 적용 중이면 조용히 아무 것도 안 한다. */
+/** 로컬 프로젝트를 원격에 반영(upsert). collab 미활성/원격 적용 중이면 조용히 아무 것도 안 한다. */
 export async function pushProject(project: Project): Promise<void> {
   if (applyingRemote) return;
-  const supabase = await getSupabaseClient();
+  const supabase = await getCollabClient();
   const room = roomKey();
   if (!supabase || !room) return;
   const nextVersion = localVersion + 1;
@@ -59,6 +65,9 @@ export async function pushProject(project: Project): Promise<void> {
     updated_at: new Date().toISOString(),
     client_id: clientId,
   });
+  // 요청이 나간 뒤 로그아웃됐다면 후속 상태 변경을 만들지 않는다 — 안 그러면 뱃지가 'off' 에서
+  // 다시 'online'/'error' 로 살아나고 localVersion 도 조용히 전진한다.
+  if (!isCollabActive()) return;
   if (error) {
     console.warn('[collab] 프로젝트 동기화 실패(다음 저장 때 재시도됨):', error.message);
     pushStatusHandler?.('error');
@@ -73,9 +82,12 @@ export async function pushProject(project: Project): Promise<void> {
  * 정상 반환하지만, 네트워크·인증 등 진짜 오류는 throw 한다 — 여기서 조용히 삼키면(구 버전 버그)
  * "연결 실패"인데도 상태가 "연결됨"으로 잘못 표시된다(startCollab 의 try/catch 가 이 throw 를
  * 잡아 collabStatus 를 'error' 로 세팅한다).
+ *
+ * ⚠️ 여기엔 post-await active 가드를 두지 않는다 — 결과를 소비하기 **전에** startCollab 이 이미
+ *    isCollabActive() 를 재확인하므로(collab/index.ts) 같은 검사를 두 벌로 만들지 않는다.
  */
 export async function pullProjectOnce(): Promise<RemoteProjectPayload | null> {
-  const supabase = await getSupabaseClient();
+  const supabase = await getCollabClient();
   const room = roomKey();
   if (!supabase || !room) return null;
   const { data, error } = await supabase
@@ -90,7 +102,7 @@ export async function pullProjectOnce(): Promise<RemoteProjectPayload | null> {
 
 /** 원격 변경 구독. 자기 에코·오래된 이벤트는 걸러내고, 진짜 새 변경만 onRemote 로 넘긴다. */
 export async function subscribeProject(onRemote: (payload: RemoteProjectPayload) => void): Promise<() => void> {
-  const supabase = await getSupabaseClient();
+  const supabase = await getCollabClient();
   const room = roomKey();
   if (!supabase || !room) return () => {};
   const channel = supabase
@@ -99,6 +111,10 @@ export async function subscribeProject(onRemote: (payload: RemoteProjectPayload)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'projects', filter: `room=eq.${room}` },
       (payload) => {
+        // 로그아웃 직후 delayed removeChannel(collab/index.ts stopCollab) 이 실행되기 전 한 tick 동안
+        // 이미 큐에 있던 이벤트가 도착할 수 있다. 그걸 반영하면 signed-out 상태에서 store 의 project
+        // 가 원격 값으로 덮이므로, 여기서 **가장 먼저** 끊는다(markApplied·뱃지·적용 전부 생략).
+        if (!isCollabActive()) return;
         const row = (payload.new ?? payload.old) as
           | { data: Project; version: number; updated_by: string | null; client_id: string | null }
           | undefined;

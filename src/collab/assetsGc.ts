@@ -3,8 +3,16 @@
 // 방을 나가거나 로컬에서 지운 뒤에도 영원히 커진다 — 이 모듈이 그 스윕을 담당한다.
 // findOrphanAssets/deleteOrphanAssets(store.ts, IndexedDB 대상)와 이름이 비슷하지만 대상이 다르다:
 // 여긴 "다른 방 포함 전체 Storage 버킷 vs 모든 방의 프로젝트 JSON 이 참조하는 id" 를 비교한다.
+//
+// ── S1-B(Auth) continuation barrier ──
+// 이 모듈은 **destructive delete** 까지 있어 로그아웃 경계가 특히 중요하다. 클라이언트를 함수
+// 시작에서 한 번 얻은 뒤 pagination/delete 루프에서 계속 재사용하므로, getCollabClient() 하나로는
+// "로그아웃 이후에 다음 request 가 새로 나가는 것"을 막지 못한다. 그래서 루프의 매 request 전후로
+// isCollabActive() 를 확인하고, **스캔 도중 닫히면 partial 결과를 성공으로 돌려주지 않는다**
+// (failed:true → 호출부가 스윕을 중단한다. 아래 RemoteScan 주석의 fail-closed 계약과 같은 이유다).
+// 이미 서버로 나간 request 하나를 취소하는 시스템은 만들지 않는다.
 
-import { getSupabaseClient } from './supabaseClient';
+import { getCollabClient, isCollabActive } from './supabaseClient';
 import { collectReferencedAssetIds, type RemoteAsset } from '../assetRefs';
 import type { Project } from '../types';
 
@@ -29,19 +37,24 @@ interface RemoteScan {
   failed: boolean;
 }
 
-/** 버킷 전체 목록. collab 미준비면 빈 결과(호출부가 매번 isCollabReady 를 따로 확인할 필요 없게). */
+/** 버킷 전체 목록. collab 미활성이면 빈 결과(호출부가 매번 isCollabActive 를 따로 확인할 필요 없게). */
 export async function listRemoteAssets(): Promise<RemoteScan> {
-  const supabase = await getSupabaseClient();
+  const supabase = await getCollabClient();
   if (!supabase) return { assets: [], failed: false };
 
   const out: RemoteAsset[] = [];
   let offset = 0;
   for (;;) {
+    // 매 page request **직전** — 로그아웃 후 다음 페이지를 새로 요청하지 않는다.
+    if (!isCollabActive()) return { assets: out, failed: true };
     const { data, error } = await supabase.storage.from(BUCKET).list('', {
       limit: LIST_PAGE_SIZE,
       offset,
       sortBy: { column: 'name', order: 'asc' },
     });
+    // 매 page request **직후** — pre-check 만 두면 "마지막 페이지 await 중" 로그아웃한 경우
+    // 다음 페이지가 없어 루프가 정상 종료돼 partial 결과가 failed:false 로 나간다.
+    if (!isCollabActive()) return { assets: out, failed: true };
     if (error) {
       console.warn('[collab] 원격 에셋 목록 조회 실패:', error.message);
       return { assets: out, failed: true };
@@ -72,10 +85,13 @@ interface RemoteRefScan {
  */
 export async function collectRemoteReferencedIds(): Promise<RemoteRefScan> {
   const ids = new Set<string>();
-  const supabase = await getSupabaseClient();
+  const supabase = await getCollabClient();
   if (!supabase) return { ids, failed: false };
 
   const { data, error } = await supabase.from('projects').select('data');
+  // 조회가 끝난 뒤 로그아웃됐다면 이 참조 집합이 완전한지 보증할 수 없다 — 불완전한 집합을
+  // 성공으로 넘기면 그 방이 쓰는 파일까지 고아로 판정된다(가장 위험한 실패 모드).
+  if (!isCollabActive()) return { ids, failed: true };
   if (error) {
     // 여기서 빈 집합을 성공인 척 돌려주면 모든 원격 파일이 고아로 판정된다 — 가장 위험한 실패 모드.
     console.warn('[collab] 원격 프로젝트 목록 조회 실패:', error.message);
@@ -100,13 +116,19 @@ export async function collectRemoteReferencedIds(): Promise<RemoteRefScan> {
 
 /** 배치 삭제. 실패분 id 를 돌려준다(throw 하지 않음 — 부분 성공을 호출부가 그대로 보고할 수 있게). */
 export async function removeRemoteAssets(ids: string[]): Promise<{ removed: number; failed: string[] }> {
-  const supabase = await getSupabaseClient();
+  const supabase = await getCollabClient();
   if (!supabase || ids.length === 0) return { removed: 0, failed: ids.length === 0 ? [] : [...ids] };
 
   let removed = 0;
   const failed: string[] = [];
   for (let i = 0; i < ids.length; i += REMOVE_CHUNK_SIZE) {
     const chunk = ids.slice(i, i + REMOVE_CHUNK_SIZE);
+    // 매 chunk 를 **보내기 전에** 확인 — 로그아웃 이후에는 다음 삭제 요청을 절대 새로 내지 않는다.
+    // 아직 처리하지 않은 나머지 id 는 전부 failed 로 보고하고 종료한다(부분 삭제를 성공으로 숨기지 않음).
+    if (!isCollabActive()) {
+      failed.push(...ids.slice(i));
+      break;
+    }
     const { data, error } = await supabase.storage.from(BUCKET).remove(chunk);
     if (error) {
       console.warn('[collab] 원격 에셋 삭제 실패:', error.message);
