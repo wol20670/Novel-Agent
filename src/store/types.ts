@@ -478,6 +478,15 @@ export interface State {
   enterLocalOnly: () => void;
   /** local-only 를 벗어나 로그인/협업 경로로 돌아간다(local Project 는 보존). */
   leaveLocalOnly: () => Promise<void>;
+  /**
+   * S1-B F1 — local-only 를 거쳐 인증됐고 persisted 협업 intent 가 있어, 자동 재접속 대신 사용자 확인을
+   * 기다리는 중인지. **UI 표시용 mirror** 이고 truth 는 app 소유 localStorage marker 다(새로고침에도 유지).
+   */
+  collabReconnectPending: boolean;
+  /** 확인 모달 "방에 다시 연결" — 기존 pull-first 그대로 재접속한다(원격이 있으면 로컬을 대체). */
+  confirmCollabReconnect: () => Promise<void>;
+  /** 확인 모달 "내 로컬 유지" — 재접속 취소 + intent 끄기. project 무수정 · remote 호출 0. */
+  keepLocalSkipReconnect: () => void;
 
   save: () => void;
   hydrate: () => void;

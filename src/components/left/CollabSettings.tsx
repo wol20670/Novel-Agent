@@ -87,14 +87,15 @@ export default function CollabSettings() {
 
   // ── local-only: 인증 경로로 돌아가는 유일한 진입점 ──
   // ⚠️ 로컬 프로젝트와 IndexedDB 에셋은 그대로 보존된다(store 를 건드리지 않는다).
-  // ⚠️ persisted 협업 intent(na_collab_enabled)도 지우지 않는다 — 로그인하면 자동 재접속에 쓰인다.
+  // ⚠️ persisted 협업 intent(na_collab_enabled)도 지우지 않는다 — 로그인하면 재접속 **확인**(S1-B F1)에 쓰인다.
   if (authPhase === 'local-only') {
     return (
       <section className="flex flex-col gap-2">
         <h2 className="section-title">🤝 협업(실시간 공유) · 선택</h2>
         <p className="text-[11px] text-gray-500 leading-snug">
           지금은 <b className="text-gray-400">로컬 전용</b>으로 쓰고 있습니다. 협업을 쓰려면 로그인하세요 —
-          지금까지 작업한 대본과 에셋은 그대로 남습니다.
+          지금까지 작업한 대본과 에셋은 그대로 남습니다. 로그인 후 예전 협업 방이 있으면 다시 연결할지 먼저
+          묻습니다.
         </p>
         <button className="btn-primary" onClick={() => void leaveLocalOnly()}>
           🔐 로그인 / 협업 사용하기

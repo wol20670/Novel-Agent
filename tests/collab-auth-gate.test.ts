@@ -8,6 +8,7 @@
 //  · activationId/generation/queue 같은 후속 Phase 시스템을 여기서 만들지 않는다.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { scene, projectWith } from './fixtures';
 
 // ── localStorage 폴리필(기존 테스트 관용구 재사용) ──
 class MemoryStorage implements Storage {
@@ -97,6 +98,13 @@ interface Harness {
   channelSubscribeHook: ((nth: number) => void) | null;
   /** signInWithPassword 가 성공하기 직전 실행 — SDK 가 그 사이 SIGNED_IN 을 쏘는 상황을 재현한다. */
   signInHook: (() => void) | null;
+  /**
+   * true 면 signInWithPassword 가 SIGNED_IN 을 쏜 뒤 **macrotask 하나를 넘겨** resolve 한다 — 실제 SDK 의
+   * lock 해제가 늦어 onAuthEvent 의 setTimeout 0 promoteSession 이 signIn 의 await 보다 먼저 도는 순서(F1 race).
+   */
+  signInResolveLate: boolean;
+  /** signInResolveLate 의 macrotask 를 넘긴 **직후, resolve 직전** 실행 — 그 전이 틈의 상태를 관측한다. */
+  signInLateHook: (() => void) | null;
 }
 
 const h: Harness = {} as Harness;
@@ -137,6 +145,8 @@ function resetHarness(): void {
   h.trackCount = 0;
   h.channelSubscribeHook = null;
   h.signInHook = null;
+  h.signInResolveLate = false;
+  h.signInLateHook = null;
 }
 
 /** 원격 요청 카운터 합계 — "network 0" 단언에 쓴다. */
@@ -186,6 +196,10 @@ vi.mock('@supabase/supabase-js', () => {
       },
       async signInWithPassword() {
         if (!h.signInError) h.signInHook?.();
+        if (h.signInResolveLate) {
+          await new Promise((r) => setTimeout(r, 5));
+          h.signInLateHook?.();
+        }
         return { error: h.signInError };
       },
       async signOut(opts: unknown) {
@@ -1176,10 +1190,354 @@ describe('S1-B ⑯ promoteSession fallback 의 실제 필요 경로', () => {
     expect(window.location.hash).toBe(''); // 실패 callback marker(sb 포함) 정리
     expect(localStorage.getItem('na_local_only')).toBeNull();
     expect(localStorage.getItem('na_pending_password_setup')).toBeNull(); // → password-setup 아님
-    // 재접속은 정확히 한 번 — project·presence 채널 2개, 초기 pull 1회.
+    // F1: na_local_only 를 거친 로그인이므로 자동 재접속 대신 확인을 기다린다(재접속 0).
+    expect(s.collabReconnectPending).toBe(true);
+    expect(supa.isCollabActive()).toBe(false);
+    expect(h.calls.pull).toBe(0);
+    expect(h.calls.channel).toBe(0);
+
+    // 사용자가 재연결을 고르면 재접속은 정확히 한 번 — project·presence 채널 2개, 초기 pull 1회.
+    await useStore.getState().confirmCollabReconnect();
+    await flushTimers();
     expect(supa.isCollabActive()).toBe(true);
     expect(h.calls.pull).toBe(1);
     expect(h.calls.channel).toBe(2);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('S1-B ⑰ F1 — local-only 를 거친 로그인은 자동 재접속 전에 확인한다', () => {
+  // hosted 재현(2026-09-25): 원격 방 2장면 · local-only 에서 3장면으로 편집 → 로그인 → persisted intent
+  // 자동 재접속의 pull-first 가 Project 를 통째 교체해 local-only 편집(scenes·rawInput)이 소실됐다.
+  const U1 = { user: { id: 'u1', email: 'a@b.c' } };
+  const LOCAL_RAW = 'LOCAL-ONLY-RAW-3';
+  const REMOTE_RAW = 'REMOTE-RAW-2';
+  const localProject = () =>
+    projectWith([scene({ id: 'a', title: 'A' }), scene({ id: 'b', title: 'B' }), scene({ id: 'c', title: 'C-local' })], {
+      rawInput: LOCAL_RAW,
+    });
+  const remoteProject = () =>
+    projectWith([scene({ id: 'a', title: 'A' }), scene({ id: 'b', title: 'B' })], { rawInput: REMOTE_RAW });
+
+  /**
+   * 데이터·채널 호출 합계 — removeAllChannels 는 뺀다. 세션 없이 부팅하면 bootstrapAuth 의 초기 seed 가
+   * signed-out 을 확정하며 다음 tick 에 stopCollab(→ removeAllChannels 1회, 채널 0개 정리)을 부르는데,
+   * 이건 S1-B 기존 부팅 동작이지 F1 경로가 아니다. "로컬 유지" 자체의 0 호출은 A 에서 전 카운터 delta 로 본다.
+   */
+  function dataCallTotal(): number {
+    const { createClient: _c, removeAllChannels: _r, ...rest } = h.calls;
+    return Object.values(rest).reduce((a, b) => a + b, 0);
+  }
+
+  // 앞선 테스트(예: R6 의 원격 적용)가 남긴 600ms 로컬 저장 타이머가 이 테스트의 localStorage 에
+  // 빈 project 를 써 넣는 오염을 막는다 — 타이머를 흘려보낸 뒤 storage·harness 를 새로 만든다.
+  beforeEach(async () => {
+    await new Promise((r) => setTimeout(r, 700));
+    resetHarness();
+    vi.stubGlobal('localStorage', new MemoryStorage());
+    vi.stubGlobal('indexedDB', fakeIndexedDB());
+    stubWindow({});
+  });
+
+  /**
+   * 새 페이지 로드 흉내. ⚠️ vi.resetModules() 만으로는 부족하다 — mock SDK 의 listener 목록(h.authCbs)은
+   * module state 밖에 있어 옛 store 의 listener 가 새 store 에 간섭한다. 명시적으로 버린다.
+   * localStorage(MemoryStorage)는 유지한다(= 브라우저 새로고침).
+   */
+  async function freshPage() {
+    h.authCbs = [];
+    vi.resetModules();
+    const { useStore } = await import('../src/store');
+    const supa = await import('../src/collab/supabaseClient');
+    const { loadProject } = await import('../src/storage/projectStore');
+    useStore.getState().hydrate();
+    return { useStore, supa, loadProject };
+  }
+  type Page = Awaited<ReturnType<typeof freshPage>>;
+
+  /** SDK 처럼: signInWithPassword 도중 SIGNED_IN(u1) 을 쏘고, 이후 getSession 은 u1 을 돌려준다. */
+  function armSignIn(): void {
+    h.signInHook = () => {
+      h.session = U1;
+      h.authCbs.forEach((cb) => cb('SIGNED_IN', U1));
+    };
+  }
+
+  /** local-only 에서 3장면으로 편집을 마친 상태. 원격 방에는 2장면이 있다. */
+  async function localOnlyEdited(opts: { intent?: boolean } = {}): Promise<Page> {
+    if (opts.intent === false) {
+      localStorage.setItem('na_collab_room', 'abc123');
+      localStorage.setItem('na_collab_name', '나');
+      localStorage.setItem('na_collab_enabled', '0');
+    } else {
+      seedCollabIntent();
+    }
+    localStorage.setItem('na_local_only', '1');
+    h.session = null;
+    h.pullResult = { data: { data: remoteProject(), version: 1, updated_by: null }, error: null };
+    vi.resetModules();
+    const { saveProject } = await import('../src/storage/projectStore');
+    saveProject(localProject(), {});
+    const page = await freshPage();
+    await page.useStore.getState().bootAuth();
+    expect(page.useStore.getState().authPhase).toBe('local-only');
+    expect(page.useStore.getState().project.scenes).toHaveLength(3);
+    return page;
+  }
+
+  /** local-only → "🔐 로그인 / 협업 사용하기"(StartGate) → 로그인 성공. */
+  async function signInOn(page: Page): Promise<void> {
+    armSignIn();
+    await page.useStore.getState().signIn('a@b.c', 'pw');
+    await flushTimers();
+    await flushTimers();
+    expect(page.useStore.getState().authPhase).toBe('authed');
+  }
+
+  function expectLocalKept(page: Page): void {
+    const s = page.useStore.getState();
+    expect(s.project.scenes.map((sc) => sc.title)).toEqual(['A', 'B', 'C-local']);
+    expect(s.project.rawInput).toBe(LOCAL_RAW);
+  }
+
+  function expectPendingNoReconnect(page: Page): void {
+    expect(page.useStore.getState().collabReconnectPending).toBe(true);
+    expect(page.supa.isCollabActive()).toBe(false);
+    expect(page.useStore.getState().collabEnabled).toBe(false);
+    expect(h.calls.pull).toBe(0);
+    expect(h.calls.channel).toBe(0);
+    expect(localStorage.getItem('na_reconnect_confirm')).toBe('1');
+  }
+
+  it('A. "내 로컬 유지" → 로컬 3장면·rawInput 유지(600ms 뒤 저장본 포함) · intent off · remote 호출 0', async () => {
+    const page = await localOnlyEdited();
+    await page.useStore.getState().leaveLocalOnly();
+    expect(page.useStore.getState().authPhase).toBe('login');
+    await signInOn(page);
+    expectPendingNoReconnect(page);
+    expectLocalKept(page);
+
+    const before = { ...h.calls };
+    page.useStore.getState().keepLocalSkipReconnect();
+    await flushTimers();
+    // "로컬 유지" 자체는 Realtime teardown(removeAllChannels)까지 포함해 collab 호출을 하나도 내지 않는다.
+    for (const k of Object.keys(before)) {
+      expect(h.calls[k], `keepLocalSkipReconnect 가 ${k} 호출`).toBe(before[k]);
+    }
+
+    const s = page.useStore.getState();
+    expect(s.collabReconnectPending).toBe(false);
+    expect(s.collabEnabled).toBe(false);
+    expect(s.collabStatus).toBe('off');
+    expect(s.collabPeers).toEqual([]);
+    expectLocalKept(page);
+    // autoSave/remoteSaveTimer 디바운스(600ms)를 넘긴 뒤에도 저장본이 원격으로 덮이지 않았다.
+    await new Promise((r) => setTimeout(r, 700));
+    expect(page.loadProject()?.project.scenes.map((sc) => sc.title)).toEqual(['A', 'B', 'C-local']);
+    expect(page.loadProject()?.project.rawInput).toBe(LOCAL_RAW);
+    // intent 만 꺼지고 방 코드·이름은 보존, marker 제거
+    expect(localStorage.getItem('na_collab_enabled')).toBe('0');
+    expect(localStorage.getItem('na_collab_room')).toBe('abc123');
+    expect(localStorage.getItem('na_collab_name')).toBe('나');
+    expect(localStorage.getItem('na_reconnect_confirm')).toBeNull();
+    // 흐름 전체에서 project upsert·pull·채널 생성 등 데이터/채널 호출 0
+    expect(page.supa.isCollabActive()).toBe(false);
+    expect(h.calls.upsert).toBe(0);
+    expect(dataCallTotal()).toBe(0);
+
+    // 새로고침해도 자동 재접속하지 않는다(intent off).
+    const again = await freshPage();
+    await again.useStore.getState().bootAuth();
+    await flushTimers();
+    expect(again.useStore.getState().authPhase).toBe('authed');
+    expect(again.useStore.getState().collabReconnectPending).toBe(false);
+    expect(dataCallTotal()).toBe(0);
+    expectLocalKept(again);
+  });
+
+  it('B. "방에 다시 연결" → 기존 pull-first 그대로(원격 2장면 적용) · 재접속 정확히 1회', async () => {
+    const page = await localOnlyEdited();
+    await page.useStore.getState().leaveLocalOnly();
+    await signInOn(page);
+    expectPendingNoReconnect(page);
+
+    await page.useStore.getState().confirmCollabReconnect();
+    await flushTimers();
+
+    const s = page.useStore.getState();
+    expect(s.collabReconnectPending).toBe(false);
+    expect(s.collabEnabled).toBe(true);
+    expect(page.supa.isCollabActive()).toBe(true);
+    expect(s.project.scenes.map((sc) => sc.title)).toEqual(['A', 'B']); // 명시적으로 승인한 교체
+    expect(s.project.rawInput).toBe(REMOTE_RAW);
+    expect(h.calls.pull).toBe(1);
+    expect(h.calls.channel).toBe(2);
+    expect(localStorage.getItem('na_reconnect_confirm')).toBeNull();
+    expect(localStorage.getItem('na_collab_enabled')).toBe('1');
+  });
+
+  it('C. refresh-safe — StartGate 에서 새로고침 · 확인 대기 중 새로고침 모두 가드가 유지된다', async () => {
+    const page = await localOnlyEdited();
+    await page.useStore.getState().leaveLocalOnly();
+    expect(localStorage.getItem('na_local_only')).toBeNull();
+    expect(localStorage.getItem('na_reconnect_confirm')).toBe('1'); // 메모리가 아니라 storage 에 남았다
+
+    // ① 로그인 화면(StartGate)에서 새로고침 → 평상시 부팅 ④(session 없음) → login
+    const p1 = await freshPage();
+    await p1.useStore.getState().bootAuth();
+    expect(p1.useStore.getState().authPhase).toBe('login');
+    await signInOn(p1);
+    expectPendingNoReconnect(p1);
+    expectLocalKept(p1);
+
+    // ② 확인 대기 중 새로고침 → 기존 세션으로 authed 부팅해도 여전히 묻는다
+    const p2 = await freshPage();
+    await p2.useStore.getState().bootAuth();
+    await flushTimers();
+    expect(p2.useStore.getState().authPhase).toBe('authed');
+    expectPendingNoReconnect(p2);
+    expectLocalKept(p2);
+  });
+
+  it('D. marker 없음 = 기존 동작 — local-only 를 거치지 않은 persisted-session 부팅은 자동 재접속 1회', async () => {
+    seedCollabIntent();
+    h.session = U1;
+    h.pullResult = { data: { data: remoteProject(), version: 1, updated_by: null }, error: null };
+    const page = await freshPage();
+    await page.useStore.getState().bootAuth();
+    await flushTimers();
+    expect(page.useStore.getState().authPhase).toBe('authed');
+    expect(page.useStore.getState().collabReconnectPending).toBe(false);
+    expect(page.supa.isCollabActive()).toBe(true);
+    expect(page.useStore.getState().collabEnabled).toBe(true);
+    expect(h.calls.pull).toBe(1);
+    expect(h.calls.channel).toBe(2);
+  });
+
+  it('E. intent 가 없으면 확인을 띄우지 않는다 — stale marker 제거 · remote 0', async () => {
+    const page = await localOnlyEdited({ intent: false });
+    await page.useStore.getState().leaveLocalOnly();
+    await flushTimers(); // 부팅 seed 의 signed-out teardown(removeAllChannels)까지 흘려보낸 뒤 baseline
+    expect(localStorage.getItem('na_reconnect_confirm')).toBe('1');
+    const before = { ...h.calls };
+    await signInOn(page);
+    expect(page.useStore.getState().collabReconnectPending).toBe(false);
+    expect(localStorage.getItem('na_reconnect_confirm')).toBeNull();
+    expect(page.supa.isCollabActive()).toBe(false);
+    // 로그인 이후 구간은 removeAllChannels 를 포함한 전 카운터 delta 0
+    for (const k of Object.keys(before)) {
+      expect(h.calls[k], `로그인 뒤 ${k} 호출`).toBe(before[k]);
+    }
+    expect(dataCallTotal()).toBe(0);
+    expectLocalKept(page);
+  });
+
+  it("D'. marker 없음 = 기존 동작 — local-only 를 거치지 않은 StartGate 로그인도 자동 재접속 정확히 1회", async () => {
+    seedCollabIntent();
+    h.session = null;
+    h.pullResult = { data: { data: remoteProject(), version: 1, updated_by: null }, error: null };
+    const page = await freshPage();
+    await page.useStore.getState().bootAuth();
+    expect(page.useStore.getState().authPhase).toBe('login');
+    await signInOn(page);
+    expect(page.useStore.getState().collabReconnectPending).toBe(false);
+    expect(localStorage.getItem('na_reconnect_confirm')).toBeNull();
+    expect(page.supa.isCollabActive()).toBe(true);
+    expect(page.useStore.getState().collabEnabled).toBe(true);
+    expect(h.calls.pull).toBe(1); // 중복 재접속 없음
+    expect(h.calls.channel).toBe(2);
+  });
+
+  it('H. race — SIGNED_IN 후속 timer 가 signIn 의 marker 기록보다 먼저 돌아도 확인 없이 재접속하지 않는다', async () => {
+    // local-only 가 보존된 채 로그인 화면에 온 경로: 세션을 못 만든 success callback(!session 분기).
+    seedCollabIntent();
+    localStorage.setItem('na_local_only', '1');
+    stubWindow({ hash: '#access_token=REDACTED&type=invite' });
+    h.session = null;
+    h.pullResult = { data: { data: remoteProject(), version: 1, updated_by: null }, error: null };
+    vi.resetModules();
+    const { saveProject } = await import('../src/storage/projectStore');
+    saveProject(localProject(), {});
+    const page = await freshPage();
+    await page.useStore.getState().bootAuth();
+    await flushTimers();
+    expect(page.useStore.getState().authPhase).toBe('login');
+    expect(localStorage.getItem('na_local_only')).toBe('1'); // 성공처럼 지우지 않았다
+
+    // SDK 가 SIGNED_IN 을 쏜 뒤 macrotask 를 넘겨 resolve → promoteSession 이 consume 보다 먼저 돈다.
+    // 그 전이 틈(signIn continuation 전)의 상태를 캡처한다.
+    let gap: Record<string, unknown> | null = null;
+    h.signInResolveLate = true;
+    h.signInLateHook = () => {
+      const s = page.useStore.getState();
+      gap = {
+        authPhase: s.authPhase,
+        pending: s.collabReconnectPending,
+        active: page.supa.isCollabActive(),
+        pull: h.calls.pull,
+        channel: h.calls.channel,
+        localOnly: localStorage.getItem('na_local_only'),
+        marker: localStorage.getItem('na_reconnect_confirm'),
+      };
+    };
+    await signInOn(page);
+
+    // ① 전이 틈: timer 가 이미 authed 로 올렸는데(= ordering 재현됨) marker 는 아직 없다 →
+    //    재접속 0 · 모달도 아직 띄우지 않는다(mirror 가 truth 보다 먼저 서지 않는다).
+    expect(gap).toEqual({
+      authPhase: 'authed',
+      pending: false,
+      active: false,
+      pull: 0,
+      channel: 0,
+      localOnly: '1',
+      marker: null,
+    });
+    // ② signIn continuation 뒤: marker 가 먼저 생기고 그다음 pending — 재접속은 끝까지 0.
+    expect(localStorage.getItem('na_local_only')).toBeNull();
+    expectPendingNoReconnect(page); // marker '1' · pending true · pull 0 · channel 0 · inactive
+    expectLocalKept(page);
+  });
+
+  it('F. local-only 중 invite callback → 비밀번호 설정 완료 후에도 자동 재접속하지 않고 묻는다', async () => {
+    seedCollabIntent();
+    localStorage.setItem('na_local_only', '1');
+    stubWindow({ hash: '#access_token=REDACTED&type=invite' });
+    h.session = U1;
+    h.pullResult = { data: { data: remoteProject(), version: 1, updated_by: null }, error: null };
+    vi.resetModules();
+    const { saveProject } = await import('../src/storage/projectStore');
+    saveProject(localProject(), {});
+    const page = await freshPage();
+    await page.useStore.getState().bootAuth();
+    await flushTimers();
+    expect(page.useStore.getState().authPhase).toBe('password-setup');
+    expect(localStorage.getItem('na_local_only')).toBeNull();
+    expect(localStorage.getItem('na_reconnect_confirm')).toBe('1');
+
+    await page.useStore.getState().completePasswordSetup('new-password');
+    await flushTimers();
+    expect(page.useStore.getState().authPhase).toBe('authed');
+    expectPendingNoReconnect(page);
+    expectLocalKept(page);
+  });
+
+  it('G. 확인 대기 중 SIGNED_OUT → 모달은 내리고 marker 는 보존 → 재로그인하면 다시 묻는다', async () => {
+    const page = await localOnlyEdited();
+    await page.useStore.getState().leaveLocalOnly();
+    await signInOn(page);
+    expectPendingNoReconnect(page);
+
+    h.session = null;
+    h.authCbs.forEach((cb) => cb('SIGNED_OUT', null));
+    expect(page.useStore.getState().collabReconnectPending).toBe(false);
+    expect(page.useStore.getState().authPhase).toBe('login');
+    expect(localStorage.getItem('na_reconnect_confirm')).toBe('1');
+    await flushTimers();
+
+    await signInOn(page);
+    expectPendingNoReconnect(page);
+    expectLocalKept(page);
   });
 });
 

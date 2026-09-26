@@ -33,6 +33,7 @@ export const useStore = create<State>((set, get) => {
     authEmail: null,
     authError: null,
     authBusy: false,
+    collabReconnectPending: false,
     activeTab: 'scenes',
     selectedSceneId: null,
     busy: {},

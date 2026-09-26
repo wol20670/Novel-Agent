@@ -7,6 +7,7 @@ import Stepper from './components/Stepper';
 import CollabBadge from './components/CollabBadge';
 import StartGate from './components/StartGate';
 import PasswordSetup from './components/PasswordSetup';
+import CollabReconnectConfirm from './components/CollabReconnectConfirm';
 
 const TOAST_STYLE: Record<string, string> = {
   info: 'bg-accent2 text-white',
@@ -27,6 +28,8 @@ export default function App() {
   const scenesCount = useStore((s) => s.project.scenes.length);
   const approved = useStore((s) => s.project.scenes.filter((sc) => sc.status === 'approved').length);
   const openaiKey = useStore((s) => s.openaiKey);
+  // S1-B F1 — local-only 를 거쳐 로그인한 뒤 예전 방 자동 재접속 대신 확인을 기다리는 중.
+  const collabReconnectPending = useStore((s) => s.collabReconnectPending);
 
   // ⚠️ 로컬 프로젝트 hydrate 는 **인증 상태와 무관하게 항상** 수행한다 — 오프라인 제작 툴이므로
   //    로그인 확인 때문에 내 대본 복원이 막히면 안 된다. bootAuth 는 그와 독립적으로 부팅 라우팅만
@@ -81,6 +84,8 @@ export default function App() {
           <RightPanel />
         </aside>
       </div>
+
+      {collabReconnectPending && <CollabReconnectConfirm />}
 
       {toast && (
         <div
