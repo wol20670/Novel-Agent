@@ -56,6 +56,17 @@ Plan → GPT 검토 → IMPLEMENTATION GO → 구현 → actual diff review → 
 - ⚠️ **동결된 것**: Expression AI(Phase 18, baseline `931a2cc`) · Outfit AI(Phase 14).
   재튜닝 금지 목록은 [ai-workflows.md](./docs/contracts/ai-workflows.md) §5 가 정본이다.
 
+## Security 축 (S1 — v1 Phase 번호와 별개)
+
+> ⚠️ v1 Phase 번호(1~19)를 잇지 않는다(Phase 20 같은 번호를 만들지 않는다). 계약 정본은
+> [project-compat.md](./docs/contracts/project-compat.md) 의 `## 협업` 절(인증 경계 · F1 · 보안 한계).
+
+| 항목 | 내용 | 상태 | 커밋 | 검증 |
+|---|---|---|---|---|
+| S1-B | Supabase Auth email/password(invite 전용) + collab runtime gate — **client-side gate** | ✅ 확정 | `707adbf` | CI(main) · hosted smoke #1~#10 · probe B |
+| S1-B F1 | local-only → 로그인 자동 재접속 전 확인(marker · 차단형 모달) — data-loss 보정 | ✅ 확정 | `f0e9dcf` | Ubuntu CI `npm run check` 70파일/1164 + `npm run build` · Preview hosted smoke A·B·C1·C2·D·E · 이 F1 에서는 로컬 Windows 5s timeout 이 baseline `707adbf` 에서도 재현돼 환경 starvation 으로 분리했고, Ubuntu CI green 을 최종 verification evidence 로 채택 · 검증 시점 production/main = `707adbf` |
+| S1-D1/D2 | server-side hardening(RLS · Storage 정책 · room 권한) | ⏸ 미착수 | — | — (`setup.sql` 은 아직 `anon` 개방) |
+
 ## 계획 입력 — 현재 계약은 여기서 읽는다
 
 > ⚠️ **"지금 코드에 이미 있는 것"을 이 문서에 다시 서술하지 않는다** — 중복 서술은 곧 stale 해진다.
