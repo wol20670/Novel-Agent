@@ -475,6 +475,127 @@ try {
   const restoredImg = await page.locator('img[src^="blob:"]').count();
   assert(restoredImg > 0, '가져오기 후 배경 에셋(blob) 복원');
   await page.screenshot({ path: join(shotDir, '4-imported.png'), fullPage: true });
+
+  // 9) 안정화 R5 — 같은 길이로 줄이 교체될 때 열린 🎙 VoiceLab 이 옛 화자 preset 을 들고 있지 않는다(F-1)
+  //
+  // 재현 수단: step 8 의 .npproj.zip 에서 project.json 을 node 쪽에서 복제·수정해 3벌을 만든다 —
+  // **같은 장면 id · 같은 lines.length · 같은 target index** 에서 화자만 A / B / 주인공으로 다르다.
+  // 기존 가져오기 input 으로 연속 import 하면 SceneCard(key=s.id)·LineRow(key=length:i)가 재사용돼
+  // 협업 pull·재분석과 같은 same-length 교체가 실제 브라우저에서 일어난다.
+  // ⚠️ production test hook 을 넣지 않는다 — 조작은 전부 fixture(zip) 와 실제 UI 로만 한다.
+  // ⚠️ Typecast 는 실제로 부르지 않는다 — 목록 요청을 abort 해서 VoiceLab 이 voice_id 직접 입력칸
+  //    (= 로컬 preset 값이 그대로 보이는 곳)으로 떨어지게 한다(network 0).
+  {
+    const manifest = JSON.parse(await pzip.file('project.json').async('string'));
+    const chars = manifest.project.characters;
+    const prot = chars.find((c) => c.isProtagonist === true);
+    const [charA, charB] = chars.filter((c) => c.isProtagonist !== true);
+    // fixture 전제(우연 통과 방지) — 캐릭터 구성이 안 맞으면 아래 variant 를 만들 수 없으니 여기서 멈춘다.
+    const castOk = !!prot && !!charA && !!charB && charA.name !== charB.name;
+    assert(castOk, `R5 fixture: 주인공 1 + 서로 다른 비주인공 A·B (${prot?.name} / ${charA?.name} / ${charB?.name})`);
+    if (!castOk) throw new Error('R5 fixture: 샘플 대본의 캐릭터 구성이 전제와 다르다');
+    const target = manifest.project.scenes.find((s) => s.lines.some((l) => l.kind === 'dialogue'));
+    const idx = target.lines.findIndex((l) => l.kind === 'dialogue');
+    const VOICE_A = 'tc_e2e_r5_voice_A';
+    const VOICE_B = 'tc_e2e_r5_voice_B';
+    const variant = async (tag, speaker) => {
+      const m = structuredClone(manifest);
+      for (const c of m.project.characters) {
+        if (c.name === charA.name) c.voice = { voiceId: VOICE_A, voiceName: 'e2e A', model: 'ssfm-v21' };
+        if (c.name === charB.name) c.voice = { voiceId: VOICE_B, voiceName: 'e2e B', model: 'ssfm-v30' };
+      }
+      const sc = m.project.scenes.find((s) => s.id === target.id);
+      // 🎙 대상을 target 줄 **하나**로 만든다 — 나머지 대사는 주인공(🎙 없음)으로 돌려 .first()/nth 의존을 없앤다.
+      // target 줄 텍스트는 variant 마다 고유 마커라 "이 import 가 화면에 반영됐다"를 기다릴 수 있다.
+      sc.lines.forEach((l, i) => {
+        if (l.kind !== 'dialogue') return;
+        delete l.members;
+        l.speaker = i === idx ? speaker : prot.name;
+        if (i === idx) l.text = `R5 교체 확인 대사 ${tag}`;
+      });
+      const z = await JSZip.loadAsync(readFileSync(projPath));
+      z.file('project.json', JSON.stringify(m, null, 2));
+      const path = join(shotDir, `r5-${tag}.npproj.zip`);
+      writeFileSync(path, await z.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+      return { path, scene: sc };
+    };
+    const vA = await variant('A', charA.name);
+    const vB = await variant('B', charB.name);
+    const vC = await variant('C', prot.name);
+
+    assert(
+      [vA, vB, vC].every((v) => v.scene.id === target.id && v.scene.lines.length === target.lines.length),
+      `R5 fixture: 세 벌 모두 같은 장면 id · 같은 lines.length (${target.id} · ${target.lines.length})`,
+    );
+    assert(
+      vA.scene.lines[idx].speaker === charA.name &&
+        vB.scene.lines[idx].speaker === charB.name &&
+        vC.scene.lines[idx].speaker === prot.name,
+      `R5 fixture: 같은 index ${idx} 에서 화자만 A / B / 주인공`,
+    );
+    assert(VOICE_A !== VOICE_B, 'R5 fixture: A·B voiceId 가 서로 다르다');
+
+    await page.route('**/api/typecast**', (route) => route.abort());
+    const keyInput = page.getByPlaceholder('Typecast API 키');
+    await keyInput.fill('e2e-dummy-typecast-key');
+
+    const card = page.locator(`[id="scene-${target.id}"]`);
+    const importVariant = async (v, tag) => {
+      await page.locator('input[type=file][accept*="npproj"]').setInputFiles(v.path);
+      await card.getByText(`R5 교체 확인 대사 ${tag}`).waitFor({ timeout: 15000 }); // 반영 = 관측 가능한 UI 상태
+    };
+    const voiceIdIs = (want) =>
+      page
+        .waitForFunction(
+          ([id, w]) => {
+            const el = document.querySelector(`[id="scene-${id}"] input[placeholder^="voice_id"]`);
+            return !!el && el.value === w;
+          },
+          [target.id, want],
+          { timeout: 8000 },
+        )
+        .then(
+          () => true,
+          () => false,
+        );
+    const voiceIdNow = () =>
+      page.evaluate(
+        (id) => document.querySelector(`[id="scene-${id}"] input[placeholder^="voice_id"]`)?.value ?? '(입력칸 없음)',
+        target.id,
+      );
+    const micButtons = card.getByTitle('성우 음성 테스트(Typecast)');
+
+    // ① A 줄에서 🎙 열기 → A preset
+    await importVariant(vA, 'A');
+    assert((await micButtons.count()) === 1, `R5: 대상 장면의 🎙 는 target 줄 하나 (실제 ${await micButtons.count()})`);
+    await micButtons.click();
+    await card.getByText(`🎙 ${charA.name} 보이스 테스트`).waitFor({ timeout: 10000 });
+    assert(await voiceIdIs(VOICE_A), `R5: A 줄 VoiceLab 은 A preset (실제 ${await voiceIdNow()})`);
+
+    // ② 같은 길이로 그 줄이 B 대사로 교체 → 헤더와 preset 이 **둘 다** B 여야 한다(F-1a)
+    await importVariant(vB, 'B');
+    await card.getByText(`🎙 ${charB.name} 보이스 테스트`).waitFor({ timeout: 10000 });
+    assert(
+      await voiceIdIs(VOICE_B),
+      `R5 F-1a: 같은 길이 교체로 화자가 B 가 되면 VoiceLab 도 B preset (실제 ${await voiceIdNow()} · A 값이면 옛 preset 이월)`,
+    );
+
+    // ③ 같은 길이로 그 줄이 주인공 대사로 교체 → voice 대상이 아니므로 패널·🎙 모두 사라져야 한다(F-1b)
+    await importVariant(vC, 'C');
+    const panelGone = await card
+      .getByText(/보이스 테스트 \(Typecast\)/)
+      .waitFor({ state: 'detached', timeout: 8000 })
+      .then(
+        () => true,
+        () => false,
+      );
+    assert(panelGone, 'R5 F-1b: 주인공 줄로 교체되면 열려 있던 VoiceLab 패널이 사라진다');
+    assert((await micButtons.count()) === 0, 'R5 F-1b: 주인공 줄에는 🎙 버튼이 없다');
+    await page.screenshot({ path: join(shotDir, '9-r5-voicelab.png'), fullPage: true });
+
+    await keyInput.fill('');
+    await page.unroute('**/api/typecast**');
+  }
 } catch (e) {
   log('❌ 예외:', e.message);
   fails.push('예외: ' + e.message);

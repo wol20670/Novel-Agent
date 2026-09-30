@@ -28,7 +28,10 @@ paths:
   (run 전체 폐기·index remapping 금지). 판정은 `voiceLineAnchorMatches` 단일 소스.
 - **`rawInput` 을 자동 수정하지 말 것.** 수동 편집은 `Scene.lines` 만 고치고, 재분석은 undo 가 아니다.
   reverse writer · parser source map · provenance · Line UUID · undo UI 를 만들지 않는다.
-- **Line UUID / tombstone / soft-delete / index remapping 을 만들지 말 것 — 이건 R5 scope 다.**
+- **Line UUID / tombstone / soft-delete / index remapping 을 만들지 말 것** — R5(Line Identity Audit)도 만들지 않았다(별도 대형 작업).
+- **`SceneLineRow` 의 VoiceLab 은 `voiceOpen && canVoice && speakerChar` + `key={speakerChar.name}` 로 마운트한다**(R5) —
+  같은 길이 교체로 화자가 바뀌면 VoiceLab 만 새로 띄우고 voice 대상이 아니면 숨긴다.
+  ⚠️ VoiceLab 에 prop→state 동기화 effect 를 만들거나 LineRow key 를 바꾸지 말 것.
 - QA UI 에서 `setLineTranslation` 뒤에 `clearTranslationQa` 같은 걸 부르지 말 것.
   QA 캐시는 직접 clear 하지 않고 기존 content anchor 판정에 맡긴다.
 - R3 DOM 계약 5개(`scene-${id}` · root click → `selectScene` · `border-accent` · `scroll-mt-4` ·

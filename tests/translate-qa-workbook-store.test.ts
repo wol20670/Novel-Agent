@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as XLSX from 'xlsx';
 import { useStore } from '../src/store';
 import {
+  analyzeQaWorkbook,
   buildQaWorkbook,
   collectQaWorkbookRows,
   readQaWorkbook,
@@ -748,5 +749,84 @@ describe('applyQaWorkbookManualOk — manual OK batch(Phase 5-B)', () => {
       expect(keys).not.toContain('0:en'); // 확정한 칸은 다시 검수하지 않는다
       expect(keys).toContain('0:ja'); // 나머지는 그대로 대상이다
     }
+  });
+});
+
+// ── ⑥ export 이후 구조 이동(안정화 R5 — line identity) ──────────────────────
+//
+// `_naqa` 의 (sceneId, lineIndex) 는 앱 밖으로 나갔다 **며칠 뒤** 돌아오는 external coordinate 다 —
+// 그 사이의 줄 삭제·삽입은 race 가 아니라 정상 사용 경로다. 보호는 analyzer 의 두 경로(changed·unchanged)가
+// 모두 isQaResultValid(exact anchor)로 현재 줄을 대조하는 것 하나뿐이라, 여기서 **실제 deleteLine** 으로
+// 좌표를 밀어 "stale 좌표에 다른 유효 QA 칸이 들어온" 상태를 직접 고정한다(out-of-range 우연 skip 이 아니다).
+
+describe('QA workbook — export 이후 구조 이동(R5)', () => {
+  const KO_A = '먼저 인사부터 할게.';
+  const KO_B = '오늘은 정말 즐거웠어.';
+  const KO_C = '내일 다시 만나자.';
+
+  /** 세 줄 모두 EN·JA 번역이 있는 대사 — 어느 줄이 어느 좌표에 와도 QA 대상 자격이 있다. */
+  function threeLineProject(): Project {
+    return projectWith(
+      [
+        scene({
+          id: 'sc_1',
+          lines: [
+            dialogue('한지수', KO_A, { i18n: { en: 'Let me say hi first.', ja: 'まず挨拶するね。' } }),
+            dialogue('강민주', KO_B, { i18n: { en: 'Today was really terrible.', ja: '今日は本当に楽しかった。' } }),
+            dialogue('강민주', KO_C, { i18n: { en: 'See you yesterday.', ja: 'また明日会おう。' } }),
+          ],
+        }),
+      ],
+      { translateMode: 'fast' },
+    );
+  }
+
+  /** 앞 줄(0번)을 실제 액션으로 지운 뒤, stale 좌표(1번)에 **다른 유효 QA 칸**이 왔는지 전제를 확인한다. */
+  function shiftByDeletingFirstLine(): void {
+    useStore.getState().deleteLine('sc_1', 0);
+    const occupant = lineAt(0, 1) as Extract<Line, { kind: 'dialogue' }>;
+    expect(occupant.kind).toBe('dialogue');
+    expect(occupant.text).toBe(KO_C); // B 가 아니라 C 가 그 좌표에 있다
+    expect(occupant.i18n?.en?.trim()).toBeTruthy(); // 그 locale 번역이 있어 QA 대상 자격이 있다
+    expect(collectQaTargets(useStore.getState().project, ['en'], {}, 'gpt-4o-mini').cells.map((a) => a.lineIndex)).toContain(1);
+    expect((lineAt(0, 0) as Extract<Line, { kind: 'dialogue' }>).text).toBe(KO_B); // B 는 0번으로 당겨졌다
+  }
+
+  it('T-1a: 수정 칸을 적용해도 밀려 들어온 다른 줄에 쓰지 않고, 원래 줄로 remap 하지도 않는다', () => {
+    const project = threeLineProject();
+    const doc = docFrom(project, qaCacheFor(project, [{ lineIndex: 1, locale: 'en' }]), (ws, rowCount) => {
+      expect(rowCount).toBe(1);
+      editCell(ws, 0, 'en', 'Today was really fun.');
+    });
+    // control — 이동이 없으면 이 doc 은 정확히 1칸을 적용한다(fixture 가 애초에 stale 인 게 아니다).
+    expect(analyzeQaWorkbook(doc, project).candidates).toHaveLength(1);
+
+    useStore.setState({ project });
+    shiftByDeletingFirstLine();
+    const cBefore = (lineAt(0, 1) as Extract<Line, { kind: 'dialogue' }>).i18n;
+    const bBefore = (lineAt(0, 0) as Extract<Line, { kind: 'dialogue' }>).i18n;
+
+    const result = useStore.getState().applyQaWorkbook(doc);
+
+    expect(result.candidates).toEqual([]);
+    expect(result.counts.stale).toBe(1);
+    expect((lineAt(0, 1) as Extract<Line, { kind: 'dialogue' }>).i18n).toEqual(cBefore); // 새 점유 줄 무변경
+    expect((lineAt(0, 0) as Extract<Line, { kind: 'dialogue' }>).i18n).toEqual(bBefore); // 원래 줄로 remap 0
+  });
+
+  it('T-1b: 안 고친 칸의 "문제 없음" 도 밀려 들어온 다른 줄에 붙지 않는다', () => {
+    const project = threeLineProject();
+    const doc = docFrom(project, qaCacheFor(project, [{ lineIndex: 1, locale: 'en' }]));
+    // control — 이동이 없으면 이 doc 은 manual OK 후보 1칸을 낸다.
+    expect(analyzeQaWorkbook(doc, project).manualOkCandidates).toHaveLength(1);
+
+    useStore.setState({ project, translationQa: {} });
+    shiftByDeletingFirstLine();
+    const cacheBefore = useStore.getState().translationQa;
+
+    const result = useStore.getState().applyQaWorkbookManualOk(doc);
+
+    expect(result).toEqual({ committed: 0 });
+    expect(useStore.getState().translationQa).toBe(cacheBefore); // wrong-target write 0(캐시 무변경)
   });
 });

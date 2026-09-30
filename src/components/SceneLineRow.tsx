@@ -417,8 +417,20 @@ export default function LineRow({
         </button>
       </div>
 
-      {voiceOpen && speakerChar && (
-        <VoiceLab sceneId={sceneId} lineIndex={index} char={speakerChar} line={line as DialogueLine} baseLocale={base} />
+      {/* 협업 pull·재분석·import 가 **같은 길이로** 이 자리의 줄을 바꾸면 LineRow 는 remount 되지 않는다(key 가
+          length 기반). VoiceLab 은 voice preset 을 마운트 시점 char 로만 초기화하므로 ① 🎙 토글과 **같은 조건**
+          canVoice 로 렌더를 막고(주인공 줄로 바뀌면 패널이 사라진다) ② 화자가 바뀌면 key 로 **VoiceLab 만** 새로
+          띄운다 — 옛 화자 preset 으로 새 화자 대사에 생성·부착하거나 💾 로 새 캐릭터 preset 을 덮지 않게.
+          ⚠️ VoiceLab 안에 prop→state 동기화 effect 를 만들거나 LineRow key 를 바꾸지 말 것(안정화 R5). */}
+      {voiceOpen && canVoice && speakerChar && (
+        <VoiceLab
+          key={speakerChar.name}
+          sceneId={sceneId}
+          lineIndex={index}
+          char={speakerChar}
+          line={line as DialogueLine}
+          baseLocale={base}
+        />
       )}
 
       {/* ⚠️ manualOutfitWritable 을 버튼과 **똑같이** 여기서도 본다 — 패널이 열린 뒤 CG cutoff 가

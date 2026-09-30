@@ -6,10 +6,19 @@
 
 <a id="line-identity"></a>
 
-## Line identity — R5 입력의 canonical (⚠️ 여기가 유일한 정본)
+## Line identity — canonical (⚠️ 여기가 유일한 정본 · R5 audit 결과 포함)
 
-**`Line` 에는 stable id 가 없다.** 줄은 **배열 인덱스**로 참조된다 —
-`setLineEmotion(sceneId, lineIndex)` · `line.voiceAssetIds` · 음성 파일명 `{charId}_{sceneLabel}_{lineIdx}`.
+**`Line` 에는 stable id 가 없다.** 동기 mutation·attach 의 lookup 좌표는 **`(sceneId, lineIndex)`** 다
+(`setLineEmotion(sceneId, lineIndex)` · `attachLineVoice(sceneId, lineIndex, …)`). 좌표와 헷갈리기 쉬운 셋은 identity 가 아니다:
+
+- `line.voiceAssetIds` 는 **Line 객체에 저장되는 line-local data** 다 — 구조 변경 시 객체째 따라간다.
+- Ren'Py 음성 basename `{charId}_{sceneLabel}_{lineIdx}` 는 **export 시점 현재 index 에서 파생되는 출력**이다
+  (저장되지 않는다 — `vo()` 와 `buildZip` 이 같은 `voiceBaseName`·같은 순회를 쓴다).
+- voice 업로드 `AssetMeta.filename`(`voice_<charName>_<lineIndex>_<locale>.<ext>`)은 localStorage·`.npproj.zip` manifest 에
+  남을 수 있는 **비권위 표시 문자열**이다(line lookup·remap·attach·export 어디에도 쓰이지 않는다).
+
+앱 밖으로 나갔다 돌아와 **실제로 판정에 쓰이는** 좌표는 QA 워크북 `_naqa` 의 `(sceneId, lineIndex)` 하나이고,
+적용 시 `isQaResultValid` exact anchor 로 현재 줄을 대조한다.
 "index 의존 금지"를 요구하면 그건 **저장 포맷 마이그레이션 + 음성 파일 경로 + `mergeScenes` 매칭**까지
 건드리는 **별도 대형 작업**이다 — 어떤 Phase 안에 슬쩍 넣지 말 것. `Scene.id` 는 있다.
 
@@ -24,12 +33,29 @@ QA / 제안 stale 판정   : content anchor 또는 revision epoch
 **R4 가 line identity 를 해결하지 않았다** — `SceneCard`/`SceneLineRow` 분리에서
 `key={`${scene.lines.length}:${i}`}` 와 그 workaround 의 semantic 을 **그대로 유지**했고
 `Line.id` · UUID · stable key helper · line migration · delete/insert identity redesign 을 하지 않았다.
-**line identity audit 은 R5 scope 다.**
 
-⚠️ **이 문서에서 R5 를 설계하지 않는다.** 위는 기존에 확정된 사실의 정리다.
 동일 입력(화자·원문이 완전히 같은 두 줄)을 구별하지 못하는 rare ambiguity 는
 번역 QA·Voice·표정 전 축에서 **같은 등급의 accepted limitation** 이다
 → [ai-workflows.md](./ai-workflows.md)
+
+### R5 — Line Identity Audit 결과 (stable ID 를 만들지 않았다)
+
+R5 는 index 의존 제거가 아니라 **identity-sensitive consumer 전수 감사**였고, production 수정은 VoiceLab mount boundary 하나다.
+
+- **구조 변경(길이·순서) production 경로는 이것뿐이다**: `deleteLine` · `insertCgEndAfterLine` · `applyAnalysis`(재분석) ·
+  `applyRemoteProject`(협업 pull) · `importProject` · `hydrate` · `resetAll` — 전부 `invalidateOutfitSuggestions` 를 탄다.
+  `updateScene({lines})` 는 production 호출이 없다(테스트의 구조 변경 시뮬레이션 전용).
+  ⚠️ 새 구조 변경 경로를 만들면 이 목록·Outfit 무효화·positional reset 을 같이 확인할 것.
+- **async 커밋(voice 단건·배치 · 번역 · 표정 · QA 실행)**: "요청 → await → 앞 줄 구조 변경 → 같은 좌표에 다른 유효 줄 → 옛 결과 도착" 에서
+  오부착 0 · 그 항목만 drop · remap 0 — 기존 anchor·재검증으로 충분하다(아래 §async 음성 첨부 · [ai-workflows.md](./ai-workflows.md)).
+- **QA 워크북**: export 뒤의 줄 삭제·삽입은 race 가 아니라 **정상 사용 경로**다 —
+  `tests/translate-qa-workbook-store.test.ts` "export 이후 구조 이동(R5)" 가 실제 `deleteLine` 으로 고정한다.
+- **`mergeScenes`** 는 content FIFO identity 라 live 좌표와 **별개 semantic** 이다(합치지 말 것).
+- **R5 가 고친 것 — VoiceLab mount boundary**: 아래 §`Scene.lines` 길이가 바뀌는 변경 의 "예외" 문단.
+- follow-up(미착수 · 지시가 있을 때만): ① voice 배치 커밋이 실행 중 먼저 커밋된 단건 부착을 선점 확인 없이 덮을 수 있다
+  (identity 가 아니라 precedence 문제 · 미검증) ② 화자 이름은 같은데 project 교체가 그 캐릭터의 `char.voice` 만 바꾸면
+  이미 열린 VoiceLab 은 새 preset 을 따라가지 않는다(R5 이전부터의 한계 · key 가 이름이라 remount 되지 않는다).
+- ⚠️ `Line.id` · UUID · tombstone · migration · index remapping · generic identity helper 는 **R5 에서도 만들지 않았다**.
 
 ## `Scene.lines` 길이가 바뀌는 변경의 필수 방어 2건
 
@@ -42,8 +68,19 @@ QA / 제안 stale 판정   : content anchor 또는 revision epoch
 
 ⚠️ **key 를 내용(text) 기반으로 만들지 말 것** — 타이핑마다 remount 돼 textarea 포커스가 날아간다.
 줄 수가 그대로인 편집(텍스트·표정·의상·숨김)에서는 remount 되지 않아야 한다.
-⚠️ 길이가 같은 복합 구조 변경(삭제+추가 동시)에서는 length 기반 reset 이 안 걸릴 수 있다 —
-단일 줄 삭제/삽입 경로엔 해당 없고 기존 동작과 동일이라 회귀가 아니다.
+⚠️ 길이가 같은 복합 구조 변경(협업 pull·재분석·import 가 삭제+추가를 동시에 가져옴)에서는 length 기반 reset 이 안 걸린다 —
+`editing`·`outfitOpen`·`voiceOpen` boolean 과 ScenePlayer `step` 의 이월은 **기존 accepted limitation 그대로**다
+(입력은 store 값에 묶인 controlled 라 보이는 줄에만 쓴다). 단일 줄 삭제/삽입 경로엔 해당 없다.
+
+**예외 — VoiceLab 은 R5 에서 따로 막았다.** VoiceLab 은 voice preset(`voiceId`·`voiceName`·`model`·`emotion`·`intensity`·
+`tempo`·`pitch`·`volume`)을 **마운트 시점 `char.voice` 로만** 초기화하는 nested form state 라, 이월되면 새 화자 대사에
+옛 화자 목소리가 canonical 부착되거나 💾 가 새 캐릭터 preset 을 덮는다(persistent wrong-target write). 그래서 `SceneLineRow` 가
+- `voiceOpen && canVoice && speakerChar` 로 렌더하고(🎙 토글과 **같은 조건** — 주인공 줄 등 voice 대상이 아니게 되면 패널이 사라진다)
+- `key={speakerChar.name}` 로 **VoiceLab 만** remount 한다(same-speaker 일반 편집에서는 remount 없음).
+
+`scripts/e2e.mjs` step 9 가 `.npproj.zip` 연속 import(같은 장면 id·같은 길이·같은 index, 화자만 교체)로 고정한다.
+⚠️ VoiceLab 안에 prop→state 동기화 effect 를 만들거나 LineRow key 를 바꾸지 말 것.
+`voiceOpen` 은 reset 하지 않는다 — **R5 가 same-length positional state 전체를 해결한 것이 아니다.**
 
 ## R4 — SceneCard / SceneLineRow 책임 경계 (새 범용 버킷을 만들지 말 것)
 

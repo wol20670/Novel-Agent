@@ -67,6 +67,17 @@ Plan → GPT 검토 → IMPLEMENTATION GO → 구현 → actual diff review → 
 | S1-B F1 | local-only → 로그인 자동 재접속 전 확인(marker · 차단형 모달) — data-loss 보정 | ✅ 확정 | `f0e9dcf` | Ubuntu CI `npm run check` 70파일/1164 + `npm run build` · Preview hosted smoke A·B·C1·C2·D·E · 이 F1 에서는 로컬 Windows 5s timeout 이 baseline `707adbf` 에서도 재현돼 환경 starvation 으로 분리했고, Ubuntu CI green 을 최종 verification evidence 로 채택 · 검증 시점 production/main = `707adbf` |
 | S1-D1/D2 | server-side hardening(RLS · Storage 정책 · room 권한) | ⏸ 미착수 | — | — (`setup.sql` 은 아직 `anon` 개방) |
 
+## 안정화 R 축 (R0~ — v1 Phase 번호·Security 축과 별개)
+
+> ⚠️ 번호를 v1 Phase·Security 축과 섞지 않는다. R0~R4 이력은
+> [`stabilization-r0-r4.md`](./docs/history/stabilization-r0-r4.md), line identity 계약 정본은
+> [scene-editor.md §Line identity](./docs/contracts/scene-editor.md#line-identity). 다음 R Phase 는 **지시가 있을 때만** 연다.
+
+| 항목 | 내용 | 상태 | 커밋 | 검증 |
+|---|---|---|---|---|
+| R0~R4 | Regression Gate · Domain Dependency · `.npproj.zip` Compat · AssetsTab 분리 · SceneCard 분리 | ✅ 확정 | 이력 참조 | [`stabilization-r0-r4.md`](./docs/history/stabilization-r0-r4.md) |
+| R5 | Line Identity Audit — identity-sensitive consumer 전수 감사(stable ID 없음) + **VoiceLab same-length 화자 교체 hardening**(`SceneLineRow` mount boundary) + QA 워크북 × 구조 이동 regression proof | ✅ 확정 (Plan 3차 리뷰 → 구현 → actual diff 리뷰 PASS) | 이 행과 같은 커밋 | T-1a/b(guard 약화 mutation 에서 FAIL 확인) · e2e step 9 pre-fix FAIL → post-fix PASS(e2e 66/66, `e2e-run` 단독) · typecheck · typecheck:tests · `dump:rpy` 23구성 256파일 byte diff 0 · golden 변경 0 · 로컬 vitest 전체·`check:full` 은 Windows 5s timeout starvation(baseline `814fbe4` 에서도 동일 재현)으로 **environment-blocked** |
+
 ## 계획 입력 — 현재 계약은 여기서 읽는다
 
 > ⚠️ **"지금 코드에 이미 있는 것"을 이 문서에 다시 서술하지 않는다** — 중복 서술은 곧 stale 해진다.
@@ -75,7 +86,7 @@ Plan → GPT 검토 → IMPLEMENTATION GO → 구현 → actual diff review → 
 | 알아야 할 것 | 정본 |
 |---|---|
 | Expression / Outfit / Translation 현재 계약 · 재튜닝 금지 목록 | [`docs/contracts/ai-workflows.md`](./docs/contracts/ai-workflows.md) |
-| Scene / Line identity(R5 입력) · CG · 수동 편집 | [`docs/contracts/scene-editor.md`](./docs/contracts/scene-editor.md) |
+| Scene / Line identity(R5 audit 결과) · CG · 수동 편집 | [`docs/contracts/scene-editor.md`](./docs/contracts/scene-editor.md) |
 | persistence · schema 5경로 · 협업 | [`docs/contracts/project-compat.md`](./docs/contracts/project-compat.md) |
 | Ren'Py 출력 · golden · 검증 절차 | [`docs/contracts/renpy-export.md`](./docs/contracts/renpy-export.md) |
 | 역사적 planning input(2026-08-11 시점 snapshot) | [`v1-ai-phases.md#phases-planinput`](./docs/history/v1-ai-phases.md#phases-planinput) |

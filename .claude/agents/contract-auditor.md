@@ -22,7 +22,7 @@ color: cyan
 
 ```
 docs/contracts/project-compat.md    persistence · schema · .npproj.zip · store · 협업
-docs/contracts/scene-editor.md      SceneCard/LineRow · line identity(R5 입력) · CG · 수동 편집
+docs/contracts/scene-editor.md      SceneCard/LineRow · line identity(R5 audit 결과) · CG · 수동 편집
 docs/contracts/renpy-export.md      생성기 · GUI 실기 함정 · golden · 검증 절차
 docs/contracts/ai-workflows.md      Expression/Outfit/Translation 동결 계약 · accepted limitation · 재튜닝 금지
 ```
