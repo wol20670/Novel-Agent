@@ -6,7 +6,9 @@
 // 사용자는 "방 코드"(6자리)와 "내 이름"만 다룬다 — 방을 새로 만들면 코드가 자동 생성되고,
 // 참가할 땐 그 코드를 그대로 입력한다.
 //
-// ⚠️ 보안 경계 아님: 방 코드를 아는 사람은 누구나 읽고 쓸 수 있다(2인 신뢰 전제).
+// ⚠️ 방 코드는 보안 경계가 아니다: supabase/setup.sql(S1-D1)은 초대된 로그인 계정(authenticated · 비익명)만
+//    허용하지만, 그 계정끼리는 방 구분이 없다 — 방 코드와 무관하게 전 방 project·전체 에셋에 접근한다
+//    (신뢰 계정 전제 · room 권한은 S1-D2).
 //
 // ── S1-B(Auth) 이후의 두 accessor ──
 // getSupabaseClient() = env 만 있으면 만들어지는 **base/Auth client**. Auth bootstrap·session 확인에 쓴다.

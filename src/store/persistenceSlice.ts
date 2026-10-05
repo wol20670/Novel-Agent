@@ -14,6 +14,7 @@ import {
   loadCollabConfig,
   pushProject as collabPushProject,
   pushAsset as collabPushAsset,
+  currentSyncLifecycle,
 } from '../collab';
 import type { State } from './types';
 import type { SliceCreator } from './context';
@@ -143,10 +144,14 @@ export const createPersistenceSlice: SliceCreator<
         // 직접 Storage 에도 올려야 상대방이 이 배경·CG·스프라이트를 받아갈 수 있다(안 하면 로컬에는
         // 있는데 서버엔 없어서 상대방 화면에 영영 안 뜨는 문제).
         if (get().collabEnabled) {
+          // 이 업로드 루프가 속한 협업 lifecycle — 루프 **시작 시 한 번만** 잡는다(S1-D1 B′-7).
+          // ⚠️ await 뒤에 다시 읽지 말 것: 그 사이 협업 OFF→ON 으로 새 lifecycle 이 열리면 옛 루프가 새 번호로
+          //    되살아나, 방금 pull 한 원격 에셋(zip 은 같은 asset id 를 쓴다)을 옛 blob 으로 덮는다.
+          const uploadLifecycle = currentSyncLifecycle();
           void (async () => {
             for (const id of newIds) {
               const blob = await getAsset(id);
-              if (blob) void collabPushAsset(id, blob);
+              if (blob) void collabPushAsset(id, blob, uploadLifecycle);
             }
           })();
           void collabPushProject(project);

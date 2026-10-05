@@ -7,21 +7,32 @@
 
 ## 현재 상태
 
-- 직전 확정: **안정화 R5(Line Identity Audit)** — stable ID 없이 identity-sensitive consumer 를 전수 감사했고,
-  production 수정은 VoiceLab mount boundary(same-length 화자 교체 hardening) 하나다.
-  계약 → [scene-editor.md §Line identity](./docs/contracts/scene-editor.md#line-identity) · 결과 index → [PHASES.md](./PHASES.md) 안정화 R 축.
-- 그 전 확정: **Security S1-B(Supabase Auth + collab runtime gate) + F1 보정(local-only → 로그인 재접속 확인)**.
-  ⚠️ **client-side gate 일 뿐**이고 서버(RLS·Storage)는 아직 `anon` 개방이다 →
-  [project-compat.md](./docs/contracts/project-compat.md) 의 `## 협업` 절 · [PHASES.md](./PHASES.md) Security 축.
+- 진행 중: **Security S1-D1(server-side data plane hardening)** — 1단계(client 보강 + `supabase/setup.sql` D1 정책)가 들어갔다.
+  - client(F-8 대응): 빈 방 초기화 INSERT-only · initial-sync write latch(project/asset upsert 차단 · 신뢰할 수 있는 initial sync 에서만 해제) ·
+    `.npproj.zip` import 업로드의 sync lifecycle binding · 원격 GC 의 "에셋 > 0 · 프로젝트 행 0" fail-closed. 코드 주석이 각 invariant 를 담는다.
+  - `setup.sql`: 초대 계정(authenticated · 비익명) 전용 정책 · legacy anon 정책 제거 · `assets` bucket private · 트랜잭션 + assertion.
+  - ⚠️ **hosted Supabase 에는 D1 SQL 이 아직 적용되지 않았다** — live 는 pre-D1(`anon` 개방 · bucket public) 상태다.
+    [project-compat.md](./docs/contracts/project-compat.md) `## 협업` 과 rule 은 repo 정의와 hosted 상태를 구분하는 transitional 문구까지 반영했고,
+    README · 협업 설정 UI 문구와 D1 최종 canonical wording 은 hosted 검증 뒤 2단계에서 정리한다. 결과 index → [PHASES.md](./PHASES.md) Security 축.
+- 직전 확정: **안정화 R5(Line Identity Audit)** — 계약 → [scene-editor.md §Line identity](./docs/contracts/scene-editor.md#line-identity).
+- 그 전 확정: **Security S1-B(Supabase Auth + collab runtime gate) + F1 보정** — ⚠️ **client-side gate 일 뿐**이다.
 - v1 동결값(역사적 고정): **implementation baseline `931a2cc`** · **repository checkpoint `5902dc8`**.
 
 ## 🎯 다음 할 일
 
-- **Security S1-D1/D2(server-side hardening: RLS·Storage 정책·room 권한)는 미착수** — 다음 Security 후보지만
-  **사용자·리뷰어 지시가 있을 때만** 연다. 그때 `supabase/setup.sql` 상단 주석의 "anon 키" 표현도 정리한다
-  (클라이언트 키는 publishable key — SQL role `anon` 과 혼동 여지).
-- 운영: 친구 계정 재초대(Supabase 기본 SMTP 발송 한도가 빡빡하니 초대 간격을 둔다) ·
-  Supabase 쪽 legacy anon key 정리 여부는 사용자 결정.
+- **S1-D1 남은 순서**(각 단계는 사용자 명시 GO · 승인 게이트를 스스로 넘지 말 것):
+  1. production 배포에 client 보강이 들어갔는지 확인 → **두 사용자 모두 새 build 로 새로고침**(옛 탭은 F-8 보호가 없다).
+  2. **hosted SQL APPLY GO** → 사용자가 Supabase SQL Editor 에서 `supabase/setup.sql` 전체 실행(Claude 는 DB 자격증명·`service_role` 을 받지 않는다).
+     실패 시 대응은 `setup.sql` 머리 주석에 있다(트랜잭션 거부 → 멈춤 · bucket UPDATE 거부 → 대시보드 Public off 후 재실행).
+  3. 검증: 정책 audit(projects 3 · storage.objects 4 · 전부 `{authenticated}` · `public=false`) → authenticated hosted smoke(GC 는 계산까지만) →
+     anon/public probe(SQL 적용 **후에만** · 키는 환경변수로만 · status 단독 판정 금지) → 테스트 데이터 정리.
+  4. 2단계 canonical finalization: `project-compat.md` `## 협업` · `.claude/rules/project-compat.md` · README §실시간 협업 ·
+     `src/components/left/CollabSettings.tsx` 보안 문구(초대 계정끼리 · 계정 사이 방별 권한 분리 없음) · PHASES/HANDOFF.
+- S1-D1 follow-up(**지시가 있을 때만**): F-9 pull 이 network throw 로 실패한 lifecycle 뒤 자동저장 upsert 가 pull-first 없이 원격을 덮을 수 있음(pre-existing) ·
+  F-10 boolean active 라 OFF→ON 사이 옛 startCollab continuation(pull 적용·채널·status)이 살아날 수 있음(pre-existing) ·
+  lifecycle 전환 시 폐기된 import 에셋 업로드는 자동 재전송되지 않음(수용한 availability residual).
+- **S1-D2(Realtime private channel · Presence authorization · room 권한 · 필요 시 GC/asset namespace 재설계)는 미착수** — D1 이 끝난 뒤
+  **사용자·리뷰어 지시가 있을 때만** 연다. D1 은 end-to-end room authorization 이 아니다(초대 계정끼리는 전 방·전체 에셋 접근).
 - v1 축은 **정해진 다음 필수 작업이 없다.** ⚠️ **새 blocker 가 없는 한 Phase 20+ 를 만들지 말 것** —
   backlog 가 존재한다는 사실만으로 Phase 를 추가하지 않는다. "종료"의 뜻은 *영원히 완성*이 아니라
   **현재 계획된 v1 핵심 개발의 종료**다.
@@ -42,7 +53,7 @@
 
 ## 📎 지금 필요한 contract 링크
 
-- [project-compat.md](./docs/contracts/project-compat.md) — persistence · `.npproj.zip` · store · 협업 · **Auth 경계 · F1 · 보안 한계**
+- [project-compat.md](./docs/contracts/project-compat.md) — persistence · `.npproj.zip` · store · 협업 · **Auth 경계 · F1 · 보안 한계**(D1 서술은 2단계에서 갱신)
 - [scene-editor.md](./docs/contracts/scene-editor.md) — SceneCard/LineRow · **line identity(R5 audit 결과 · VoiceLab)** · CG · 수동 편집
 - [renpy-export.md](./docs/contracts/renpy-export.md) — 생성기 · GUI 실기 함정 · golden · 검증 절차
 - [ai-workflows.md](./docs/contracts/ai-workflows.md) — Expression/Outfit/Translation 동결 계약 · 재튜닝 금지
@@ -62,5 +73,5 @@
 
 ## ✅ 방금 반영됨 (`/handoff-maintain` 이 git log 와 대조해 반영된 줄을 지운다)
 
-- **안정화 R5 Line Identity Audit** — `SceneLineRow` VoiceLab mount boundary · QA 워크북 × 구조 이동 테스트 ·
-  e2e step 9 · `scene-editor.md` §Line identity(R5 결과) · `.claude/rules/scene-editor.md` · PHASES 안정화 R 축.
+- **Security S1-D1 1단계** — `src/collab/{sync,index,assetsSync,assetsGc}.ts` F-8 보강 · `src/store/{assetSlice,persistenceSlice}.ts` ·
+  `supabase/setup.sql` D1 정책(live 미적용) · `tests/collab-auth-gate.test.ts` S1-D1 F-8 블록 · PHASES Security 축.

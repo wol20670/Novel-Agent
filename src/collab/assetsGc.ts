@@ -72,30 +72,38 @@ export async function listRemoteAssets(): Promise<RemoteScan> {
   return { assets: out, failed: false };
 }
 
-/** 참조 집합 + 실패 여부. failed 면 호출부는 **반드시 스윕을 중단**해야 한다(RemoteScan 주석 참고). */
+/**
+ * 참조 집합 + 실패 여부 + 읽은 프로젝트 행 수. failed 면 호출부는 **반드시 스윕을 중단**해야 한다(RemoteScan 주석 참고).
+ * rowCount 는 S1-D1 F-8 판정용이다 — RLS 는 걸러진 행을 **에러 없이** 빼므로, 무인증 fallback 으로 나간 조회는
+ * failed:false · 행 0 으로 돌아온다. 호출부(assetSlice.findRemoteOrphanAssets)가 "원격 에셋은 있는데 행 0"을
+ * 불완전 스캔으로 보고 중단한다.
+ */
 interface RemoteRefScan {
   ids: Set<string>;
   failed: boolean;
+  rowCount: number;
 }
 
 /**
  * 모든 방의 프로젝트가 참조하는 에셋 id 합집합. 방 필터 없이 projects 테이블 전체를 훑는다 —
- * anon SELECT 가 열려 있어(supabase/setup.sql) 전 방 조회가 가능하고, 이 스윕은 "어느 방이든
+ * S1-D1 이후 authenticated(초대 계정)는 전 방 행을 읽을 수 있고(supabase/setup.sql), 이 스윕은 "어느 방이든
  * 쓰고 있으면 지우면 안 된다"가 목적이라 필터링하면 오히려 위험하다.
+ * ⚠️ room 단위 SELECT 를 도입하면 RLS 가 다른 방 행을 **에러 없이** 빼서 이 스윕이 부분 집합을 성공으로 받는다
+ *    (남의 방 에셋을 고아로 판정 — S1-D1 F-4). 그때는 GC 를 재설계해야 한다.
  */
 export async function collectRemoteReferencedIds(): Promise<RemoteRefScan> {
   const ids = new Set<string>();
   const supabase = await getCollabClient();
-  if (!supabase) return { ids, failed: false };
+  if (!supabase) return { ids, failed: false, rowCount: 0 };
 
   const { data, error } = await supabase.from('projects').select('data');
   // 조회가 끝난 뒤 로그아웃됐다면 이 참조 집합이 완전한지 보증할 수 없다 — 불완전한 집합을
   // 성공으로 넘기면 그 방이 쓰는 파일까지 고아로 판정된다(가장 위험한 실패 모드).
-  if (!isCollabActive()) return { ids, failed: true };
+  if (!isCollabActive()) return { ids, failed: true, rowCount: 0 };
   if (error) {
     // 여기서 빈 집합을 성공인 척 돌려주면 모든 원격 파일이 고아로 판정된다 — 가장 위험한 실패 모드.
     console.warn('[collab] 원격 프로젝트 목록 조회 실패:', error.message);
-    return { ids, failed: true };
+    return { ids, failed: true, rowCount: 0 };
   }
   let rowFailed = false;
   for (const row of data ?? []) {
@@ -111,7 +119,7 @@ export async function collectRemoteReferencedIds(): Promise<RemoteRefScan> {
       rowFailed = true;
     }
   }
-  return { ids, failed: rowFailed };
+  return { ids, failed: rowFailed, rowCount: (data ?? []).length };
 }
 
 /** 배치 삭제. 실패분 id 를 돌려준다(throw 하지 않음 — 부분 성공을 호출부가 그대로 보고할 수 있게). */

@@ -480,6 +480,13 @@ export const createAssetSlice: SliceCreator<
         return null; // [] 로 돌려주면 호출부가 "지울 게 없음"으로 오해해 이 에러 토스트를 덮어쓴다.
       }
       if (remote.assets.length === 0) return [];
+      // 원격 에셋은 있는데 프로젝트 행이 0 — projects 는 DELETE 정책이 없어 앱 경로로는 행이 사라지지 않는다(S1-D1).
+      // 세션 토큰이 잠깐 비어 참조 조회만 무인증으로 나가면 RLS 가 행을 **에러 없이** 숨겨 이렇게 보인다(F-8).
+      // 불완전 스캔으로 보고 중단한다 — 계속하면 다른 방이 쓰는 에셋까지 고아 후보가 된다.
+      if (remoteReferenced.rowCount === 0) {
+        flash('서버 프로젝트 목록이 비어 보여 정리를 중단했습니다. 다시 로그인하거나 잠시 뒤 다시 시도하세요.', 'error');
+        return null;
+      }
       // 원격 스캔은 "지금까지 push 된 프로젝트 JSON"만 보는데, 로컬 편집은 autoSave 디바운스(600ms)를
       // 타고 나가고 아예 한 번도 push 안 된 방(막 시작한 세션 등)은 원격 스캔에 안 잡힌다. 그래서
       // 로컬 프로젝트의 참조 집합과 로컬 AssetMeta 맵 키까지 합쳐야 지금 쓰고 있는 걸 고아로

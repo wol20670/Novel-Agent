@@ -54,7 +54,17 @@ function fakeIndexedDB() {
     if (!stores.has(name)) stores.set(name, new Map());
     const m = stores.get(name)!;
     return {
-      get: (k: IDBValidKey) => req(m.get(k)),
+      get: (k: IDBValidKey) => {
+        // S1-D1 T-F8-1h: 특정 key 의 읽기를 테스트가 정한 시점까지 멈춘다(그 사이 협업 lifecycle 을 바꾼다).
+        const gate = h.idbGetGate?.(k) ?? null;
+        if (!gate) return req(m.get(k));
+        const r: Record<string, unknown> = { result: undefined, error: null };
+        void gate.then(() => {
+          r.result = m.get(k);
+          setTimeout(() => (r.onsuccess as (() => void) | undefined)?.(), 0);
+        });
+        return r;
+      },
       put: (v: unknown, k: IDBValidKey) => { m.set(k, v); return req(undefined); },
       delete: (k: IDBValidKey) => { m.delete(k); return req(undefined); },
     };
@@ -105,6 +115,18 @@ interface Harness {
   signInResolveLate: boolean;
   /** signInResolveLate 의 macrotask 를 넘긴 **직후, resolve 직전** 실행 — 그 전이 틈의 상태를 관측한다. */
   signInLateHook: (() => void) | null;
+  // ── S1-D1 F-8 ──
+  /** projects.insert 결과(빈 방 초기화). insertImpl 이 있으면 그쪽이 우선한다. */
+  insertResult: { error: { code?: string; message: string } | null };
+  /** 있으면 insert 가 이 promise 를 돌려준다 — 응답을 늦춰 lifecycle 전환을 끼워 넣는다. */
+  insertImpl: (() => Promise<{ error: { code?: string; message: string } | null }>) | null;
+  /** 있으면 pull(maybeSingle)이 이 promise 를 돌려준다 — 새 lifecycle 의 pull 을 멈춘다. */
+  pullImpl: (() => Promise<{ data: unknown; error: { message: string } | null }>) | null;
+  /** 실제로 보낸 행(호출 shape · version 관측용). */
+  insertRows: Record<string, unknown>[];
+  upsertRows: Record<string, unknown>[];
+  /** fake IndexedDB get 지연 — promise 를 주면 그게 resolve 된 뒤에 onsuccess 를 발화한다. */
+  idbGetGate: ((key: IDBValidKey) => Promise<void> | null) | null;
 }
 
 const h: Harness = {} as Harness;
@@ -122,6 +144,7 @@ function resetHarness(): void {
     createClient: 0,
     from: 0,
     upsert: 0,
+    insert: 0,
     pull: 0,
     projectsSelect: 0,
     list: 0,
@@ -147,6 +170,12 @@ function resetHarness(): void {
   h.signInHook = null;
   h.signInResolveLate = false;
   h.signInLateHook = null;
+  h.insertResult = { error: null };
+  h.insertImpl = null;
+  h.pullImpl = null;
+  h.insertRows = [];
+  h.upsertRows = [];
+  h.idbGetGate = null;
 }
 
 /** 원격 요청 카운터 합계 — "network 0" 단언에 쓴다. */
@@ -217,6 +246,7 @@ vi.mock('@supabase/supabase-js', () => {
           async maybeSingle() {
             h.calls.pull += 1;
             h.pullHook?.();
+            if (h.pullImpl) return h.pullImpl();
             return h.pullResult;
           },
         }),
@@ -227,9 +257,16 @@ vi.mock('@supabase/supabase-js', () => {
         },
       };
       return {
-        async upsert() {
+        async upsert(row: Record<string, unknown>) {
           h.calls.upsert += 1;
+          h.upsertRows.push(row);
           return { error: null };
+        },
+        async insert(row: Record<string, unknown>) {
+          h.calls.insert += 1;
+          h.insertRows.push(row);
+          if (h.insertImpl) return h.insertImpl();
+          return h.insertResult;
         },
         select: () => selectResult,
       };
@@ -1616,5 +1653,364 @@ describe('S1-B ⑫ 정적 불변식', () => {
     // signed-out 처리에서 stopCollab 은 반드시 setTimeout 안에 있어야 한다.
     expect(/setTimeout\(\s*\(\)\s*=>\s*\{[^}]*stopCollab\(\)/.test(slice)).toBe(true);
     expect(/queueMicrotask/.test(slice)).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// S1-D1 F-8 — D1 이후 세션 토큰이 잠깐 비면 요청이 publishable key(DB role anon)로 나가고, RLS 가 행을
+// **에러 없이** 숨겨 pull 이 "빈 방"으로 보일 수 있다. 그때 숨은 원격 방·에셋을 로컬로 덮지 않는지 본다.
+// 하네스에서는 그 상태를 "pull = null(에러 없음) + INSERT = PK 충돌(23505)"로 재현한다.
+// 모든 lifecycle 전환은 production 경로(store.setCollabConfig)로만 만든다 — startCollab/resetSyncState 직접 호출 없음.
+describe('S1-D1 F-8 initial-sync hardening', () => {
+  const ROOM = 'abc123';
+  const DUP = { error: { code: '23505', message: 'duplicate key value violates unique constraint "projects_pkey"' } };
+  const OLD = new Date(0).toISOString();
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  /** 조건이 설 때까지 timer tick 을 흘린다(고정 sleep 대신 결정적 대기). */
+  async function until(cond: () => boolean, what: string): Promise<void> {
+    for (let i = 0; i < 50; i++) {
+      if (cond()) return;
+      await flushTimers();
+    }
+    throw new Error(`도달하지 못했다: ${what}`);
+  }
+
+  /** 로그인됐지만 협업은 꺼진 store — intent 를 심지 않아 자동 재접속이 없다. 로컬 project 제목 = LOCAL. */
+  async function signedInStore() {
+    vi.resetModules();
+    const { useStore } = await import('../src/store');
+    const sync = await import('../src/collab/sync');
+    const assetsSync = await import('../src/collab/assetsSync');
+    const { saveProject } = await import('../src/storage/projectStore');
+    const { emptyProject } = await import('../src/types');
+    saveProject({ ...emptyProject(), title: 'LOCAL' }, {});
+    useStore.getState().hydrate();
+    h.session = { user: { id: 'u1', email: 'a@b.c' } };
+    await useStore.getState().bootAuth();
+    await flushTimers();
+    const statuses: string[] = [];
+    useStore.subscribe((s, prev) => {
+      if (s.collabStatus !== prev.collabStatus) statuses.push(s.collabStatus);
+    });
+    const on = () => useStore.getState().setCollabConfig({ room: ROOM, displayName: '나', enabled: true });
+    const off = () => useStore.getState().setCollabConfig({ enabled: false });
+    /** 원격에 이미 있는 방(pull 결과). */
+    const remote = (title: string) => ({
+      data: { data: { ...emptyProject(), title }, version: 5, updated_by: null },
+      error: null,
+    });
+    return { useStore, sync, assetsSync, statuses, on, off, remote, emptyProject };
+  }
+
+  /** lifecycle A: pull 이 빈 방으로 보였고 INSERT 가 숨은 행과 PK 충돌 → latch. */
+  async function failedLifecycle() {
+    const m = await signedInStore();
+    h.insertResult = DUP; // pullResult 기본값 = { data: null, error: null }
+    await m.on();
+    return m;
+  }
+
+  it('T-F8-1 pull 이 빈 방으로 보여도 초기화는 INSERT 만 하고, PK 충돌이면 error 로 멈춘다', async () => {
+    const { useStore, sync, statuses } = await failedLifecycle();
+    expect(h.calls.pull).toBe(1);
+    expect(h.calls.insert).toBe(1);
+    expect(h.calls.upsert).toBe(0); // 초기화에 upsert 를 쓰지 않았다 → 숨은 원격 방을 덮지 않는다
+    expect(useStore.getState().project.title).toBe('LOCAL'); // 원격 적용 없음
+    expect(useStore.getState().collabStatus).toBe('error');
+    expect(statuses).not.toContain('online');
+    expect(h.calls.channel).toBe(0); // project 구독·presence 미시작
+    expect(sync.isInitialSyncBlocked()).toBe(true);
+  });
+
+  it('T-F8-1b 실패한 lifecycle 에서는 직접 push 도 자동저장도 원격 upsert 를 내지 않는다(로컬 저장은 된다)', async () => {
+    const { useStore, sync } = await failedLifecycle();
+    // runtime 은 기존 계약대로 열려 있다 → 자동저장이 pushProject 를 부르는 위험 전제가 실재한다.
+    expect(useStore.getState().collabEnabled).toBe(true);
+    await sync.pushProject(useStore.getState().project);
+    useStore.getState().updateProjectMeta({ title: 'EDITED' });
+    await new Promise((r) => setTimeout(r, 700)); // autoSave 600ms 디바운스
+    await flushTimers();
+    expect(h.calls.upsert).toBe(0);
+    expect(useStore.getState().collabStatus).toBe('error');
+    const { loadProject } = await import('../src/storage/projectStore');
+    expect(loadProject()?.project.title).toBe('EDITED'); // 로컬 편집은 보존
+  });
+
+  it('T-F8-1c 실제 재시작(협업 끄기→켜기)에서 pull-first 를 통과한 뒤에야 project push 가 복구된다', async () => {
+    const { useStore, sync, on, off, remote } = await failedLifecycle();
+    await off();
+    h.pullResult = remote('REMOTE');
+    await on();
+    expect(h.calls.pull).toBe(2);
+    expect(h.calls.insert).toBe(1); // 두 번째 lifecycle 은 INSERT 하지 않았다
+    expect(useStore.getState().project.title).toBe('REMOTE'); // pull-first
+    expect(useStore.getState().collabStatus).toBe('online');
+    expect(sync.isInitialSyncBlocked()).toBe(false);
+    await sync.pushProject(useStore.getState().project);
+    expect(h.calls.upsert).toBe(1);
+  });
+
+  it('T-F8-1d 실패한 lifecycle 에서는 에셋 upsert 도 막히고, 실제 재시작 뒤 복구된다', async () => {
+    const { useStore, assetsSync, on, off, remote } = await failedLifecycle();
+    await assetsSync.pushAsset('a_known', new Blob(['old']));
+    expect(h.calls.upload).toBe(0);
+    expect(useStore.getState().collabStatus).toBe('error');
+    await off();
+    h.pullResult = remote('REMOTE');
+    await on();
+    expect(useStore.getState().collabStatus).toBe('online');
+    await assetsSync.pushAsset('a_known', new Blob(['new']));
+    expect(h.calls.upload).toBe(1);
+  });
+
+  it('T-F8-1f 옛 lifecycle 의 INSERT 가 새 lifecycle 정상화 뒤 늦게 실패해도 latch·status 를 오염시키지 않는다', async () => {
+    const { useStore, sync, assetsSync, on, off, remote } = await signedInStore();
+    const dA = deferred<{ error: { code?: string; message: string } | null }>();
+    h.insertImpl = () => dA.promise;
+    const pA = on(); // lifecycle A — INSERT 응답을 기다리며 멈춘다
+    await until(() => h.calls.insert === 1, 'A 의 INSERT in-flight');
+    await off();
+    h.insertImpl = null;
+    h.pullResult = remote('REMOTE');
+    await on(); // lifecycle B — pull-first 로 정상 연결
+    expect(useStore.getState().collabStatus).toBe('online');
+    expect(h.calls.insert).toBe(1); // B 는 INSERT 하지 않았다
+    expect(sync.isInitialSyncBlocked()).toBe(false);
+
+    dA.resolve(DUP); // A 의 INSERT 가 이제야 실패로 돌아온다
+    await pA;
+    await flushTimers();
+    expect(useStore.getState().collabStatus).toBe('online'); // B 를 error 로 덮지 않았다
+    expect(sync.isInitialSyncBlocked()).toBe(false); // latch 를 다시 세우지 않았다
+    await sync.pushProject(useStore.getState().project);
+    expect(h.calls.upsert).toBe(1);
+    expect(h.upsertRows[0].version).toBe(6); // B 의 version progression(원격 5 → 6) 그대로
+    await assetsSync.pushAsset('a_new', new Blob(['x']));
+    expect(h.calls.upload).toBe(1);
+  });
+
+  it('T-F8-1f2 옛 lifecycle 의 INSERT 가 늦게 **성공**해도 새 lifecycle 의 version·채널·status 를 건드리지 않는다', async () => {
+    const { useStore, sync, on, off, remote } = await signedInStore();
+    const dA = deferred<{ error: { code?: string; message: string } | null }>();
+    h.insertImpl = () => dA.promise;
+    const pA = on();
+    await until(() => h.calls.insert === 1, 'A 의 INSERT in-flight');
+    await off();
+    h.insertImpl = null;
+    h.pullResult = remote('REMOTE');
+    await on();
+    expect(useStore.getState().collabStatus).toBe('online');
+    const channelsB = h.calls.channel;
+
+    dA.resolve({ error: null }); // 서버에는 이미 도착해 성공한 옛 요청
+    await pA;
+    await flushTimers();
+    expect(h.calls.channel).toBe(channelsB); // A 가 구독·presence 로 넘어가지 않았다
+    expect(useStore.getState().collabStatus).toBe('online');
+    expect(sync.isInitialSyncBlocked()).toBe(false);
+    await sync.pushProject(useStore.getState().project);
+    expect(h.upsertRows[0].version).toBe(6); // A 의 성공이 localVersion 을 전진시키지 않았다(1 이 아니라 6)
+  });
+
+  it('T-F8-1g 실패 뒤 재시작한 lifecycle 이 pull 을 기다리는 동안엔 project/asset write 가 계속 막혀 있다', async () => {
+    const { useStore, sync, assetsSync, on, off, remote } = await failedLifecycle();
+    await off();
+    const dB = deferred<{ data: unknown; error: { message: string } | null }>();
+    h.pullImpl = () => dB.promise;
+    const pB = on(); // lifecycle B — pull 응답 전에서 멈춘다
+    await until(() => h.calls.pull === 2, 'B 의 pull 요청 도달');
+    expect(sync.isInitialSyncBlocked()).toBe(true); // start 만으로는 풀리지 않는다
+    await sync.pushProject(useStore.getState().project);
+    await assetsSync.pushAsset('a_known', new Blob(['old']));
+    expect(h.calls.upsert).toBe(0);
+    expect(h.calls.upload).toBe(0);
+
+    dB.resolve(remote('REMOTE'));
+    await pB;
+    expect(useStore.getState().project.title).toBe('REMOTE');
+    expect(sync.isInitialSyncBlocked()).toBe(false);
+    expect(useStore.getState().collabStatus).toBe('online');
+    expect(h.calls.insert).toBe(1);
+    await sync.pushProject(useStore.getState().project);
+    expect(h.calls.upsert).toBe(1);
+    await assetsSync.pushAsset('a_known', new Blob(['new']));
+    expect(h.calls.upload).toBe(1);
+  });
+
+  // JSZip 은 Blob 을 FileReader 로 읽는데 node 에는 FileReader 가 없다 — 테스트 환경만의 제약이라
+  // transfer-assets-roundtrip.test.ts 와 같은 최소 shim 을 이 테스트에서만 심는다(afterEach 가 unstub).
+  class FileReaderShim {
+    onload: ((e: { target: { result: ArrayBuffer } }) => void) | null = null;
+    onerror: ((e: { target: { error: unknown } }) => void) | null = null;
+    readAsArrayBuffer(blob: Blob): void {
+      blob.arrayBuffer().then(
+        (result) => this.onload?.({ target: { result } }),
+        (error) => this.onerror?.({ target: { error } }),
+      );
+    }
+  }
+
+  it('T-F8-1h 실패한 lifecycle 에서 시작된 .npproj.zip 에셋 업로드는 새 lifecycle 정상화 뒤에도 Storage 에 쓰지 못한다', async () => {
+    vi.stubGlobal('FileReader', FileReaderShim);
+    const { useStore, sync, assetsSync, on, off, remote, emptyProject } = await failedLifecycle();
+    const { putAsset } = await import('../src/storage/assetStore');
+    const { exportProjectFile } = await import('../src/project/transfer');
+    // 원격 방이 쓰는 것과 같은 asset id 를 가진 옛 zip — import 는 id 를 그대로 보존한다.
+    await putAsset('a_known', new Blob(['OLD'], { type: 'image/png' }));
+    const { blob: zip } = await exportProjectFile(
+      { ...emptyProject(), title: 'OLD-ZIP' },
+      {
+        a_known: {
+          id: 'a_known',
+          kind: 'background',
+          prompt: '',
+          mime: 'image/png',
+          source: 'upload',
+          filename: 'old.png',
+          createdAt: 1,
+        },
+      },
+    );
+    const dGet = deferred<void>();
+    let gateHits = 0;
+    h.idbGetGate = (k) => {
+      if (k !== 'a_known') return null;
+      gateHits += 1;
+      return dGet.promise;
+    };
+
+    await useStore.getState().importProject(zip as unknown as File);
+    expect(useStore.getState().project.title).toBe('OLD-ZIP'); // 로컬 import 는 성공
+    await until(() => gateHits === 1, 'import 업로드 루프가 a_known 읽기에서 멈춤');
+    expect(h.calls.upsert).toBe(0); // import 의 project push 는 latch 가 막았다
+    expect(h.calls.upload).toBe(0);
+
+    await off();
+    h.pullResult = remote('REMOTE');
+    await on(); // lifecycle B — pull-first 성공 → latch 해제
+    expect(useStore.getState().project.title).toBe('REMOTE');
+    expect(sync.isInitialSyncBlocked()).toBe(false);
+    expect(useStore.getState().collabStatus).toBe('online');
+
+    h.idbGetGate = null;
+    dGet.resolve(); // A 시절 루프가 이제 깨어나 a_known 을 올리려 한다
+    await flushTimers();
+    await flushTimers();
+    expect(gateHits).toBe(1);
+    expect(h.calls.upload).toBe(0); // 옛 producer 는 Storage 에 쓰지 못했다
+    expect(useStore.getState().collabStatus).toBe('online'); // status 도 덮지 않았다
+    expect(useStore.getState().project.title).toBe('REMOTE'); // 옛 import project 로 되돌아가지 않았다
+    await assetsSync.pushAsset('a_new', new Blob(['x']));
+    expect(h.calls.upload).toBe(1); // 현재 lifecycle 의 write 는 살아 있다
+  });
+
+  it('T-F8-1i 실패 뒤 재시작한 lifecycle 이 진짜 빈 방이면 INSERT 성공으로 latch 가 풀린다', async () => {
+    const { useStore, sync, assetsSync, on, off } = await failedLifecycle();
+    await off();
+    h.insertResult = { error: null }; // pullResult 는 여전히 null — 이번엔 정말 빈 방(다른 방 코드 등)
+    await on();
+    expect(h.calls.insert).toBe(2);
+    expect(useStore.getState().collabStatus).toBe('online');
+    expect(sync.isInitialSyncBlocked()).toBe(false);
+    await sync.pushProject(useStore.getState().project);
+    expect(h.calls.upsert).toBe(1);
+    expect(h.upsertRows[0].version).toBe(2);
+    await assetsSync.pushAsset('a_new', new Blob(['x']));
+    expect(h.calls.upload).toBe(1);
+  });
+
+  it('T-F8-1j latch 상태에서 로그아웃 직후(teardown 전 한 tick) push 는 off 뱃지를 error 로 되살리지 않는다', async () => {
+    const { useStore, sync, assetsSync } = await failedLifecycle();
+    expect(useStore.getState().collabStatus).toBe('error');
+    h.authCbs.forEach((cb) => cb('SIGNED_OUT', null)); // runtime 은 동기로 닫히고 handler 해제는 다음 tick
+    expect(useStore.getState().collabStatus).toBe('off');
+    await assetsSync.pushAsset('a_known', new Blob(['old']));
+    await sync.pushProject(useStore.getState().project);
+    expect(useStore.getState().collabStatus).toBe('off');
+    expect(h.calls.upload).toBe(0);
+    expect(h.calls.upsert).toBe(0);
+    await flushTimers();
+  });
+
+  it('T-F8-2 진짜 새 방은 INSERT 1회(version 1)로 만들고 정상 연결된다', async () => {
+    const { useStore, sync, on } = await signedInStore();
+    await on();
+    expect(h.calls.insert).toBe(1);
+    expect(h.insertRows[0]).toMatchObject({ room: ROOM, version: 1 });
+    expect(typeof h.insertRows[0].client_id).toBe('string');
+    expect((h.insertRows[0].data as { title: string }).title).toBe('LOCAL');
+    expect(h.calls.upsert).toBe(0);
+    expect(h.calls.channel).toBe(2); // project 구독 + presence
+    expect(useStore.getState().collabStatus).toBe('online');
+    expect(sync.isInitialSyncBlocked()).toBe(false);
+  });
+
+  it('T-F8-2b 새 방 생성 뒤 첫 push 는 upsert 이고 version 이 2 로 이어진다', async () => {
+    const { useStore, sync, on } = await signedInStore();
+    await on();
+    await sync.pushProject(useStore.getState().project);
+    expect(h.calls.upsert).toBe(1);
+    expect(h.calls.insert).toBe(1);
+    expect(h.insertRows[0].version).toBe(1);
+    expect(h.upsertRows[0].version).toBe(2);
+    expect(Object.keys(h.upsertRows[0]).sort()).toEqual(Object.keys(h.insertRows[0]).sort());
+  });
+
+  /** 원격 방에 정상 연결된 store(GC 판정용). */
+  async function onlineWithRemote() {
+    const m = await signedInStore();
+    h.pullResult = m.remote('REMOTE');
+    await m.on();
+    expect(m.useStore.getState().collabStatus).toBe('online');
+    return m;
+  }
+
+  it('T-F8-3 원격 에셋은 있는데 프로젝트 행이 0 이면 불완전 스캔으로 보고 정리를 중단한다', async () => {
+    const { useStore } = await onlineWithRemote();
+    h.listPages = [[{ name: 'a_orphan', metadata: { size: 1 }, created_at: OLD }]];
+    h.projectsSelectResult = { data: [], error: null };
+    const res = await useStore.getState().findRemoteOrphanAssets(0);
+    expect(res).toBeNull();
+    expect(useStore.getState().toastType).toBe('error');
+    expect(useStore.getState().toast).toContain('중단');
+    expect(h.calls.remove).toBe(0);
+  });
+
+  it('T-F8-4 원격 에셋도 프로젝트 행도 0 이면 정상 empty 다', async () => {
+    const { useStore } = await onlineWithRemote();
+    h.listPages = [[]];
+    h.projectsSelectResult = { data: [], error: null };
+    const toastBefore = useStore.getState().toast;
+    const res = await useStore.getState().findRemoteOrphanAssets(0);
+    expect(res).toEqual([]);
+    expect(useStore.getState().toast).toBe(toastBefore); // error toast 없음
+  });
+
+  it('T-F8-5 다른 방이 참조하는 에셋은 고아가 아니다(전 행 참조 합집합 유지)', async () => {
+    const { useStore, emptyProject } = await onlineWithRemote();
+    h.listPages = [
+      [
+        { name: 'a_orphan', metadata: { size: 1 }, created_at: OLD },
+        { name: 'a_used', metadata: { size: 1 }, created_at: OLD },
+      ],
+    ];
+    h.projectsSelectResult = {
+      data: [
+        { data: { ...emptyProject(), title: 'ROOM-X' } },
+        { data: projectWith([scene({ backgroundAssetId: 'a_used' })]) },
+      ],
+      error: null,
+    };
+    const res = await useStore.getState().findRemoteOrphanAssets(0);
+    const ids = (res ?? []).map((a) => a.id);
+    expect(ids).toContain('a_orphan');
+    expect(ids).not.toContain('a_used');
+    expect(h.calls.remove).toBe(0);
   });
 });

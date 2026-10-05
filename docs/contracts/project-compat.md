@@ -149,11 +149,13 @@ buildZip    → generateRenpyFiles·resolveItems·resolveCgs·charIdMap·voiceBa
 ## 협업 (`src/collab/`)
 
 - Supabase last-write-wins relay(저장마다 600ms 디바운스 push) + 프레즌스. 에코 판정은 세션별 `client_id`.
-- ⚠️ `projects` 테이블·Storage `assets` 버킷 모두 **RLS on + `to anon, authenticated` 개방 정책** 필수
-  (정책 없이 RLS 만 켜면 400). predicate 는 operation 별로 다르다 — `projects` 는 `true`
-  (select `using (true)` · insert `with check (true)` · update `using (true) with check (true)`),
-  Storage 는 `bucket_id = 'assets'`(select·delete `using` · insert `with check` · update 둘 다). 전체 SQL = `supabase/setup.sql`(idempotent) — 재구축뿐 아니라
-  **스키마가 바뀌는 버전업 배포 전에도 재실행**. 이 정책은 S1-B 이후에도 **그대로**다(아래 §보안 한계).
+- ⚠️ `projects` 테이블·Storage `assets` 버킷 모두 **RLS on + 정책** 필수(정책 없이 RLS 만 켜면 400).
+  전체 SQL = `supabase/setup.sql`(idempotent) — 재구축뿐 아니라 **스키마가 바뀌는 버전업 배포 전에도 재실행**.
+  ⚠️ **repo 의 SQL 정의 ≠ hosted 적용 상태**(아래 §보안 한계):
+  - checked-in `setup.sql` = **S1-D1 data-plane 정책** — `to authenticated` + 비익명(`is_anonymous`) 조건 ·
+    `projects` select/insert/update(DELETE 없음) · Storage select/insert/update/delete(`bucket_id = 'assets'`) · bucket private · 트랜잭션 + assertion.
+  - 그 이전 정책 = `to anon, authenticated` 개방(`projects` 는 `true` · Storage 는 `bucket_id = 'assets'`). hosted Supabase 는 D1 SQL 이
+    적용·검증되기 전까지 이 상태다 — 현재 hosted 상태는 [`PHASES.md`](../../PHASES.md) Security 축 · `HANDOFF.md` · 실제 policy audit 으로 확인한다.
 - **에셋 삭제는 로컬(IndexedDB)에만 반영된다** — 교체·해제·초기화 어디에도 원격 삭제가 없어 버킷은 단조 증가한다.
   회수는 에셋 탭 "☁️ 협업 Storage 정리" 스윕이 유일한 경로(`collab/assetsGc.ts` + `assetRefs.diffRemoteOrphans`).
   **교체 즉시 원격 삭제는 일부러 안 넣었다** — 상대가 아직 pull 안 했거나 LWW 로 옛 프로젝트가 다시 올라오면
@@ -161,13 +163,13 @@ buildZip    → generateRenpyFiles·resolveItems·resolveCgs·charIdMap·voiceBa
 - 스윕 판정의 두 가드(하나라도 빼면 데이터 손실):
   **① projects 전 행의 참조 합집합**(Storage 키가 평면 구조라 방 구분이 없다)
   **② 업로드 후 유예 기간**(`REMOTE_GRACE_OPTIONS` — 기본 7일, UI 에서 1일·전체로 변경 가능).
-- ⚠️ **실제 노출 범위(중요 — "방 코드 아는 사람만"보다 넓다)**: 클라이언트 키(현재 publishable key,
-  S1-B 이전엔 legacy anon key)는 설계상 번들에 구워져 공개된다.
-  RLS 정책에 방·사용자 조건이 없고(`true` / `bucket_id = 'assets'`) Storage 오브젝트 키가 평면 구조라
+- ⚠️ **pre-D1 노출 범위(D1 SQL 이 hosted 에 적용·검증되기 전의 live 상태 — "방 코드 아는 사람만"보다 넓다)**:
+  클라이언트 키(현재 publishable key, S1-B 이전엔 legacy anon key)는 설계상 번들에 구워져 공개된다.
+  pre-D1 정책에는 방·사용자 조건이 없고(`true` / `bucket_id = 'assets'`) Storage 오브젝트 키가 평면 구조라
   **방 단위 구분이 없다** →
   배포 사이트를 열 수 있는 사람은 누구나 `assets` 버킷 전체를 목록 조회·다운로드·업로드·덮어쓰기 할 수 있다.
-  실질 방어선은 "배포 URL 을 모른다" 하나. 2인 사설 도구라 감수한 선택(2026-08-05 사용자 확인) —
-  서버 쪽 축소는 S1-D1/D2 의 몫이다(아래 §보안 한계).
+  실질 방어선은 "배포 URL 을 모른다" 하나. 2인 사설 도구라 감수한 선택(2026-08-05 사용자 확인).
+  checked-in `setup.sql`(S1-D1)은 이를 초대 계정 전용으로 줄이지만 **방 단위 구분은 여전히 없다**(S1-D2 — 아래 §보안 한계).
   **`service_role` 키는 RLS 를 통째로 우회하니 절대 repo·번들에 넣지 말 것.**
 - ⚠️ Supabase 대시보드가 "Clients can list all files in this bucket / Remove policy" 를 띄워도
   **그 버튼을 누르면 안 된다** — `.download()` 가 인증 엔드포인트를 타 SELECT 정책을 필요로 해서
@@ -232,15 +234,19 @@ local-only 에서 편집한 뒤 로그인하면 intent 로 자동 재접속하�
 - local-only 를 거치지 않은 로그인·새로고침(marker 없음)은 **기존 자동 재접속 그대로**다.
 - 알려진 잔여: F1 배포 **이전에** 이미 local-only 를 떠나 StartGate 에 있던 사용자는 marker 가 없다.
 
-### ⚠️ 보안 한계 — S1-B 는 end-to-end authorization 이 아니다
+### ⚠️ 보안 한계 — S1-B / staged S1-D1 (end-to-end authorization 이 아니다)
 
-- S1-B(+F1)는 **client-side authentication/runtime gate** 다. 서버는 아직 인증을 강제하지 않는다 —
-  `setup.sql` 정책이 `to anon, authenticated` 에 위 predicate(`true` / `bucket_id = 'assets'`,
-  `using`·`with check` operation 별 적용)로 열려 있어, **번들에 공개된 Supabase URL + publishable key 만으로
-  REST/Storage 에 직접 접근할 수 있다**. S1-B/F1 을 "권한 강화"·"authorization 완료"로 표현하지 말 것.
-- **server-side hardening(RLS·Storage 정책 · room 권한)은 별도 S1-D1/D2** 다(미착수).
+- S1-B(+F1)는 **client-side authentication/runtime gate** 다 — signed-out·local-only 에서 앱의 신규 collaboration
+  remote path(`getCollabClient()`)를 구조적으로 차단하지만, **server-side authorization/RLS 를 대신하지 않는다**.
+  S1-B/F1 을 "server-side 권한 강화"·"end-to-end authorization 완료"로 표현하지 말 것.
+- checked-in `supabase/setup.sql` 은 **S1-D1 data-plane 정책**(authenticated · 비익명 project/Storage access · `assets` private)을 정의한다.
+  ⚠️ **repo 에 SQL 정의가 있다는 것은 hosted Supabase 에 적용됐다는 뜻이 아니다** — 실제 hosted enforcement 는 별도 rollout verification 이
+  필요하고, 현재 진행 상태는 [`PHASES.md`](../../PHASES.md) Security 축 · `HANDOFF.md` 에서 확인한다. 적용 전 hosted 는 위 §pre-D1 노출 범위 그대로라
+  **번들의 Supabase URL + publishable key 만으로 REST/Storage 에 직접 접근할 수 있다**.
+- S1-D1 은 **room-level authorization 이 아니다** — D1 trusted-account interim 에서는 초대된 authenticated 계정 사이에
+  전 방 project / 전체 assets 권한 분리가 없다.
+- Realtime private channel · Presence authorization · room 권한은 **S1-D2**(미착수).
 - publishable key(`VITE_SUPABASE_PUBLISHABLE_KEY`)는 **secret boundary 가 아니다** — 번들에 공개되는 값이다.
-- 위 §실제 노출 범위는 S1-B 이후에도 **그대로 유효**하다(로그인은 앱 UI 의 경로만 막는다).
 
 ## 폰트
 

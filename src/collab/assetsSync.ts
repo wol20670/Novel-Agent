@@ -11,7 +11,7 @@
 
 import { getAsset, putAsset } from '../storage/assetStore';
 import { getCollabClient, isCollabActive } from './supabaseClient';
-import type { PushStatusHandler } from './sync';
+import { currentSyncLifecycle, isInitialSyncBlocked, type PushStatusHandler } from './sync';
 
 const BUCKET = 'assets';
 
@@ -24,16 +24,40 @@ export function setAssetPushStatusHandler(handler: PushStatusHandler | null): vo
   pushStatusHandler = handler;
 }
 
-/** 로컬 업로드 직후 Storage 에도 올린다. collab 미활성이면 조용히 no-op(로컬 동작엔 영향 없음). */
-export async function pushAsset(id: string, blob: Blob): Promise<void> {
+/**
+ * 로컬 업로드 직후 Storage 에도 올린다. collab 미활성이면 조용히 no-op(로컬 동작엔 영향 없음).
+ *
+ * ── S1-D1 F-8 ──
+ * · B′-4: initial sync 를 신뢰할 수 없는 동안(sync.ts latch)엔 같은 id 의 원격 오브젝트를 upsert 로 덮지 않는다 → 'error'.
+ * · B′-7: expectedLifecycle = 이 업로드를 만든 producer 가 **시작할 때** 잡은 sync lifecycle 번호(importProject 루프).
+ *   그 사이 협업이 OFF→ON 으로 새 lifecycle 이 됐다면 옛 producer 다 → **조용히** 버린다(새 lifecycle 의 status 를
+ *   error/online 으로 덮지 않는다). boolean active 는 OFF→ON 뒤 다시 true 라 이 번호로만 가릴 수 있다.
+ *   일반 업로드(uploadAsset)는 lifecycle 번호를 넘기지 않는다(번호 검사 없음) — B′-4 latch 는 똑같이 걸린다.
+ */
+export async function pushAsset(id: string, blob: Blob, expectedLifecycle?: number): Promise<void> {
+  const stale = () => expectedLifecycle !== undefined && expectedLifecycle !== currentSyncLifecycle();
+  if (stale()) return;
+  if (isInitialSyncBlocked()) {
+    // 로그아웃 직후(handler 해제 전 한 tick)엔 'off' 를 'error' 로 되살리지 않는다(S1-B continuation barrier).
+    if (isCollabActive()) pushStatusHandler?.('error');
+    return;
+  }
   const supabase = await getCollabClient();
+  // client await 중 OFF→ON 이 끼면 active 는 다시 true 일 수 있다 — destructive upload 직전에 번호표를 다시 본다.
+  if (stale()) return;
   if (!supabase) return;
+  if (isInitialSyncBlocked()) {
+    pushStatusHandler?.('error');
+    return;
+  }
   const { error } = await supabase.storage.from(BUCKET).upload(id, blob, {
     upsert: true,
     contentType: blob.type || undefined,
   });
   // 업로드가 끝난 뒤 로그아웃됐다면 뱃지를 되살리지 않는다('off' 유지).
   if (!isCollabActive()) return;
+  // 이미 나간 업로드의 결과로 새 lifecycle 의 뱃지를 덮지 않는다(요청 자체는 취소하지 않는다).
+  if (stale()) return;
   if (error) {
     console.warn('[collab] 에셋 업로드 실패:', error.message);
     pushStatusHandler?.('error');

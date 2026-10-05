@@ -65,7 +65,8 @@ Plan → GPT 검토 → IMPLEMENTATION GO → 구현 → actual diff review → 
 |---|---|---|---|---|
 | S1-B | Supabase Auth email/password(invite 전용) + collab runtime gate — **client-side gate** | ✅ 확정 | `707adbf` | CI(main) · hosted smoke #1~#10 · probe B |
 | S1-B F1 | local-only → 로그인 자동 재접속 전 확인(marker · 차단형 모달) — data-loss 보정 | ✅ 확정 | `f0e9dcf` | Ubuntu CI `npm run check` 70파일/1164 + `npm run build` · Preview hosted smoke A·B·C1·C2·D·E · 이 F1 에서는 로컬 Windows 5s timeout 이 baseline `707adbf` 에서도 재현돼 환경 starvation 으로 분리했고, Ubuntu CI green 을 최종 verification evidence 로 채택 · 검증 시점 production/main = `707adbf` |
-| S1-D1/D2 | server-side hardening(RLS · Storage 정책 · room 권한) | ⏸ 미착수 | — | — (`setup.sql` 은 아직 `anon` 개방) |
+| S1-D1 | server-side **data plane** hardening — `projects`·`assets` 를 초대 계정(authenticated · 비익명) 전용으로 · bucket private · F-8 client 보강(빈 방 INSERT-only · initial-sync write latch · import 업로드 lifecycle binding · GC 0행 fail-closed) | 🔄 1단계 반영(client + `setup.sql`) · **hosted SQL 미적용**(live 는 아직 `anon` 개방) | 이 행과 같은 커밋 | typecheck · typecheck:tests · `collab-auth-gate` 74/74(F-8 15 신규) · mutation 14종 전부 FAIL 확인 · e2e 단독(`e2e-run`) 전체 통과 · `git diff --check` · 로컬 vitest 전체·`check:full` 은 Windows 5s timeout starvation(실패 대상이 실행마다 바뀜 · 단독 PASS)으로 **environment-blocked** · hosted policy audit/smoke/anon probe 는 SQL 적용 뒤 |
+| S1-D2 | Realtime private channel · Presence authorization · room 권한(필요 시 GC/asset namespace 재설계) | ⏸ 미착수 | — | — |
 
 ## 안정화 R 축 (R0~ — v1 Phase 번호·Security 축과 별개)
 

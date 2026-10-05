@@ -43,7 +43,10 @@ paths:
   "내 로컬 유지"에서 `setCollabConfig`/`stopCollab`/push 를 부르지 말 것. `startCollab` 의 pull-first 는 바꾸지 않는다.
 - signed-out/local-only 에서 막히는 것은 **신규** data·presence·storage 작업이다 — 전이 시 Realtime teardown
   (`removeAllChannels`)은 날 수 있으니 "remote 호출 전체 0"으로 쓰지 말 것.
-- ⚠️ S1-B 는 **client-side gate** 다 — `setup.sql` 은 아직 `to anon, authenticated` 개방(`using`/`with check`)이라
-  authorization 으로 쓰지 말 것. 서버 hardening 은 S1-D1/D2. 번들의 Supabase URL + publishable key 는 비밀이 아니다.
+- ⚠️ S1-B Auth/runtime gate 는 **client-side boundary** 다 — authorization 으로 쓰지 말 것.
+- checked-in `setup.sql` 은 **S1-D1 data-plane 정책**(authenticated · 비익명 · `assets` private)을 정의하지만,
+  **repo 에 있다는 사실만으로 hosted 적용을 가정하지 말 것** — hosted 상태는 `PHASES.md`/`HANDOFF.md` 와 실제 policy audit 으로 확인한다.
+- S1-D1 은 trusted authenticated-account interim 이고 **room authorization 이 아니다** — Realtime private channel · Presence · room 권한은 S1-D2.
+  번들의 Supabase URL + publishable key 는 비밀이 아니다.
 
 **상세·근거 → [`docs/contracts/project-compat.md`](../../docs/contracts/project-compat.md)**

@@ -12,13 +12,14 @@ import {
 } from './supabaseClient';
 import { currentAuthUserId, getAuthSession } from './auth';
 import {
-  pushProject,
   pullProjectOnce,
   subscribeProject,
   markApplied,
   withApplyingRemoteGuard,
   resetSyncState,
   setPushStatusHandler,
+  insertInitialProject,
+  markInitialSyncReady,
 } from './sync';
 import { setAssetPushStatusHandler } from './assetsSync';
 import { startPresence, type PeerPresence } from './presence';
@@ -112,6 +113,8 @@ export async function enableCollabIfAuthenticated(hooks: CollabHooks): Promise<b
  *    (버리면 채널이 열린 채 남는다).
  * ⚠️ 반대로 일반적인 network/pull/Realtime **실패**로는 deactivate 하지 않는다 — 기존처럼
  *    'error' 만 표시하고 runtime 은 열어 둬서 다음 autosave/push 가 재시도할 수 있게 한다.
+ *    (예외: 빈 방 INSERT 가 실패한 경우는 sync.ts 의 initial-sync latch 가 원격 project/asset upsert 를
+ *     막는다 — 숨은 원격 방을 덮지 않기 위해서다. S1-D1 F-8.)
  */
 export async function startCollab(hooks: CollabHooks): Promise<void> {
   // ⚠️ gate 가 **맨 앞**이다. 아래 teardown 의 resetSupabaseChannels() 는 공유 client 의
@@ -123,7 +126,8 @@ export async function startCollab(hooks: CollabHooks): Promise<void> {
   }
 
   teardownChannels();
-  resetSyncState();
+  // 이 startCollab 의 번호표 — initial INSERT 의 stale 판정과 latch 해제에만 쓴다(S1-D1 B′-5/B′-6).
+  const syncLifecycle = resetSyncState();
   resetSupabaseChannels();
 
   hooks.setStatus('connecting');
@@ -149,9 +153,19 @@ export async function startCollab(hooks: CollabHooks): Promise<void> {
     if (remote) {
       markApplied(remote.version);
       withApplyingRemoteGuard(() => hooks.applyRemoteProject(remote.data));
+      // remote truth 를 읽어 반영한 뒤에만 initial-sync latch 를 푼다(S1-D1 B′-6).
+      markInitialSyncReady(syncLifecycle);
     } else {
-      // 이 방에 아직 아무도 없으면 내 로컬 상태를 초기값으로 올린다.
-      await pushProject(hooks.getProject());
+      // 이 방에 아직 아무도 없으면 내 로컬 상태를 초기값으로 올린다 — **INSERT only**(S1-D1 F-8).
+      // pull 이 무인증 fallback 으로 기존 행을 못 봤을 수 있어서, upsert 면 그 방을 로컬로 덮는다.
+      // 결과 셋을 섞지 말 것: stale(옛 lifecycle)은 status 도 건드리지 않고, failed 만 error 다.
+      const result = await insertInitialProject(hooks.getProject(), syncLifecycle);
+      if (result === 'stale') return;
+      if (!isCollabActive()) return;
+      if (result === 'failed') {
+        hooks.setStatus('error');
+        return; // 구독·presence·online 미도달 — 이 방의 원격 write 는 sync 의 latch 가 막는다
+      }
     }
   } catch (e) {
     console.warn('[collab] 시작 실패:', e);
@@ -226,7 +240,7 @@ export {
   updatePassword,
   type AuthEvent,
 } from './auth';
-export { pushProject } from './sync';
+export { pushProject, currentSyncLifecycle } from './sync';
 export { pushAsset, ensureAsset } from './assetsSync';
 export { updatePresence } from './presence';
 export type { PeerPresence } from './presence';
